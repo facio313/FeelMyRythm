@@ -1,0 +1,13 @@
+# 웹 프론트 빌드(컨텍스트 = 레포 루트)용. 서버는 apps/server 자체 컨텍스트/.dockerignore 사용.
+.git/
+node_modules/
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+apps/server/
+apps/mobile/
+docs/
+terminals/
+.env
+.env.*
+.DS_Store

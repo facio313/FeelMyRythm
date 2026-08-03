@@ -1,0 +1,20 @@
+{
+  "name": "feelmyrythm",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/web",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "test": "npm run test -w @feelmyrythm/core",
+    "build": "npm run build -w @feelmyrythm/web",
+    "dev:web": "npm run dev -w @feelmyrythm/web",
+    "dev:server": "cd apps/server && uv run uvicorn app.main:app --reload --port 8000",
+    "test:server": "cd apps/server && uv run pytest -q"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

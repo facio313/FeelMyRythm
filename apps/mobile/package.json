@@ -1,0 +1,20 @@
+{
+  "name": "@feelmyrythm/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor 셸 — 웹 빌드를 iOS/Android 앱으로 패키징 (구현 로드맵 Phase 8)",
+  "scripts": {
+    "sync": "npm run build -w @feelmyrythm/web && cap sync",
+    "add:ios": "cap add ios",
+    "add:android": "cap add android",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/haptics": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

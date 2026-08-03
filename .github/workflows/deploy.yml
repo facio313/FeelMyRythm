@@ -1,0 +1,61 @@
+# GitHub Secrets 설정 방법:
+#   레포 → Settings → Secrets and variables → Actions → New repository secret
+#
+#   DEPLOY_HOST  서버 IP 또는 도메인
+#   DEPLOY_USER  SSH 접속 유저명 (cks)
+#   DEPLOY_KEY   SSH Private Key 전체 내용
+#                생성: ssh-keygen -t ed25519 -C "github-actions-feelmyrythm"
+#                서버: ~/.ssh/authorized_keys 에 공개키(.pub) 추가
+#                시크릿: 개인키 내용 전체 붙여넣기 (-----BEGIN 포함)
+#
+# 서버 사전 준비 (최초 1회):
+#   /home/cks/FeelMyRythm/.env 파일 생성
+#     POSTGRES_PASSWORD=<DB 비밀번호>
+#     FMR_JWT_SECRET=<긴 랜덤 문자열>
+
+name: Deploy to RPi5
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy on RPi5 via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: 22022
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -e
+
+            DEPLOY_DIR="/home/cks/FeelMyRythm"
+            REPO_URL="https://github.com/facio313/FeelMyRythm.git"
+
+            # 1. git clone / pull
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              rm -rf "$DEPLOY_DIR"
+              git clone "$REPO_URL" "$DEPLOY_DIR"
+            else
+              git -C "$DEPLOY_DIR" pull origin main
+            fi
+
+            cd "$DEPLOY_DIR"
+
+            # 2. 볼륨 바인드 디렉터리 준비
+            mkdir -p dbmnt uploadsmnt
+
+            # 3. .env 확인 (POSTGRES_PASSWORD, FMR_JWT_SECRET)
+            if [ ! -f .env ]; then
+              echo "ERROR: $DEPLOY_DIR/.env 가 없습니다. POSTGRES_PASSWORD, FMR_JWT_SECRET 를 넣어 생성하세요."
+              exit 1
+            fi
+
+            # 4. 빌드 및 컨테이너 재시작
+            docker compose -f docker-compose.prod.yml up --build -d
+            docker image prune -f

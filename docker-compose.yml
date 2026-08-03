@@ -1,0 +1,17 @@
+# 로컬 Postgres (운영 동등 환경으로 서버를 돌리고 싶을 때)
+# 사용: docker compose up -d
+#      FMR_DATABASE_URL=postgresql+psycopg://fmr:fmr@localhost:5432/feelmyrythm uv run uvicorn app.main:app
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: fmr
+      POSTGRES_PASSWORD: fmr
+      POSTGRES_DB: feelmyrythm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
