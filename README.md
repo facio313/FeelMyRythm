@@ -85,6 +85,12 @@ WebView 오디오 지연이 실측으로 문제가 되면 `packages/audio`의 `A
 | `FMR_UPLOADS_DIR` | `./uploads` | 악보 파일 저장 경로 (운영: S3 교체 지점) |
 | `FMR_CORS_ORIGINS` | localhost:5173 | 웹 오리진 |
 
+## 배포 (RPi5)
+
+`main` 푸시 시 `.github/workflows/deploy.yml`이 SSH로 서버에 배포합니다.
+GitHub Actions 시크릿은 **Pilgrimage와 동일 이름**을 씁니다 (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`).
+레포 시크릿은 공유되지 않으므로, Pilgrimage에 등록된 것과 같은 값을 FeelMyRythm 레포에도 같은 이름으로 등록하면 됩니다.
+
 ## 현재 구현 범위
 
 | 기능 | 상태 |

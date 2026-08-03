@@ -1,12 +1,8 @@
-# GitHub Secrets 설정 방법:
-#   레포 → Settings → Secrets and variables → Actions → New repository secret
-#
+# GitHub Secrets: Pilgrimage 와 동일 이름·동일 값 재사용
+#   (레포 시크릿은 공유되지 않으므로 FeelMyRythm 레포에도 같은 이름으로 등록)
 #   DEPLOY_HOST  서버 IP 또는 도메인
-#   DEPLOY_USER  SSH 접속 유저명 (cks)
+#   DEPLOY_USER  SSH 접속 유저명
 #   DEPLOY_KEY   SSH Private Key 전체 내용
-#                생성: ssh-keygen -t ed25519 -C "github-actions-feelmyrythm"
-#                서버: ~/.ssh/authorized_keys 에 공개키(.pub) 추가
-#                시크릿: 개인키 내용 전체 붙여넣기 (-----BEGIN 포함)
 #
 # 서버 사전 준비 (최초 1회):
 #   /home/cks/FeelMyRythm/.env 파일 생성
@@ -24,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy on RPi5 via SSH
+      - name: Deploy on RPi5
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
