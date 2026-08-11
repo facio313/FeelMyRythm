@@ -1,0 +1,15 @@
+---
+description: FeelMyRythm 공통 — 핵심 룰 (전체 가이드는 AGENTS.md)
+alwaysApply: true
+---
+
+# FeelMyRythm (core rules)
+
+- 사용자 응답 **한국어**. 코드·식별자·커밋은 **영문**.
+- 모호하면 구현 전 질문. **요청 범위만** 구현.
+- 도메인·타이밍·동기화 변경 전 **`docs/DESIGN.md`** · **`AGENTS.md`** 확인.
+- **동기화**: 박 스트리밍 금지. 시계 합의 + 로컬 타임라인 전개.
+- **오디오**: 클릭/시각은 오디오 클럭 기준. `packages/core`에 DOM 의존성 금지.
+- **`.env` 커밋 금지**. 키 하드코딩 금지.
+- **브랜치**: `{tool}/feature` → `{tool}` → `dev` → `main`. 영문 kebab-case만.
+- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor/*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.
