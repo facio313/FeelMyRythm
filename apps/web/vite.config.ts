@@ -3,7 +3,10 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+const appBase = '/feelmyrythm/';
+
 export default defineConfig({
+  base: appBase,
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -15,8 +18,15 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      [`${appBase}api`]: {
+        target: 'http://localhost:8000',
+        rewrite: (requestPath) => requestPath.replace(/^\/feelmyrythm/, ''),
+      },
+      [`${appBase}ws`]: {
+        target: 'ws://localhost:8000',
+        ws: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/feelmyrythm/, ''),
+      },
     },
   },
 });

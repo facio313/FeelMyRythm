@@ -1,4 +1,5 @@
 import { useAuth } from './auth';
+import { appPath } from './paths';
 
 export class ApiError extends Error {
   constructor(
@@ -32,19 +33,19 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(path, { ...init, headers: { ...headers, ...init?.headers }, body });
+  const res = await fetch(appPath(path), { ...init, headers: { ...headers, ...init?.headers }, body });
   if (!res.ok) await parseError(res);
   return (await res.json()) as T;
 }
 
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(path, { method: 'POST', headers: authHeaders(), body: form });
+  const res = await fetch(appPath(path), { method: 'POST', headers: authHeaders(), body: form });
   if (!res.ok) await parseError(res);
   return (await res.json()) as T;
 }
 
 export async function apiBlob(path: string): Promise<Blob> {
-  const res = await fetch(path, { headers: authHeaders() });
+  const res = await fetch(appPath(path), { headers: authHeaders() });
   if (!res.ok) await parseError(res);
   return await res.blob();
 }

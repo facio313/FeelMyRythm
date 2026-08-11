@@ -34,7 +34,7 @@ cd apps/server && uv sync && cd ../..
 npm run dev:server        # http://localhost:8000 (OpenAPI: /docs)
 
 # 3) 웹 (새 터미널)
-npm run dev:web           # http://localhost:5173 (API/WS 프록시 내장)
+npm run dev:web           # http://localhost:5173/feelmyrythm/ (API/WS 프록시 내장)
 ```
 
 Postgres로 돌리려면:
@@ -87,9 +87,16 @@ WebView 오디오 지연이 실측으로 문제가 되면 `packages/audio`의 `A
 
 ## 배포 (RPi5)
 
-`main` 푸시 시 `.github/workflows/deploy.yml`이 SSH로 서버에 배포합니다.
-GitHub Actions 시크릿은 **Pilgrimage와 동일 이름**을 씁니다 (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`).
-레포 시크릿은 공유되지 않으므로, Pilgrimage에 등록된 것과 같은 값을 FeelMyRythm 레포에도 같은 이름으로 등록하면 됩니다.
+공개 경로는 `https://bonifacio.work/feelmyrythm/`입니다. 프런트 자산, React Router,
+REST API와 WebSocket 모두 이 prefix를 사용하며 이미지 내부 nginx가 FastAPI의 `/api`, `/ws` 경로로 전달합니다.
+
+`main` 푸시 시 GitHub의 ARM64 runner가 서버·웹 이미지를 빌드해 커밋 SHA 태그로 GHCR에 올립니다.
+그 뒤 제한된 SSH 명령 `deploy feelmyrythm <commit-sha>`로 해당 이미지만 서버에 배포합니다.
+Repository Secret은 `DEPLOY_KEY`가 필요합니다.
+
+운영 DB는 앱별 컨테이너가 아니라 공용 `cksDB`를 사용합니다. `/home/cks/FeelMyRythm/.env`에
+`FMR_DATABASE_URL`과 `FMR_JWT_SECRET`을 설정하며, `docker-compose.prod.yml`은 `cksDB`를 생성하거나
+재시작하지 않고 같은 이름의 외부 Docker 네트워크에 연결만 합니다.
 
 ## 현재 구현 범위
 

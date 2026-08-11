@@ -16,6 +16,7 @@ apps/server/dev.db
 apps/server/uploads/
 apps/server/tests/test.db
 apps/server/tests/uploads/
+/uploadsmnt/
 .env
 .env.*
 

@@ -4,6 +4,7 @@
  */
 import { ClockSyncEstimator } from '@feelmyrythm/core';
 import type { RosterMember, TransportState, WsServerMessage } from '@feelmyrythm/protocol';
+import { appPath } from './paths';
 
 const BURST_COUNT = 10;
 const BURST_INTERVAL_MS = 150;
@@ -26,7 +27,8 @@ export class RoomClient {
   connect(roomId: string, token: string): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     this.onStatus?.('connecting');
-    this.ws = new WebSocket(`${proto}://${location.host}/ws/rooms/${roomId}?token=${encodeURIComponent(token)}`);
+    const wsPath = appPath(`/ws/rooms/${roomId}`);
+    this.ws = new WebSocket(`${proto}://${location.host}${wsPath}?token=${encodeURIComponent(token)}`);
 
     this.ws.onopen = () => {
       this.onStatus?.('open');

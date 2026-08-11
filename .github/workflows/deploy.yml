@@ -1,57 +1,111 @@
-# GitHub Secrets: Pilgrimage 와 동일 이름·동일 값 재사용
-#   (레포 시크릿은 공유되지 않으므로 FeelMyRythm 레포에도 같은 이름으로 등록)
-#   DEPLOY_HOST  서버 IP 또는 도메인
-#   DEPLOY_USER  SSH 접속 유저명
-#   DEPLOY_KEY   SSH Private Key 전체 내용
-#
-# 서버 사전 준비 (최초 1회):
-#   /home/cks/FeelMyRythm/.env 파일 생성
-#     POSTGRES_PASSWORD=<DB 비밀번호>
-#     FMR_JWT_SECRET=<긴 랜덤 문자열>
-
-name: Deploy to RPi5
+name: Build and deploy to RPi5
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: feelmyrythm-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  SERVER_IMAGE: ghcr.io/facio313/feelmyrythm-server
+  WEB_IMAGE: ghcr.io/facio313/feelmyrythm-web
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  build-and-deploy:
+    name: Build ARM64 images and deploy
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
 
     steps:
-      - name: Deploy on RPi5
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: 22022
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          script: |
-            set -e
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
-            DEPLOY_DIR="/home/cks/FeelMyRythm"
-            REPO_URL="https://github.com/facio313/FeelMyRythm.git"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-            # 1. git clone / pull
-            if [ ! -d "$DEPLOY_DIR/.git" ]; then
-              rm -rf "$DEPLOY_DIR"
-              git clone "$REPO_URL" "$DEPLOY_DIR"
-            else
-              git -C "$DEPLOY_DIR" pull origin main
-            fi
+      - name: Test server image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./apps/server
+          target: test
+          platforms: linux/arm64
+          push: false
+          pull: true
+          cache-from: type=gha,scope=feelmyrythm-server
 
-            cd "$DEPLOY_DIR"
+      - name: Build and publish ARM64 server image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./apps/server
+          platforms: linux/arm64
+          push: true
+          pull: true
+          tags: |
+            ${{ env.SERVER_IMAGE }}:${{ github.sha }}
+            ${{ env.SERVER_IMAGE }}:latest
+          cache-from: type=gha,scope=feelmyrythm-server
+          cache-to: type=gha,mode=max,scope=feelmyrythm-server
 
-            # 2. 볼륨 바인드 디렉터리 준비
-            mkdir -p dbmnt uploadsmnt
+      - name: Build and publish ARM64 web image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          platforms: linux/arm64
+          push: true
+          pull: true
+          tags: |
+            ${{ env.WEB_IMAGE }}:${{ github.sha }}
+            ${{ env.WEB_IMAGE }}:latest
+          cache-from: type=gha,scope=feelmyrythm-web
+          cache-to: type=gha,mode=max,scope=feelmyrythm-web
 
-            # 3. .env 확인 (POSTGRES_PASSWORD, FMR_JWT_SECRET)
-            if [ ! -f .env ]; then
-              echo "ERROR: $DEPLOY_DIR/.env 가 없습니다. POSTGRES_PASSWORD, FMR_JWT_SECRET 를 넣어 생성하세요."
-              exit 1
-            fi
+      - name: Request restricted server deployment
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          GHCR_TOKEN: ${{ github.token }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+        run: |
+          set -Eeuo pipefail
 
-            # 4. 빌드 및 컨테이너 재시작
-            docker compose -f docker-compose.prod.yml up --build -d
-            docker image prune -f
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          trap 'rm -f "$HOME/.ssh/deploy_key"' EXIT
+
+          printf '%s\n' \
+            '[ssh.bonifacio.work]:22022 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII91ovdQZMg9NpUyjjFSS0Ra0SEuYuAw4Uv3GTv6J92F' \
+            > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          {
+            printf '%s\n' "$GHCR_TOKEN"
+            printf '%s\n' "$DEPLOY_ACTOR"
+          } | ssh -T \
+            -i "$HOME/.ssh/deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 \
+            -p 22022 \
+            cks@ssh.bonifacio.work \
+            "deploy feelmyrythm $GITHUB_SHA"

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from . import ws
 from .config import settings
@@ -36,4 +37,6 @@ app.include_router(ws.router)
 
 @app.get("/api/health")
 def health() -> dict:
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
     return {"ok": True}

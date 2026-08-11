@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS dependencies
 
 WORKDIR /app
 
@@ -8,7 +8,16 @@ RUN pip install --no-cache-dir uv && \
     pip install --no-cache-dir -r requirements.txt && \
     rm requirements.txt
 
-COPY . .
+FROM dependencies AS test
+
+RUN pip install --no-cache-dir "pytest>=8.0" "httpx>=0.27"
+COPY app ./app
+COPY tests ./tests
+RUN pytest
+
+FROM dependencies AS runtime
+
+COPY app ./app
 
 EXPOSE 8000
 

@@ -7,3 +7,4 @@ if _TEST_DB.exists():
     _TEST_DB.unlink()
 os.environ["FMR_DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 os.environ["FMR_UPLOADS_DIR"] = str(Path(__file__).parent / "uploads")
+os.environ["FMR_JWT_SECRET"] = "test-only-jwt-secret-with-at-least-thirty-two-bytes"
