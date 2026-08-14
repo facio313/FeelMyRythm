@@ -85,6 +85,31 @@ WebView 오디오 지연이 실측으로 문제가 되면 `packages/audio`의 `A
 | `FMR_UPLOADS_DIR` | `./uploads` | 악보 파일 저장 경로 (운영: S3 교체 지점) |
 | `FMR_CORS_ORIGINS` | localhost:5173 | 웹 오리진 |
 
+## Git 개발 환경 (Pilgrimage와 동일)
+
+에이전트별로 브랜치 + git worktree를 씁니다. `worktrees/`는 `.gitignore`에 포함됩니다.
+
+| 경로 | 브랜치 | 도구 |
+|------|--------|------|
+| `FeelMyRythm/` | `main` | 배포 기준 (사용자) |
+| `FeelMyRythm/` (`dev` 체크아웃) | `dev` | 통합 (사용자) |
+| `worktrees/cursor/` | `cursor` | Cursor |
+| `worktrees/codex/` | `codex` | OpenAI Codex |
+| `worktrees/anthropic/` | `anthropic` | Claude Code |
+
+```
+{tool}/feature-name → {tool} → dev → main
+```
+
+워크트리 재생성:
+
+```bash
+./scripts/setup-worktrees.sh
+```
+
+Cursor로 개발할 때는 **`worktrees/cursor` 폴더를 워크스페이스로 연다.**
+상세 규칙: [AGENTS.md](AGENTS.md)
+
 ## 배포 (RPi5)
 
 공개 경로는 `https://bonifacio.work/feelmyrythm/`입니다. 프런트 자산, React Router,
