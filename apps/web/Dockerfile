@@ -1,23 +1,30 @@
-# 빌드 컨텍스트는 레포 루트 (npm workspaces 모노레포이므로).
-# docker-compose.prod.yml 에서 context: . / dockerfile: apps/web/Dockerfile 로 지정한다.
-FROM node:22-slim AS build
+FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS build
+WORKDIR /workspace
 
-WORKDIR /app
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
 
-COPY package.json package-lock.json tsconfig.base.json ./
-COPY packages/core/package.json packages/core/
-COPY packages/audio/package.json packages/audio/
-COPY packages/protocol/package.json packages/protocol/
-COPY packages/ui/package.json packages/ui/
-COPY apps/web/package.json apps/web/
-RUN npm ci
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/mobile/package.json apps/mobile/package.json
+COPY packages/core/package.json packages/core/package.json
+COPY packages/audio/package.json packages/audio/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/protocol/package.json packages/protocol/package.json
 
-COPY packages ./packages
-COPY apps/web ./apps/web
-RUN npm test && npm run build -w @feelmyrythm/web
+RUN npm install --global pnpm@10.15.0 \
+    && pnpm install --frozen-lockfile
 
-FROM nginx:stable-alpine
-COPY --from=build /app/apps/web/dist /usr/share/nginx/html/feelmyrythm
+COPY apps/web apps/web
+COPY apps/mobile/src apps/mobile/src
+COPY packages packages
+
+RUN pnpm --filter @feelmyrythm/core build \
+    && pnpm --filter @feelmyrythm/audio build \
+    && pnpm --filter @feelmyrythm/web build
+
+FROM nginx:1.29.4-alpine@sha256:4870c12cd2ca986de501a804b4f506ad3875a0b1874940ba0a2c7f763f1855b2 AS runtime
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html/feelmyrythm
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=4 CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]

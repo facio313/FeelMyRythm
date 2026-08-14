@@ -1,14 +1,16 @@
 name: Build and deploy to RPi5
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Validate
+    types:
+      - completed
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: feelmyrythm-production
@@ -18,29 +20,59 @@ env:
   REGISTRY: ghcr.io
   SERVER_IMAGE: ghcr.io/facio313/feelmyrythm-server
   WEB_IMAGE: ghcr.io/facio313/feelmyrythm-web
+  POSTGRES_RUNTIME_IMAGE: postgres:17.11-alpine@sha256:5d61573b31c206ae538c85893edeb6e320e1a9ffd838c0f9dca927fb6f765fa4
 
 jobs:
-  build-and-deploy:
-    name: Build ARM64 images and deploy
+  publish:
+    name: Publish validated immutable ARM64 images
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_sha == github.sha &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
-
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      deploy_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate source identity
+        id: source
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$VALIDATED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$VALIDATED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Check out validated source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        env:
+          VALIDATED_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$(git rev-parse HEAD)" == "$VALIDATED_SHA" ]]
 
       - name: Sign in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
+          username: ${{ github.event.workflow_run.actor.login }}
           password: ${{ github.token }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Test server image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: ./apps/server
           target: test
@@ -49,40 +81,67 @@ jobs:
           pull: true
           cache-from: type=gha,scope=feelmyrythm-server
 
-      - name: Build and publish ARM64 server image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - name: Build immutable server runtime image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: ./apps/server
           platforms: linux/arm64
-          push: true
+          load: true
+          push: false
           pull: true
-          tags: |
-            ${{ env.SERVER_IMAGE }}:${{ github.sha }}
-            ${{ env.SERVER_IMAGE }}:latest
+          tags: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
           cache-from: type=gha,scope=feelmyrythm-server
           cache-to: type=gha,mode=max,scope=feelmyrythm-server
 
-      - name: Build and publish ARM64 web image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - name: Build immutable web runtime image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           file: ./apps/web/Dockerfile
           platforms: linux/arm64
-          push: true
+          load: true
+          push: false
           pull: true
-          tags: |
-            ${{ env.WEB_IMAGE }}:${{ github.sha }}
-            ${{ env.WEB_IMAGE }}:latest
+          tags: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
+          build-args: |
+            VITE_GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
           cache-from: type=gha,scope=feelmyrythm-web
           cache-to: type=gha,mode=max,scope=feelmyrythm-web
 
+      - name: Smoke-test the exact runtime images
+        env:
+          SERVER_RUNTIME_IMAGE: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
+          WEB_RUNTIME_IMAGE: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
+          POSTGRES_RUNTIME_IMAGE: ${{ env.POSTGRES_RUNTIME_IMAGE }}
+        run: bash .github/scripts/smoke-runtime-images.sh
+
+      - name: Publish the smoke-tested immutable images
+        env:
+          SERVER_RUNTIME_IMAGE: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
+          WEB_RUNTIME_IMAGE: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          docker push "$SERVER_RUNTIME_IMAGE"
+          docker push "$WEB_RUNTIME_IMAGE"
+
+  deploy:
+    name: Request restricted server deployment
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
       - name: Request restricted server deployment
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_SHA: ${{ needs.publish.outputs.deploy_sha }}
           GHCR_TOKEN: ${{ github.token }}
-          DEPLOY_ACTOR: ${{ github.actor }}
+          DEPLOY_ACTOR: ${{ github.event.workflow_run.actor.login }}
         run: |
           set -Eeuo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
 
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/deploy_key"
@@ -108,4 +167,4 @@ jobs:
             -o ServerAliveCountMax=3 \
             -p 22022 \
             cks@ssh.bonifacio.work \
-            "deploy feelmyrythm $GITHUB_SHA"
+            "deploy feelmyrythm $DEPLOY_SHA"

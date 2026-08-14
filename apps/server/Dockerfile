@@ -1,24 +1,45 @@
-FROM python:3.13-slim AS dependencies
+FROM ghcr.io/astral-sh/uv:0.11.9@sha256:6b6fa841d71a48fbc9e2c55651c5ad570e01104d7a7d701f57b2b22c0f58e9b1 AS uv
 
+FROM python:3.13.15-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
+
 COPY pyproject.toml uv.lock ./
-RUN pip install --no-cache-dir uv && \
-    uv export --frozen --no-dev --no-hashes -o requirements.txt && \
-    pip install --no-cache-dir -r requirements.txt && \
-    rm requirements.txt
+COPY --from=uv /uv /uvx /bin/
+RUN uv sync --frozen --no-dev
 
-FROM dependencies AS test
-
-RUN pip install --no-cache-dir "pytest>=8.0" "httpx>=0.27"
+FROM base AS test
+RUN uv sync --frozen --group dev
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
 COPY tests ./tests
-RUN pytest
+RUN uv run ruff check app tests scripts alembic \
+    && uv run mypy app \
+    && uv run pytest
 
-FROM dependencies AS runtime
-
+FROM base AS development
+RUN uv sync --frozen --group dev
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
+COPY tests ./tests
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
+FROM base AS runtime
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+COPY scripts ./scripts
+RUN groupadd --system --gid 10001 feelmyrythm \
+    && useradd --system --uid 10001 --gid feelmyrythm --home-dir /nonexistent --shell /usr/sbin/nologin feelmyrythm
+USER 10001:10001
 EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

@@ -1,0 +1,7265 @@
+{
+  "components": {
+    "schemas": {
+      "Anchor": {
+        "additionalProperties": false,
+        "properties": {
+          "measure": {
+            "title": "Measure",
+            "type": "integer"
+          },
+          "pass": {
+            "title": "Pass",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "measure",
+          "pass"
+        ],
+        "title": "Anchor",
+        "type": "object"
+      },
+      "AnnotationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "discriminator": {
+              "mapping": {
+                "pen": "#/components/schemas/PenAnnotationData",
+                "stamp": "#/components/schemas/StampAnnotationData",
+                "text": "#/components/schemas/TextAnnotationData"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PenAnnotationData"
+              },
+              {
+                "$ref": "#/components/schemas/TextAnnotationData"
+              },
+              {
+                "$ref": "#/components/schemas/StampAnnotationData"
+              }
+            ],
+            "title": "Data"
+          },
+          "scope": {
+            "enum": [
+              "private",
+              "project"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "data"
+        ],
+        "title": "AnnotationCreate",
+        "type": "object"
+      },
+      "AnnotationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "authorId": {
+            "title": "Authorid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "private",
+              "project"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scoreId": {
+            "title": "Scoreid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scoreId",
+          "authorId",
+          "scope",
+          "revision",
+          "data",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "AnnotationOut",
+        "type": "object"
+      },
+      "AnnotationPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "AnnotationPoint",
+        "type": "object"
+      },
+      "AnnotationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "discriminator": {
+              "mapping": {
+                "pen": "#/components/schemas/PenAnnotationData",
+                "stamp": "#/components/schemas/StampAnnotationData",
+                "text": "#/components/schemas/TextAnnotationData"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PenAnnotationData"
+              },
+              {
+                "$ref": "#/components/schemas/TextAnnotationData"
+              },
+              {
+                "$ref": "#/components/schemas/StampAnnotationData"
+              }
+            ],
+            "title": "Data"
+          },
+          "expectedRevision": {
+            "minimum": 0.0,
+            "title": "Expectedrevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "data"
+        ],
+        "title": "AnnotationUpdate",
+        "type": "object"
+      },
+      "Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post",
+        "type": "object"
+      },
+      "DeviceCalibrationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "deviceFingerprint": {
+            "title": "Devicefingerprint",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "offsetMs": {
+            "title": "Offsetms",
+            "type": "number"
+          },
+          "outputLabel": {
+            "title": "Outputlabel",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "deviceFingerprint",
+          "outputLabel",
+          "offsetMs",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "DeviceCalibrationOut",
+        "type": "object"
+      },
+      "DeviceCalibrationWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "deviceFingerprint": {
+            "minLength": 1,
+            "title": "Devicefingerprint",
+            "type": "string"
+          },
+          "offsetMs": {
+            "maximum": 1000.0,
+            "minimum": -1000.0,
+            "title": "Offsetms",
+            "type": "number"
+          },
+          "outputLabel": {
+            "minLength": 1,
+            "title": "Outputlabel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceFingerprint",
+          "outputLabel",
+          "offsetMs"
+        ],
+        "title": "DeviceCalibrationWrite",
+        "type": "object"
+      },
+      "DownloadUrlOut": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt"
+        ],
+        "title": "DownloadUrlOut",
+        "type": "object"
+      },
+      "EmailVerificationCompleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "passwordConfirmation": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Passwordconfirmation",
+            "type": "string"
+          },
+          "token": {
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password",
+          "passwordConfirmation"
+        ],
+        "title": "EmailVerificationCompleteIn",
+        "type": "object"
+      },
+      "EmailVerificationPendingOut": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "expiresIn": {
+            "title": "Expiresin",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "expiresIn",
+          "message"
+        ],
+        "title": "EmailVerificationPendingOut",
+        "type": "object"
+      },
+      "EmailVerificationResendIn": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "EmailVerificationResendIn",
+        "type": "object"
+      },
+      "EmptyPayload": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "EmptyPayload",
+        "type": "object"
+      },
+      "ErrorPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorPayload",
+        "type": "object"
+      },
+      "ErrorServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/ErrorPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ERROR",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "ErrorServerMessage",
+        "type": "object"
+      },
+      "GoogleLoginIn": {
+        "additionalProperties": false,
+        "properties": {
+          "idToken": {
+            "minLength": 1,
+            "title": "Idtoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idToken"
+        ],
+        "title": "GoogleLoginIn",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupMemberCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "GroupMemberCreate",
+        "type": "object"
+      },
+      "GroupMemberOut": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "joinedAt": {
+            "format": "date-time",
+            "title": "Joinedat",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "displayName",
+          "role",
+          "joinedAt"
+        ],
+        "title": "GroupMemberOut",
+        "type": "object"
+      },
+      "GroupMemberUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "GroupMemberUpdate",
+        "type": "object"
+      },
+      "GroupOut": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "myRole": {
+            "enum": [
+              "owner",
+              "leader",
+              "member"
+            ],
+            "title": "Myrole",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "myRole",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "GroupOut",
+        "type": "object"
+      },
+      "GroupUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "GroupUpdate",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JoinRoomMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/JoinRoomPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "JOIN_ROOM",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "JoinRoomMessage",
+        "type": "object"
+      },
+      "JoinRoomPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "bluetooth": {
+            "default": false,
+            "title": "Bluetooth",
+            "type": "boolean"
+          },
+          "calibrationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Calibrationid"
+          },
+          "roomId": {
+            "title": "Roomid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "roomId",
+          "accessToken"
+        ],
+        "title": "JoinRoomPayload",
+        "type": "object"
+      },
+      "JoinedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "owner",
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "role"
+        ],
+        "title": "JoinedPayload",
+        "type": "object"
+      },
+      "JoinedServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/JoinedPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "JOINED",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "JoinedServerMessage",
+        "type": "object"
+      },
+      "LateJoinMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsedNs": {
+            "title": "Elapsedns",
+            "type": "integer"
+          },
+          "serverNowNs": {
+            "title": "Servernowns",
+            "type": "integer"
+          },
+          "strategy": {
+            "const": "next-measure-boundary",
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverNowNs",
+          "elapsedNs",
+          "strategy"
+        ],
+        "title": "LateJoinMetadata",
+        "type": "object"
+      },
+      "LogAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "measureNumber": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurenumber"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "scoreId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoreid"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "title": "LogAnchor",
+        "type": "object"
+      },
+      "LoginIn": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginIn",
+        "type": "object"
+      },
+      "MeasureMapOut": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "measureNumberOffset": {
+            "title": "Measurenumberoffset",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureRegion"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "scoreId": {
+            "title": "Scoreid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scoreId",
+          "revision",
+          "regions",
+          "measureNumberOffset",
+          "updatedAt"
+        ],
+        "title": "MeasureMapOut",
+        "type": "object"
+      },
+      "MeasureMapWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "minimum": 0.0,
+            "title": "Expectedrevision",
+            "type": "integer"
+          },
+          "measureNumberOffset": {
+            "default": 0,
+            "title": "Measurenumberoffset",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureRegion"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "regions"
+        ],
+        "title": "MeasureMapWrite",
+        "type": "object"
+      },
+      "MeasureRect": {
+        "additionalProperties": false,
+        "properties": {
+          "h": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "H",
+            "type": "number"
+          },
+          "w": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "W",
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "title": "MeasureRect",
+        "type": "object"
+      },
+      "MeasureRegion": {
+        "additionalProperties": false,
+        "properties": {
+          "measureNumber": {
+            "minimum": 1.0,
+            "title": "Measurenumber",
+            "type": "integer"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "rect": {
+            "$ref": "#/components/schemas/MeasureRect"
+          }
+        },
+        "required": [
+          "page",
+          "measureNumber",
+          "rect"
+        ],
+        "title": "MeasureRegion",
+        "type": "object"
+      },
+      "MessageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
+      "MusicXmlDraftOut": {
+        "additionalProperties": false,
+        "properties": {
+          "anacrusis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapAnacrusis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "countIn": {
+            "additionalProperties": true,
+            "title": "Countin",
+            "type": "object"
+          },
+          "jumps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Jumps",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "totalMeasures": {
+            "title": "Totalmeasures",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "title",
+          "totalMeasures",
+          "sections",
+          "jumps",
+          "countIn",
+          "warnings"
+        ],
+        "title": "MusicXmlDraftOut",
+        "type": "object"
+      },
+      "PasswordResetCompleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "passwordConfirmation": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Passwordconfirmation",
+            "type": "string"
+          },
+          "token": {
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password",
+          "passwordConfirmation"
+        ],
+        "title": "PasswordResetCompleteIn",
+        "type": "object"
+      },
+      "PasswordResetRequestIn": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequestIn",
+        "type": "object"
+      },
+      "PenAnnotationData": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "pen",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measureNumber": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurenumber"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PenAnnotationPayload"
+          }
+        },
+        "required": [
+          "kind",
+          "page",
+          "payload"
+        ],
+        "title": "PenAnnotationData",
+        "type": "object"
+      },
+      "PenAnnotationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/AnnotationPoint"
+            },
+            "minItems": 2,
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "PenAnnotationPayload",
+        "type": "object"
+      },
+      "PingMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/PingPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "PING",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "PingMessage",
+        "type": "object"
+      },
+      "PingPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "t0": {
+            "title": "T0",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t0"
+        ],
+        "title": "PingPayload",
+        "type": "object"
+      },
+      "PongPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "serverReceiveTimeNs": {
+            "title": "Serverreceivetimens",
+            "type": "integer"
+          },
+          "t0": {
+            "title": "T0",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t0",
+          "serverReceiveTimeNs"
+        ],
+        "title": "PongPayload",
+        "type": "object"
+      },
+      "PongServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/PongPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "PONG",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "PongServerMessage",
+        "type": "object"
+      },
+      "PositionedAnnotationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "anchorType": {
+            "default": "page",
+            "enum": [
+              "page",
+              "measure"
+            ],
+            "title": "Anchortype",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "text"
+        ],
+        "title": "PositionedAnnotationPayload",
+        "type": "object"
+      },
+      "PracticeLogCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/LogAnchor"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "PracticeLogCreate",
+        "type": "object"
+      },
+      "PracticeLogOut": {
+        "additionalProperties": false,
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/LogAnchor"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "authorId": {
+            "title": "Authorid",
+            "type": "string"
+          },
+          "authorName": {
+            "title": "Authorname",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repertoireId",
+          "authorId",
+          "authorName",
+          "content",
+          "anchors",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "PracticeLogOut",
+        "type": "object"
+      },
+      "PracticeLogUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "anchors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LogAnchor"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchors"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          }
+        },
+        "title": "PracticeLogUpdate",
+        "type": "object"
+      },
+      "PracticeSessionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "anchorMeasure": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchormeasure"
+          },
+          "anchorPass": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorpass"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endedat"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "leaderId": {
+            "title": "Leaderid",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "roomId": {
+            "title": "Roomid",
+            "type": "string"
+          },
+          "serverStartTimeNs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serverstarttimens"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "armed",
+              "playing",
+              "stopped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tempoMapRevision": {
+            "title": "Tempomaprevision",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "roomId",
+          "repertoireId",
+          "leaderId",
+          "tempoMapRevision",
+          "status",
+          "anchorMeasure",
+          "anchorPass",
+          "serverStartTimeNs",
+          "createdAt",
+          "updatedAt",
+          "endedAt"
+        ],
+        "title": "PracticeSessionOut",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectOut": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "groupId": {
+            "title": "Groupid",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "groupId",
+          "name",
+          "description",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ProjectOut",
+        "type": "object"
+      },
+      "ProjectUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "ProjectUpdate",
+        "type": "object"
+      },
+      "ReadyMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/ReadyPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "READY",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "ReadyMessage",
+        "type": "object"
+      },
+      "ReadyPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready"
+        ],
+        "title": "ReadyPayload",
+        "type": "object"
+      },
+      "RefreshIn": {
+        "additionalProperties": false,
+        "properties": {
+          "refreshToken": {
+            "minLength": 1,
+            "title": "Refreshtoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refreshToken"
+        ],
+        "title": "RefreshIn",
+        "type": "object"
+      },
+      "RegisterIn": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "minLength": 1,
+            "title": "Displayname",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "displayName"
+        ],
+        "title": "RegisterIn",
+        "type": "object"
+      },
+      "RepertoireAccessOut": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "owner",
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RepertoireAccessOut",
+        "type": "object"
+      },
+      "RepertoireCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "composer": {
+            "default": "",
+            "title": "Composer",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "RepertoireCreate",
+        "type": "object"
+      },
+      "RepertoireOut": {
+        "additionalProperties": false,
+        "properties": {
+          "composer": {
+            "title": "Composer",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "currentTempoMapRevision": {
+            "title": "Currenttempomaprevision",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "openTodoCount": {
+            "title": "Opentodocount",
+            "type": "integer"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "scoreCount": {
+            "title": "Scorecount",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "title",
+          "composer",
+          "notes",
+          "currentTempoMapRevision",
+          "scoreCount",
+          "openTodoCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "RepertoireOut",
+        "type": "object"
+      },
+      "RepertoireUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "composer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composer"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "RepertoireUpdate",
+        "type": "object"
+      },
+      "ReportRttMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/ReportRttPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "REPORT_RTT",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "ReportRttMessage",
+        "type": "object"
+      },
+      "ReportRttPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "rttMs": {
+            "maximum": 120000,
+            "minimum": 0,
+            "title": "Rttms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rttMs"
+        ],
+        "title": "ReportRttPayload",
+        "type": "object"
+      },
+      "RevisionPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "repertoireId",
+          "revision"
+        ],
+        "title": "RevisionPayload",
+        "type": "object"
+      },
+      "RevisionServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/RevisionPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "TEMPOMAP_UPDATED",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "RevisionServerMessage",
+        "type": "object"
+      },
+      "RoomCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repertoireId"
+        ],
+        "title": "RoomCreate",
+        "type": "object"
+      },
+      "RoomOut": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "leaderId": {
+            "title": "Leaderid",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "roomId": {
+            "title": "Roomid",
+            "type": "string"
+          },
+          "tempoMapRevision": {
+            "title": "Tempomaprevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "roomId",
+          "repertoireId",
+          "leaderId",
+          "tempoMapRevision",
+          "expiresAt"
+        ],
+        "title": "RoomOut",
+        "type": "object"
+      },
+      "RosterMember": {
+        "additionalProperties": false,
+        "properties": {
+          "bluetooth": {
+            "title": "Bluetooth",
+            "type": "boolean"
+          },
+          "calibrated": {
+            "title": "Calibrated",
+            "type": "boolean"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "leader",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "rttMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rttms"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "role",
+          "ready",
+          "calibrated",
+          "bluetooth"
+        ],
+        "title": "RosterMember",
+        "type": "object"
+      },
+      "RosterPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/RosterMember"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "title": "RosterPayload",
+        "type": "object"
+      },
+      "RosterServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/RosterPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ROOM_ROSTER",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "RosterServerMessage",
+        "type": "object"
+      },
+      "ScoreCompleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "sizeBytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sizebytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sizeBytes"
+        ],
+        "title": "ScoreCompleteIn",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "additionalProperties": false,
+        "properties": {
+          "contentType": {
+            "title": "Contenttype",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "full",
+              "part"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "sizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizebytes"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "uploadStatus": {
+            "enum": [
+              "pending",
+              "ready"
+            ],
+            "title": "Uploadstatus",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repertoireId",
+          "kind",
+          "instrument",
+          "filename",
+          "contentType",
+          "sizeBytes",
+          "uploadStatus",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "ScorePresignIn": {
+        "additionalProperties": false,
+        "properties": {
+          "contentType": {
+            "minLength": 1,
+            "title": "Contenttype",
+            "type": "string"
+          },
+          "filename": {
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "instrument": {
+            "default": "",
+            "title": "Instrument",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "full",
+              "part"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "sizeBytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sizebytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "contentType",
+          "sizeBytes",
+          "kind"
+        ],
+        "title": "ScorePresignIn",
+        "type": "object"
+      },
+      "ScoreSettingsOut": {
+        "additionalProperties": false,
+        "properties": {
+          "measureMap": {
+            "$ref": "#/components/schemas/MeasureMapOut"
+          },
+          "score": {
+            "$ref": "#/components/schemas/ScoreOut"
+          }
+        },
+        "required": [
+          "score",
+          "measureMap"
+        ],
+        "title": "ScoreSettingsOut",
+        "type": "object"
+      },
+      "ScoreSettingsWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedMeasureMapRevision": {
+            "minimum": 0.0,
+            "title": "Expectedmeasuremaprevision",
+            "type": "integer"
+          },
+          "instrument": {
+            "default": "",
+            "title": "Instrument",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "full",
+              "part"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "measureNumberOffset": {
+            "default": 0,
+            "title": "Measurenumberoffset",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureRegion"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "expectedMeasureMapRevision",
+          "regions"
+        ],
+        "title": "ScoreSettingsWrite",
+        "type": "object"
+      },
+      "ScoreUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "instrument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "part"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          }
+        },
+        "title": "ScoreUpdate",
+        "type": "object"
+      },
+      "SeekMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/SeekPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "CMD_SEEK",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "SeekMessage",
+        "type": "object"
+      },
+      "SeekPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "measure": {
+            "minimum": 1,
+            "title": "Measure",
+            "type": "integer"
+          },
+          "pass": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Pass",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "measure"
+        ],
+        "title": "SeekPayload",
+        "type": "object"
+      },
+      "ServerEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "enum": [
+              "JOINED",
+              "PONG",
+              "TRANSPORT",
+              "ROOM_ROSTER",
+              "TEMPOMAP_UPDATED",
+              "ERROR"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "ServerEnvelope",
+        "type": "object"
+      },
+      "StampAnnotationData": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "stamp",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measureNumber": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurenumber"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PositionedAnnotationPayload"
+          }
+        },
+        "required": [
+          "kind",
+          "page",
+          "payload"
+        ],
+        "title": "StampAnnotationData",
+        "type": "object"
+      },
+      "StartMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/StartPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "CMD_START",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "StartMessage",
+        "type": "object"
+      },
+      "StartPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "countIn": {
+            "default": true,
+            "title": "Countin",
+            "type": "boolean"
+          },
+          "measure": {
+            "minimum": 1,
+            "title": "Measure",
+            "type": "integer"
+          },
+          "pass": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Pass",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "measure"
+        ],
+        "title": "StartPayload",
+        "type": "object"
+      },
+      "StopMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/EmptyPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "CMD_STOP",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "StopMessage",
+        "type": "object"
+      },
+      "TempoMapAnacrusis": {
+        "additionalProperties": false,
+        "properties": {
+          "beats": {
+            "minimum": 1.0,
+            "title": "Beats",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "beats"
+        ],
+        "title": "TempoMapAnacrusis",
+        "type": "object"
+      },
+      "TempoMapCoda": {
+        "additionalProperties": false,
+        "properties": {
+          "codaMeasure": {
+            "minimum": 1.0,
+            "title": "Codameasure",
+            "type": "integer"
+          },
+          "toCodaMeasure": {
+            "minimum": 1.0,
+            "title": "Tocodameasure",
+            "type": "integer"
+          },
+          "type": {
+            "const": "coda",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "toCodaMeasure",
+          "codaMeasure"
+        ],
+        "title": "TempoMapCoda",
+        "type": "object"
+      },
+      "TempoMapCountIn": {
+        "additionalProperties": false,
+        "properties": {
+          "measures": {
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Measures",
+            "type": "integer"
+          },
+          "useSectionMeter": {
+            "const": true,
+            "title": "Usesectionmeter",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "measures",
+          "useSectionMeter"
+        ],
+        "title": "TempoMapCountIn",
+        "type": "object"
+      },
+      "TempoMapDaCapo": {
+        "additionalProperties": false,
+        "properties": {
+          "alCoda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alcoda"
+          },
+          "alFine": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alfine"
+          },
+          "atMeasure": {
+            "minimum": 1.0,
+            "title": "Atmeasure",
+            "type": "integer"
+          },
+          "type": {
+            "const": "dc",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "atMeasure"
+        ],
+        "title": "TempoMapDaCapo",
+        "type": "object"
+      },
+      "TempoMapDalSegno": {
+        "additionalProperties": false,
+        "properties": {
+          "alCoda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alcoda"
+          },
+          "alFine": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alfine"
+          },
+          "atMeasure": {
+            "minimum": 1.0,
+            "title": "Atmeasure",
+            "type": "integer"
+          },
+          "segnoMeasure": {
+            "minimum": 1.0,
+            "title": "Segnomeasure",
+            "type": "integer"
+          },
+          "type": {
+            "const": "ds",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "atMeasure",
+          "segnoMeasure"
+        ],
+        "title": "TempoMapDalSegno",
+        "type": "object"
+      },
+      "TempoMapData": {
+        "additionalProperties": false,
+        "properties": {
+          "anacrusis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapAnacrusis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "countIn": {
+            "$ref": "#/components/schemas/TempoMapCountIn"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "jumps": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "coda": "#/components/schemas/TempoMapCoda",
+                  "dc": "#/components/schemas/TempoMapDaCapo",
+                  "ds": "#/components/schemas/TempoMapDalSegno",
+                  "repeat": "#/components/schemas/TempoMapRepeat"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/TempoMapRepeat"
+                },
+                {
+                  "$ref": "#/components/schemas/TempoMapDaCapo"
+                },
+                {
+                  "$ref": "#/components/schemas/TempoMapDalSegno"
+                },
+                {
+                  "$ref": "#/components/schemas/TempoMapCoda"
+                }
+              ]
+            },
+            "title": "Jumps",
+            "type": "array"
+          },
+          "repertoireItemId": {
+            "minLength": 1,
+            "title": "Repertoireitemid",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/TempoMapSection"
+            },
+            "minItems": 1,
+            "title": "Sections",
+            "type": "array"
+          },
+          "totalMeasures": {
+            "minimum": 1.0,
+            "title": "Totalmeasures",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "repertoireItemId",
+          "revision",
+          "totalMeasures",
+          "sections",
+          "jumps",
+          "countIn"
+        ],
+        "title": "TempoMapData",
+        "type": "object"
+      },
+      "TempoMapOut": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdById": {
+            "title": "Createdbyid",
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TempoMapData"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "repertoireId",
+          "revision",
+          "data",
+          "createdById",
+          "createdAt"
+        ],
+        "title": "TempoMapOut",
+        "type": "object"
+      },
+      "TempoMapRepeat": {
+        "additionalProperties": false,
+        "properties": {
+          "endMeasure": {
+            "minimum": 1.0,
+            "title": "Endmeasure",
+            "type": "integer"
+          },
+          "endings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TempoMapVoltaEnding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endings"
+          },
+          "startMeasure": {
+            "minimum": 1.0,
+            "title": "Startmeasure",
+            "type": "integer"
+          },
+          "times": {
+            "minimum": 1.0,
+            "title": "Times",
+            "type": "integer"
+          },
+          "type": {
+            "const": "repeat",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "startMeasure",
+          "endMeasure",
+          "times"
+        ],
+        "title": "TempoMapRepeat",
+        "type": "object"
+      },
+      "TempoMapSection": {
+        "additionalProperties": false,
+        "properties": {
+          "accentPattern": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    0,
+                    1,
+                    2
+                  ],
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accentpattern"
+          },
+          "beatUnit": {
+            "enum": [
+              "whole",
+              "dottedWhole",
+              "half",
+              "dottedHalf",
+              "quarter",
+              "dottedQuarter",
+              "eighth",
+              "dottedEighth",
+              "sixteenth",
+              "dottedSixteenth",
+              "thirtySecond"
+            ],
+            "title": "Beatunit",
+            "type": "string"
+          },
+          "bpm": {
+            "exclusiveMinimum": 0.0,
+            "title": "Bpm",
+            "type": "number"
+          },
+          "endMeasure": {
+            "minimum": 1.0,
+            "title": "Endmeasure",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "startMeasure": {
+            "minimum": 1.0,
+            "title": "Startmeasure",
+            "type": "integer"
+          },
+          "subdivision": {
+            "anyOf": [
+              {
+                "enum": [
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subdivision"
+          },
+          "tempoChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapTempoChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeSignature": {
+            "$ref": "#/components/schemas/TempoMapTimeSignature"
+          }
+        },
+        "required": [
+          "id",
+          "startMeasure",
+          "endMeasure",
+          "timeSignature",
+          "bpm",
+          "beatUnit"
+        ],
+        "title": "TempoMapSection",
+        "type": "object"
+      },
+      "TempoMapTempoChange": {
+        "additionalProperties": false,
+        "properties": {
+          "targetBpm": {
+            "exclusiveMinimum": 0.0,
+            "title": "Targetbpm",
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "rit",
+              "accel"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "targetBpm"
+        ],
+        "title": "TempoMapTempoChange",
+        "type": "object"
+      },
+      "TempoMapTimeSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "denom": {
+            "minimum": 1.0,
+            "title": "Denom",
+            "type": "integer"
+          },
+          "num": {
+            "minimum": 1.0,
+            "title": "Num",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "num",
+          "denom"
+        ],
+        "title": "TempoMapTimeSignature",
+        "type": "object"
+      },
+      "TempoMapVoltaEnding": {
+        "additionalProperties": false,
+        "properties": {
+          "forPass": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Forpass",
+            "type": "array"
+          },
+          "measures": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Measures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "measures",
+          "forPass"
+        ],
+        "title": "TempoMapVoltaEnding",
+        "type": "object"
+      },
+      "TempoMapWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TempoMapData"
+          },
+          "expectedRevision": {
+            "minimum": 0.0,
+            "title": "Expectedrevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "data"
+        ],
+        "title": "TempoMapWrite",
+        "type": "object"
+      },
+      "TextAnnotationData": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measureNumber": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurenumber"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PositionedAnnotationPayload"
+          }
+        },
+        "required": [
+          "kind",
+          "page",
+          "payload"
+        ],
+        "title": "TextAnnotationData",
+        "type": "object"
+      },
+      "TodoCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "assigneeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigneeid"
+          },
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "dueDate": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duedate"
+          },
+          "practiceLogId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Practicelogid"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "TodoCreate",
+        "type": "object"
+      },
+      "TodoOut": {
+        "additionalProperties": false,
+        "properties": {
+          "assigneeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigneeid"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdById": {
+            "title": "Createdbyid",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "boolean"
+          },
+          "dueDate": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duedate"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "practiceLogId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Practicelogid"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repertoireId",
+          "practiceLogId",
+          "content",
+          "assigneeId",
+          "dueDate",
+          "done",
+          "createdById",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "TodoOut",
+        "type": "object"
+      },
+      "TodoUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "assigneeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigneeid"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "dueDate": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duedate"
+          }
+        },
+        "title": "TodoUpdate",
+        "type": "object"
+      },
+      "TokenPairOut": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "expiresIn": {
+            "title": "Expiresin",
+            "type": "integer"
+          },
+          "refreshToken": {
+            "title": "Refreshtoken",
+            "type": "string"
+          },
+          "tokenType": {
+            "const": "bearer",
+            "default": "bearer",
+            "title": "Tokentype",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresIn",
+          "user"
+        ],
+        "title": "TokenPairOut",
+        "type": "object"
+      },
+      "TransportPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Anchor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "countIn": {
+            "default": true,
+            "title": "Countin",
+            "type": "boolean"
+          },
+          "lateJoin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LateJoinMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "roomId": {
+            "title": "Roomid",
+            "type": "string"
+          },
+          "serverStartTimeNs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Serverstarttimens"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "armed",
+              "playing",
+              "stopped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tempoMapRevision": {
+            "title": "Tempomaprevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "roomId",
+          "repertoireId",
+          "tempoMapRevision",
+          "status"
+        ],
+        "title": "TransportPayload",
+        "type": "object"
+      },
+      "TransportServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/TransportPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "TRANSPORT",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "TransportServerMessage",
+        "type": "object"
+      },
+      "UploadTargetOut": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "method": {
+            "enum": [
+              "PUT",
+              "POST"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "scoreId": {
+            "title": "Scoreid",
+            "type": "string"
+          },
+          "storageKey": {
+            "title": "Storagekey",
+            "type": "string"
+          },
+          "uploadUrl": {
+            "title": "Uploadurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scoreId",
+          "storageKey",
+          "uploadUrl",
+          "method",
+          "expiresAt"
+        ],
+        "title": "UploadTargetOut",
+        "type": "object"
+      },
+      "UserDeleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "accountDeleteToken": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accountdeletetoken"
+          },
+          "currentPassword": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentpassword"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "googleIdToken": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Googleidtoken"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "UserDeleteIn",
+        "type": "object"
+      },
+      "UserOut": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "emailVerifiedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emailverifiedat"
+          },
+          "hasPassword": {
+            "title": "Haspassword",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "displayName",
+          "hasPassword"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "UserUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "minLength": 1,
+            "title": "Displayname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "title": "UserUpdate",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WsClientMessage": {
+        "discriminator": {
+          "mapping": {
+            "CMD_SEEK": "#/components/schemas/SeekMessage",
+            "CMD_START": "#/components/schemas/StartMessage",
+            "CMD_STOP": "#/components/schemas/StopMessage",
+            "JOIN_ROOM": "#/components/schemas/JoinRoomMessage",
+            "PING": "#/components/schemas/PingMessage",
+            "READY": "#/components/schemas/ReadyMessage",
+            "REPORT_RTT": "#/components/schemas/ReportRttMessage"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/JoinRoomMessage"
+          },
+          {
+            "$ref": "#/components/schemas/PingMessage"
+          },
+          {
+            "$ref": "#/components/schemas/StartMessage"
+          },
+          {
+            "$ref": "#/components/schemas/StopMessage"
+          },
+          {
+            "$ref": "#/components/schemas/SeekMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ReportRttMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ReadyMessage"
+          }
+        ]
+      },
+      "WsServerMessage": {
+        "discriminator": {
+          "mapping": {
+            "ERROR": "#/components/schemas/ErrorServerMessage",
+            "JOINED": "#/components/schemas/JoinedServerMessage",
+            "PONG": "#/components/schemas/PongServerMessage",
+            "ROOM_ROSTER": "#/components/schemas/RosterServerMessage",
+            "TEMPOMAP_UPDATED": "#/components/schemas/RevisionServerMessage",
+            "TRANSPORT": "#/components/schemas/TransportServerMessage"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/JoinedServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/PongServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/TransportServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/RosterServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/RevisionServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ErrorServerMessage"
+          }
+        ]
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API and WebSocket clock/transport gateway. Clients expand tempo-map beats locally; the server only agrees on revision, anchor, and absolute server time.",
+    "title": "FeelMyRythm API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/annotations/{annotation_id}": {
+      "delete": {
+        "operationId": "delete_annotation_api_annotations__annotation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "annotation_id",
+            "required": true,
+            "schema": {
+              "title": "Annotation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Annotation",
+        "tags": [
+          "scores"
+        ]
+      },
+      "get": {
+        "operationId": "get_annotation_api_annotations__annotation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "annotation_id",
+            "required": true,
+            "schema": {
+              "title": "Annotation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Annotation",
+        "tags": [
+          "scores"
+        ]
+      },
+      "put": {
+        "operationId": "update_annotation_api_annotations__annotation_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "annotation_id",
+            "required": true,
+            "schema": {
+              "title": "Annotation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Annotation",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/auth/google": {
+      "post": {
+        "operationId": "google_login_api_auth_google_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleLoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Google Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout_api_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "refresh_api_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationPendingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/request-password-reset": {
+      "post": {
+        "operationId": "request_password_reset_api_auth_request_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Password Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/resend-verification": {
+      "post": {
+        "operationId": "resend_verification_api_auth_resend_verification_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailVerificationResendIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resend Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "operationId": "reset_password_api_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetCompleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/verify-email": {
+      "post": {
+        "operationId": "verify_email_api_auth_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailVerificationCompleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/calibrations": {
+      "get": {
+        "operationId": "list_calibrations_api_calibrations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceCalibrationOut"
+                  },
+                  "title": "Response List Calibrations Api Calibrations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calibrations",
+        "tags": [
+          "device calibrations"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_calibration_api_calibrations_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCalibrationWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCalibrationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upsert Calibration",
+        "tags": [
+          "device calibrations"
+        ]
+      }
+    },
+    "/api/calibrations/{calibration_id}": {
+      "delete": {
+        "operationId": "delete_calibration_api_calibrations__calibration_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calibration_id",
+            "required": true,
+            "schema": {
+              "title": "Calibration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Calibration",
+        "tags": [
+          "device calibrations"
+        ]
+      },
+      "get": {
+        "operationId": "get_calibration_api_calibrations__calibration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calibration_id",
+            "required": true,
+            "schema": {
+              "title": "Calibration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCalibrationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Calibration",
+        "tags": [
+          "device calibrations"
+        ]
+      }
+    },
+    "/api/groups": {
+      "get": {
+        "operationId": "list_groups_api_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupOut"
+                  },
+                  "title": "Response List Groups Api Groups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Groups",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_group_api_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Group",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/groups/{group_id}": {
+      "delete": {
+        "operationId": "delete_group_api_groups__group_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Group",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "get": {
+        "operationId": "get_group_api_groups__group_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Group",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_group_api_groups__group_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Group",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/groups/{group_id}/members": {
+      "get": {
+        "operationId": "list_members_api_groups__group_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupMemberOut"
+                  },
+                  "title": "Response List Members Api Groups  Group Id  Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Members",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "post": {
+        "operationId": "add_member_api_groups__group_id__members_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMemberCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Member",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/groups/{group_id}/members/{member_id}": {
+      "delete": {
+        "operationId": "remove_member_api_groups__group_id__members__member_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Member",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_member_api_groups__group_id__members__member_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMemberUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Member",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/groups/{group_id}/projects": {
+      "get": {
+        "operationId": "list_projects_api_groups__group_id__projects_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectOut"
+                  },
+                  "title": "Response List Projects Api Groups  Group Id  Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Projects",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_project_api_groups__group_id__projects_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Project",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Health Api Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/logs/{log_id}": {
+      "delete": {
+        "operationId": "delete_log_api_logs__log_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "log_id",
+            "required": true,
+            "schema": {
+              "title": "Log Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Log",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "get": {
+        "operationId": "get_log_api_logs__log_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "log_id",
+            "required": true,
+            "schema": {
+              "title": "Log Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeLogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Log",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "patch": {
+        "operationId": "update_log_api_logs__log_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "log_id",
+            "required": true,
+            "schema": {
+              "title": "Log Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeLogUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeLogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Log",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/practice-sessions/{session_id}": {
+      "get": {
+        "operationId": "get_practice_session_api_practice_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeSessionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Practice Session",
+        "tags": [
+          "practice rooms"
+        ]
+      }
+    },
+    "/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "delete_project_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Project",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "get": {
+        "operationId": "get_project_api_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project",
+        "tags": [
+          "groups and projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_project_api_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Project",
+        "tags": [
+          "groups and projects"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/repertoire": {
+      "get": {
+        "operationId": "list_repertoire_api_projects__project_id__repertoire_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RepertoireOut"
+                  },
+                  "title": "Response List Repertoire Api Projects  Project Id  Repertoire Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Repertoire",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "post": {
+        "operationId": "create_repertoire_api_projects__project_id__repertoire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepertoireCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepertoireOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Repertoire",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}": {
+      "delete": {
+        "operationId": "delete_repertoire_api_repertoire__repertoire_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Repertoire",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "get": {
+        "operationId": "get_repertoire_api_repertoire__repertoire_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepertoireOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Repertoire",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "patch": {
+        "operationId": "update_repertoire_api_repertoire__repertoire_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepertoireUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepertoireOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Repertoire",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/access": {
+      "get": {
+        "operationId": "get_repertoire_access_api_repertoire__repertoire_id__access_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepertoireAccessOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Repertoire Access",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/annotations": {
+      "get": {
+        "operationId": "list_repertoire_annotations_api_repertoire__repertoire_id__annotations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnnotationOut"
+                  },
+                  "title": "Response List Repertoire Annotations Api Repertoire  Repertoire Id  Annotations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Repertoire Annotations",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/logs": {
+      "get": {
+        "operationId": "list_logs_api_repertoire__repertoire_id__logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PracticeLogOut"
+                  },
+                  "title": "Response List Logs Api Repertoire  Repertoire Id  Logs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Logs",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "post": {
+        "operationId": "create_log_api_repertoire__repertoire_id__logs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeLogCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeLogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Log",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/musicxml/draft": {
+      "post": {
+        "operationId": "musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicXmlDraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Musicxml Draft",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/practice-sessions": {
+      "get": {
+        "operationId": "list_practice_sessions_api_repertoire__repertoire_id__practice_sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PracticeSessionOut"
+                  },
+                  "title": "Response List Practice Sessions Api Repertoire  Repertoire Id  Practice Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Practice Sessions",
+        "tags": [
+          "practice rooms"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/scores": {
+      "get": {
+        "operationId": "list_scores_api_repertoire__repertoire_id__scores_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScoreOut"
+                  },
+                  "title": "Response List Scores Api Repertoire  Repertoire Id  Scores Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scores",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/scores/presign": {
+      "post": {
+        "operationId": "presign_score_api_repertoire__repertoire_id__scores_presign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScorePresignIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadTargetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Presign Score",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/tempomap": {
+      "get": {
+        "operationId": "get_latest_tempo_map_api_repertoire__repertoire_id__tempomap_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Latest Tempo Map",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "put": {
+        "operationId": "put_tempo_map_api_repertoire__repertoire_id__tempomap_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TempoMapWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Tempo Map",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/tempomap/revisions": {
+      "get": {
+        "operationId": "list_tempo_map_revisions_api_repertoire__repertoire_id__tempomap_revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TempoMapOut"
+                  },
+                  "title": "Response List Tempo Map Revisions Api Repertoire  Repertoire Id  Tempomap Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tempo Map Revisions",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/tempomap/revisions/{revision}": {
+      "get": {
+        "operationId": "get_tempo_map_revision_api_repertoire__repertoire_id__tempomap_revisions__revision__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TempoMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tempo Map Revision",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/repertoire/{repertoire_id}/todos": {
+      "get": {
+        "operationId": "list_todos_api_repertoire__repertoire_id__todos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TodoOut"
+                  },
+                  "title": "Response List Todos Api Repertoire  Repertoire Id  Todos Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Todos",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "post": {
+        "operationId": "create_todo_api_repertoire__repertoire_id__todos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repertoire_id",
+            "required": true,
+            "schema": {
+              "title": "Repertoire Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Todo",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/rooms": {
+      "post": {
+        "operationId": "create_room_api_rooms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Room",
+        "tags": [
+          "practice rooms"
+        ]
+      }
+    },
+    "/api/rooms/{room_id}": {
+      "get": {
+        "operationId": "get_room_api_rooms__room_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "room_id",
+            "required": true,
+            "schema": {
+              "title": "Room Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Room",
+        "tags": [
+          "practice rooms"
+        ]
+      }
+    },
+    "/api/scores/{score_id}": {
+      "delete": {
+        "operationId": "delete_score_api_scores__score_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Score",
+        "tags": [
+          "scores"
+        ]
+      },
+      "get": {
+        "operationId": "get_score_api_scores__score_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Score",
+        "tags": [
+          "scores"
+        ]
+      },
+      "patch": {
+        "operationId": "update_score_api_scores__score_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Score",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/annotations": {
+      "get": {
+        "operationId": "list_annotations_api_scores__score_id__annotations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnnotationOut"
+                  },
+                  "title": "Response List Annotations Api Scores  Score Id  Annotations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Annotations",
+        "tags": [
+          "scores"
+        ]
+      },
+      "post": {
+        "operationId": "create_annotation_api_scores__score_id__annotations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Annotation",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/complete": {
+      "post": {
+        "operationId": "complete_score_api_scores__score_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreCompleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Score",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/download": {
+      "get": {
+        "operationId": "score_download_api_scores__score_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadUrlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Score Download",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/measure-map": {
+      "delete": {
+        "operationId": "delete_measure_map_api_scores__score_id__measure_map_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Measure Map",
+        "tags": [
+          "scores"
+        ]
+      },
+      "get": {
+        "operationId": "get_measure_map_api_scores__score_id__measure_map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasureMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Measure Map",
+        "tags": [
+          "scores"
+        ]
+      },
+      "put": {
+        "operationId": "put_measure_map_api_scores__score_id__measure_map_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeasureMapWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasureMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Measure Map",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/settings": {
+      "put": {
+        "operationId": "update_score_settings_api_scores__score_id__settings_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreSettingsWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreSettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Score Settings",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/todos/{todo_id}": {
+      "delete": {
+        "operationId": "delete_todo_api_todos__todo_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "todo_id",
+            "required": true,
+            "schema": {
+              "title": "Todo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Todo",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "get": {
+        "operationId": "get_todo_api_todos__todo_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "todo_id",
+            "required": true,
+            "schema": {
+              "title": "Todo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Todo",
+        "tags": [
+          "repertoire"
+        ]
+      },
+      "patch": {
+        "operationId": "update_todo_api_todos__todo_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "todo_id",
+            "required": true,
+            "schema": {
+              "title": "Todo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Todo",
+        "tags": [
+          "repertoire"
+        ]
+      }
+    },
+    "/api/uploads/local/{storage_key}": {
+      "get": {
+        "operationId": "local_download_api_uploads_local__storage_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "storage_key",
+            "required": true,
+            "schema": {
+              "title": "Storage Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Local Download",
+        "tags": [
+          "scores"
+        ]
+      },
+      "put": {
+        "operationId": "local_upload_api_uploads_local__storage_key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "storage_key",
+            "required": true,
+            "schema": {
+              "title": "Storage Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Local Upload",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/users/me": {
+      "delete": {
+        "operationId": "delete_me_api_users_me_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserDeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Me",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "operationId": "me_api_users_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "operationId": "update_me_api_users_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Me",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/me/delete-challenge": {
+      "post": {
+        "operationId": "request_account_delete_challenge_api_users_me_delete_challenge_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Account Delete Challenge",
+        "tags": [
+          "users"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Legacy PWA fixture</title>
+  </head>
+  <body>
+    <p id="state" role="status">preparing</p>
+    <script>
+      async function prepare() {
+        const expectedWorker = '/feelmyrythm/pwa/legacy-sw.js';
+        if (!navigator.serviceWorker.controller?.scriptURL.endsWith(expectedWorker)) {
+          await navigator.serviceWorker.register(expectedWorker, { scope: '/feelmyrythm/' });
+          await navigator.serviceWorker.ready;
+          location.reload();
+          return;
+        }
+
+        const cache = await caches.open('fmr-api');
+        await cache.put(
+          '/feelmyrythm/api/pwa-probe',
+          new Response(JSON.stringify({ source: 'legacy-user-a' }), {
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+        document.getElementById('state').textContent = 'ready';
+      }
+
+      prepare().catch((error) => {
+        document.getElementById('state').textContent = `failed: ${String(error)}`;
+      });
+    </script>
+  </body>
+</html>

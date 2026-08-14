@@ -1,59 +1,83 @@
-# Production app services only. The shared PostgreSQL container is managed separately as cksDB.
-# Required .env values:
-#   FMR_DATABASE_URL=postgresql+psycopg://<user>:<password>@cksDB:5432/feelmyrythm
-#   FMR_JWT_SECRET=<long-random-secret>
+# App services only. The shared PostgreSQL service/network/data are managed outside this stack.
+# Required values are loaded from the server's untracked .env file.
 services:
   fmrServer:
-    image: ${FEELMYRYTHM_SERVER_IMAGE:-ghcr.io/facio313/feelmyrythm-server:latest}
+    image: ghcr.io/facio313/feelmyrythm-server:${FMR_IMAGE_TAG:?set a 40-character commit SHA}
+    platform: linux/arm64
     container_name: fmrServer
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
     env_file:
       - .env
     environment:
-      FMR_UPLOADS_DIR: /data/uploads
-    volumes:
-      - fmrUploads:/data/uploads
+      FMR_ENVIRONMENT: production
+      FMR_DATABASE_URL: ${FMR_DATABASE_URL:?set the dedicated cksDB database URL}
+      FMR_AUTO_CREATE_SCHEMA: 'false'
+      FMR_JWT_SECRET: ${FMR_JWT_SECRET:?set a production JWT secret}
+      FMR_WEB_APP_BASE_URL: ${FMR_WEB_APP_BASE_URL:?set the public web application URL}
+      FMR_SMTP_HOST: ${FMR_SMTP_HOST:?set the verification email SMTP host}
+      FMR_SMTP_PORT: ${FMR_SMTP_PORT:-587}
+      FMR_SMTP_FROM_EMAIL: ${FMR_SMTP_FROM_EMAIL:?set the verification sender address}
+      FMR_SMTP_STARTTLS: ${FMR_SMTP_STARTTLS:-true}
+      FMR_SMTP_USE_SSL: ${FMR_SMTP_USE_SSL:-false}
+      FMR_SMTP_USERNAME: ${FMR_SMTP_USERNAME:-}
+      FMR_SMTP_PASSWORD: ${FMR_SMTP_PASSWORD:-}
+      FMR_MAIL_WORKER_COUNT: ${FMR_MAIL_WORKER_COUNT:-2}
+      FMR_MAIL_QUEUE_CAPACITY: ${FMR_MAIL_QUEUE_CAPACITY:-128}
+      FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS: ${FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS:-5}
+      FMR_PASSWORD_VERIFY_CONCURRENCY: ${FMR_PASSWORD_VERIFY_CONCURRENCY:-4}
+      FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}
+      FMR_STORAGE_BACKEND: s3
+      FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}
+      FMR_S3_REGION: ${FMR_S3_REGION:?set the production score bucket region}
+      FMR_S3_ENDPOINT_URL: ${FMR_S3_ENDPOINT_URL:-}
+      FMR_STORAGE_WORKER_ENABLED: ${FMR_STORAGE_WORKER_ENABLED:-true}
+      FMR_STORAGE_WORKER_INTERVAL_SECONDS: ${FMR_STORAGE_WORKER_INTERVAL_SECONDS:-30}
+      FMR_STORAGE_DELETE_BATCH_SIZE: ${FMR_STORAGE_DELETE_BATCH_SIZE:-100}
+      FMR_STORAGE_DELETE_LEASE_SECONDS: ${FMR_STORAGE_DELETE_LEASE_SECONDS:-300}
+      FMR_STORAGE_DELETE_RETRY_BASE_SECONDS: ${FMR_STORAGE_DELETE_RETRY_BASE_SECONDS:-5}
+      FMR_STORAGE_DELETE_RETRY_MAX_SECONDS: ${FMR_STORAGE_DELETE_RETRY_MAX_SECONDS:-3600}
+      FMR_PENDING_UPLOAD_GRACE_SECONDS: ${FMR_PENDING_UPLOAD_GRACE_SECONDS:-900}
+      FMR_LEGACY_PENDING_UPLOAD_TTL_SECONDS: ${FMR_LEGACY_PENDING_UPLOAD_TTL_SECONDS:-86400}
+      FMR_LATE_UPLOAD_GUARD_SECONDS: ${FMR_LATE_UPLOAD_GUARD_SECONDS:-86400}
+      FMR_STAGING_REDELETE_INTERVAL_SECONDS: ${FMR_STAGING_REDELETE_INTERVAL_SECONDS:-900}
+      FMR_LOCAL_UPLOAD_TEMP_TTL_SECONDS: ${FMR_LOCAL_UPLOAD_TEMP_TTL_SECONDS:-3600}
     ports:
-      - "127.0.0.1:9175:8000"
+      - '127.0.0.1:9175:8000'
     networks:
       - feelmyrythm
       - cksDB
     restart: always
     healthcheck:
       test:
-        - CMD-SHELL
-        - >-
-          python -c "import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)" || exit 1
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
       interval: 15s
       timeout: 5s
       retries: 6
       start_period: 20s
 
   fmrWeb:
-    image: ${FEELMYRYTHM_WEB_IMAGE:-ghcr.io/facio313/feelmyrythm-web:latest}
+    image: ghcr.io/facio313/feelmyrythm-web:${FMR_IMAGE_TAG:?set a 40-character commit SHA}
+    platform: linux/arm64
     container_name: fmrWeb
     depends_on:
       fmrServer:
         condition: service_healthy
     ports:
-      - "127.0.0.1:5175:80"
+      - '127.0.0.1:5175:80'
     networks:
       - feelmyrythm
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/feelmyrythm/ || exit 1"]
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/healthz']
       interval: 15s
       timeout: 5s
       retries: 4
       start_period: 10s
-
-volumes:
-  fmrUploads:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /home/cks/FeelMyRythm/uploadsmnt
 
 networks:
   feelmyrythm:

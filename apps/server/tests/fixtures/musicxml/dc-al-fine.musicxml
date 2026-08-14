@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1"><part-name>Flute</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1"/>
+    <measure number="2"/>
+    <measure number="3">
+      <direction>
+        <direction-type><words>Fine</words></direction-type>
+        <sound fine="yes"/>
+      </direction>
+    </measure>
+    <measure number="4"/>
+    <measure number="5"/>
+    <measure number="6">
+      <direction>
+        <direction-type><words>D.C. al Fine</words></direction-type>
+        <sound dacapo="yes"/>
+      </direction>
+    </measure>
+  </part>
+</score-partwise>

@@ -65,6 +65,7 @@
 - **PWA만으로는 부족한 이유**: iOS Safari는 화면 잠금/백그라운드에서 오디오·타이머를 강하게 제한한다. 연습 중 화면이 꺼지면 메트로놈이 멈추는 것은 치명적. → 네이티브 셸 필요.
 - **React Native가 아닌 이유**: 이 앱의 성능 민감 지점은 UI가 아니라 **오디오 스케줄링**이다. RN을 써도 오디오는 결국 네이티브 모듈을 짜야 하므로, UI까지 재작업하는 RN보다 웹 UI를 그대로 쓰고 오디오만 필요시 플러그인화하는 Capacitor가 유리하다.
 - **알려진 리스크와 대응**: WKWebView(iOS)의 오디오 출력 지연이 기기별로 다를 수 있음 → §6.5 기기별 캘리브레이션으로 흡수. 그래도 부족하면 `AudioEngine` 인터페이스 구현체만 네이티브(AVAudioEngine/Oboe) 플러그인으로 교체(§5.1). 코어 로직은 무변경.
+- **native 인증 경계**: Google Identity Services의 웹 button은 Capacitor WebView에서 신뢰할 수 있는 native 로그인으로 간주하지 않는다. Sign in with Apple과 native Google 연동 전까지 모든 Capacitor 빌드는 Google button/SDK를 숨기고 이메일 가입·로그인·복구만 제공한다. 브라우저 배포는 기존 Google 로그인을 유지한다.
 
 ### 2.3 서버 스택 근거 — Python은 적합, 프레임워크는 Flask보다 FastAPI
 
@@ -137,6 +138,23 @@ graph TB
 4. 리더가 "26마디부터 시작" 누름 → 서버가 `START{measure:26, serverStartTime: now+3s}` 브로드캐스트.
 5. 각 클라이언트는 serverStartTime을 자기 오디오 클럭 시각으로 변환하고, 예비박부터 정확히 스케줄.
 6. 이후 네트워크가 끊겨도 재생은 로컬에서 결정론적으로 지속된다.
+
+### 3.4 인증·계정 보안 흐름
+
+- 이메일 가입 첫 요청은 이름과 이메일만 저장하고 password hash나 세션을 만들지 않는다. 메일 링크의 `verificationToken`은 purpose·email·`auth_generation`·만료에 묶이며, 재발급 전에 generation을 올려 이전 링크를 무효화한다. 링크 소유자가 별도 화면에서 새 password와 확인값을 제출한 때에만 legacy 미검증 hash를 덮어쓰고 검증 시각·새 generation·세션 발급을 한 transaction 흐름으로 완료한다.
+- 비밀번호 재설정 요청은 등록 여부와 무관하게 같은 202 응답을 보낸다. reset token은 purpose·email·generation·만료에 묶고, 성공 시 generation 증가와 모든 refresh session 삭제로 한 번만 쓸 수 있게 한다. 브라우저/앱은 verification/reset token을 URL fragment에서 즉시 지우고 메모리에만 두며, 새로고침 뒤에는 메일 링크를 다시 열도록 안내한다.
+- 가입·재발급·reset·Google-only 탈퇴 확인 메일은 SMTP enqueue **전에** 사용자별 last-attempt를 commit한다. provider timeout과 bounded queue overflow도 `Retry-After` cooldown을 유지한다. SMTP I/O는 고정 worker 수·bounded queue의 비동기 delivery manager로 요청 밖에서 수행하고, queue full/provider 오류 로그에는 recipient나 서명 URL을 남기지 않는다. shutdown은 제한 시간까지 drain한 뒤 아직 시작하지 않은 job을 취소한다. 운영은 SMTP, absolute HTTPS `FMR_WEB_APP_BASE_URL`, query/fragment 없는 absolute HTTPS `FMR_PUBLIC_API_BASE_URL`이 유효하지 않으면 시작하지 않는다.
+- password login은 계정 없음·비활성·미검증·Google-only에도 고정 dummy bcrypt를 실행하고, bounded 전역 verifier로 동시 bcrypt CPU 작업을 제한한다. client IP/CAPTCHA/provider quota 제한은 trusted CDN/nginx/provider에서 수행하며 앱은 임의 `X-Forwarded-For`를 신뢰하지 않는다.
+- 검증된 Google 이메일이 미검증 선점 row와 같으면 그 row에 subject를 연결하고 legacy password·refresh session을 제거하며 generation을 올린다. 이미 다른 Google subject나 별도 계정에 연결된 충돌은 409다.
+- password 계정 탈퇴는 현재 password를 다시 검증한다. Google-only 계정은 브라우저에서 audience·verified email·subject를 다시 검증한 Google ID token을 쓰거나, native에서도 열 수 있는 purpose=`account_delete` 만료 메일 token을 쓴다. 후자는 email·Google subject·generation에 묶고 fragment에서 즉시 제거해 메모리에만 보관한다.
+
+### 3.5 웹 런타임·화면 상태 경계
+
+- 웹 bootstrap은 React App을 import·mount하기 전 Cache Storage의 구형 `fmr-api`를 fail-closed로 purge한다. 그런 다음 `sw.js?fmr-safety=v1`을 `updateViaCache: none`으로 등록해 제어권 이관과 구형 same-scope worker의 `redundant`를 확인하고, 전환 중 마지막 legacy fetch가 캐시를 다시 만든 경우까지 마지막 purge로 제거한다. 캐시 상태·삭제·제어권을 증명하지 못하면 보안 시작 화면에 머물고 재시도만 허용한다.
+- Workbox는 `/feelmyrythm/api/*`를 navigation fallback과 runtime cache에서 제외하고, nginx API proxy는 `Cache-Control: no-store`를 항상 부여한다. 오프라인 데이터는 Service Worker 응답 캐시가 아니라 계정별 IndexedDB snapshot만 사용한다.
+- AppShell은 단일 본문 scroller의 좌표를 history entry key별로 보존해 POP에서만 복원하고 새 탐색은 맨 위에서 시작한다. 탐색 후 새 `h1`에 focus하며 browser POP은 모바일 더보기 overlay를 닫는다.
+- workspace의 `/groups`는 전체 shape을 결정하는 권위 root 요청이다. 그 후 members·projects·repertoire leaf는 최대 6개만 동시 실행하고 `allSettled`로 건강한 그룹·곡을 유지하며, 실패한 영역은 위치와 재시도를 별도로 노출한다.
+- PWA manifest는 `/feelmyrythm/` `id`·scope·start URL, `ko-KR`·category·standalone metadata, 별도의 `any`/`maskable` PNG와 180px Apple touch icon을 제공한다. theme 변경은 페이지 `data-theme`과 `theme-color`, Capacitor SystemBars를 함께 갱신하며 storage·native 실패는 웹 UI를 중단하지 않는다.
 
 ---
 
@@ -224,8 +242,10 @@ buildCountIn(map: TempoMap, from: seekPoint): Beat[]                            
 ### 4.4 편집기 UX 요건 (요약)
 
 - 구간 리스트 편집(표 형태) + 마디 눈금 타임라인 뷰(구간을 색 블록으로 시각화) 병행.
+- 표 모드는 스크린 리더에 행·열 관계를 유지하는 native `table`, column header, row header를 사용한다.
 - 탭 템포(화면 두드려 BPM 측정), 구간 분할("이 마디에서 나누기"), 검증(구간 빈틈/겹침, 반복 무한루프 검출은 `expandTimeline`이 담당).
 - 악보가 연결된 경우(§7) 마디 클릭 → 해당 마디에서 구간 나누기.
+- 로그인한 사용자의 원격 템포맵은 network failure에서만 현재 `userId`의 schema v3 snapshot으로 연다. 이때 Editor 전체를 읽기 전용으로 잠궈 편집·가져오기·저장을 막고, 연결 재확인과 JSON 내보내기만 제공한다.
 
 ---
 
@@ -300,10 +320,10 @@ client                          server
 // 서버가 방마다 유지하는 단일 진실
 interface TransportState {
   roomId: string;
-  tempoMapId: string; revision: number;
-  status: 'idle' | 'armed' | 'playing';
+  repertoireId: string; revision: number;
+  status: 'idle' | 'armed' | 'playing' | 'stopped';
   anchor?: { measure: number; pass: number };
-  serverStartTime?: number;   // 예비박 첫 박의 서버 시각 (epoch ms)
+  serverStartTimeNs?: number; // 예비박 첫 박의 서버 시각 (epoch ns)
 }
 ```
 
@@ -316,11 +336,15 @@ interface TransportState {
 | C→S | `CMD_START` | anchor(마디), 리더/권한자만 |
 | C→S | `CMD_STOP`, `CMD_SEEK` | |
 | S→C | `TRANSPORT` | TransportState 전체 (모든 변경 시 + 입장 시) |
-| S→C | `TEMPOMAP_UPDATED` | revision 변경 → 클라 재요청, 재생 중이면 다음 마디 경계 적용 |
+| S→C | `TEMPOMAP_UPDATED` | 예약된 revision 알림. 현재 서버는 활성 방의 고정 revision을 바꾸거나 편집 결과를 broadcast하지 않음 |
 | S→C | `ROOM_ROSTER` | 참가자·준비 상태 표시용 |
 
 - `CMD_START` 처리: 서버는 `serverStartTime = serverNow + lead`(기본 3초, 최악 RTT·재생준비 여유) 를 찍어 `TRANSPORT` 브로드캐스트.
+- 방 생성 시 `TempoMap` revision과 유효 `(measure, pass)` anchor 집합을 고정한다. 이후 템포맵 편집은 활성 방 revision을 바꾸거나 참가자에게 새 타임라인을 밀어 넣지 않는다.
 - **늦게 합류/재접속**: 타임라인이 결정론적이므로 `elapsed = serverNow - serverStartTime` 으로 현재 위치를 계산해 **다음 마디 경계부터** 합류(중간부터 소리 냄). 시퀀스 재전송 불필요.
+- 로컬 타임라인 자연 종료 시 리더가 `CMD_STOP`을 보내 서버를 `stopped`로 정리한다. `4000/4400/4404` close는 terminal, `4401`은 현재 auth session에서 token을 한 번만 갱신한 뒤 재거부 시 terminal이다.
+- ready/start/stop 조작은 전송 즉시 pending으로 전환해 같은 명령을 다시 보내지 않는다. 서버의 roster/transport 변경으로 acknowledgment하거나 5초 후 timeout·재시도 안내로 해제한다.
+- 초대 링크 복사가 Clipboard API 미지원·권한 거부로 실패하면 같은 URL을 선택 가능한 read-only input과 재시도 조작으로 제공한다.
 - 서버 상태는 메모리 + (멀티 인스턴스 시) Redis. 방은 마지막 참가자 퇴장 후 일정 시간 뒤 소멸.
 
 ### 6.4 동기 시작 시퀀스
@@ -374,18 +398,40 @@ interface MeasureMap {
 }
 ```
 
+저장·업로드 일관성:
+
+- `Score.kind`·`instrument`와 `MeasureMap.regions`·`measureNumberOffset`은 `PUT /scores/:id/settings`에 `expectedMeasureMapRevision`을 함께 보내 한 transaction으로 저장한다. revision이 오래됐으면 metadata와 map 어느 쪽도 바꾸지 않고 409를 반환한다.
+- `PUT /scores/:id/settings`와 `PUT /scores/:id/measure-map`은 map 조회 전에 같은 `Score` parent row를 잠근다. 아직 map이 없는 최초 생성도 직렬화하며, 방어적으로 발생한 unique insert 경합은 rollback 후 409로 변환한다.
+- presign은 server-only final key와 client-visible staging key를 분리해 `pending` Score와 정확한 upload 만료 시각을 먼저 저장한다. local PUT도 token뿐 아니라 해당 pending row·만료·선언 크기를 업로드 전후에 다시 검증하고 임시 파일을 atomic publish한다.
+- complete는 `Score FOR UPDATE`로 reaper·parent delete와 직렬화하고 staging을 final로 멱등 promote한다. 객체 copy 뒤 DB commit이 실패해도 다음 complete가 final의 정확한 크기를 확인해 복구하며, `ready` 전에는 목록·GET에서 pending을 숨긴다.
+- Score·Repertoire·Project·Group·계정 삭제는 객체 저장소를 먼저 호출하지 않는다. 논리 삭제와 final/staging key의 durable outbox enqueue를 같은 DB transaction으로 commit하고 204를 반환한다. 다중 worker는 `SKIP LOCKED` lease로 claim해 객체를 멱등 삭제하고 bounded exponential backoff로 포기 없이 재시도한다.
+- stale pending reaper는 만료+grace 뒤 잠근 Score와 outbox를 원자 정리한다. presigned 요청이 늦게 도착해 삭제 후 staging object를 다시 만들 수 있으므로 worker는 `guard_until`까지 staging key를 주기적으로 재삭제한다. S3 lifecycle rule은 방어층일 뿐 correctness를 대신하지 않는다. 목록 배지의 `scoreCount`는 `ready`만 집계한다.
+
 ### 7.2 마디 기반 내비게이션
 
 - 곡(RepertoireItem)에 속한 모든 악보(총보·파트보들)는 **마디 번호라는 공통 좌표계**를 공유한다.
 - 악보에서 마디 탭 → 메트로놈 seek / "여기부터 시작" 동기 명령.
 - 재생 중: 현재 `TimelineMeasure.measureNumber` 에 해당하는 region 하이라이트 + 자동 페이지 넘김.
 - 총보↔파트보 전환: 현재 마디 번호 유지한 채 다른 Score의 같은 마디로 점프 (`measureNumberOffset` 적용).
+- 총보·파트보 선택기는 `tablist`/`tab`/`tabpanel`로 연결하고 선택 tab만 tab stop으로 두며, 화살표와 Home/End로 파트를 순환한다.
+- 마디 region과 page anchor의 `x/y/w/h`는 viewport나 카드가 아니라 실제 score page surface를 기준으로 0–1 정규화한다. zoom은 표시 크기만 바꾸며 저장 좌표를 바꾸지 않는다.
+- 재생 중 사용자가 이전/다음 페이지를 직접 선택하면 auto-follow를 일시 중지한다. 현재 재생 마디로 이동하며 다시 추적하는 명시적 resume CTA를 계속 제공한다.
+- compact viewport의 필기·매핑 도구는 safe area를 고려한 fixed bottom overlay로 띄워 score surface를 reflow하지 않는다.
 
 ### 7.3 필기·주석 레이어
 
 - 악보 위 벡터 오버레이(SVG/캔버스): 펜 스트로크, 텍스트, 셈여림·기호 스탬프.
-- 앵커: 페이지 정규화 좌표 또는 마디 번호(마디 앵커면 파트보 간 이동에도 따라옴).
+- 펜·시스템 매핑은 pointer down에서 현재 `pointerId`를 capture하고 move/up에서 그 pointer만 반영한다. 스타일러스 필기 중 다른 손가락이 닿아도 스트로크에 섞지 않으며 `pointercancel`은 임시 상태를 폐기한다.
+- page anchor는 원본 `scoreId`·page의 정규화 좌표에 고정한다. measure anchor는 곡의 canonical 마디 번호를 저장하고, 파트 전환 시 대상 `MeasureMap`과 `measureNumberOffset`으로 다시 배치한다.
+- `GET /repertoire/:id/annotations`는 그 곡의 모든 Score에서 현재 사용자가 볼 수 있는 project 주석과 본인의 private 주석을 반환해 measure anchor의 파트 간 이동을 지원한다. 기존 `GET /scores/:id/annotations`는 score별 조회 경로로 유지한다.
 - 저장은 JSON(원본 파일 불변). 공유 범위: 개인 / 프로젝트 공유. 실시간 공동 필기는 후순위(단순 last-write-wins부터).
+
+### 7.4 권한·오프라인 snapshot
+
+- `GET /repertoire/:id/access`는 현재 사용자의 `owner | leader | member` role을 반환한다. client는 upload·metadata·map 편집 UI를 선제 제한하고, 서버는 모든 쓰기 요청에서 권한을 다시 검사한다.
+- IndexedDB schema v3는 마지막으로 성공한 원격 템포맵, 악보 blob, `MeasureMap`, visible annotations, repertoire practice logs를 `userId` 복합 키 store에 각각 snapshot한다. 성공한 서버 응답만 현재 사용자의 snapshot을 교체한다.
+- v1/v2에서 소유자를 판별할 수 없는 원격 snapshot은 v3 migration에서 폐기하고 명시적 local 데이터와 기기 보정은 보존한다.
+- browser offline이나 fetch transport 실패 같은 **network failure**일 때만 현재 사용자의 snapshot을 읽기 전용 fallback으로 사용한다. HTTP 4xx/5xx, 권한·revision·payload 오류는 server-authoritative error로 표시하며 캐시로 성공처럼 대체하지 않는다. Service Worker는 인증 API 응답을 runtime cache하지 않는다.
 
 ---
 
@@ -439,6 +485,7 @@ erDiagram
 - `getUserMedia` → `AudioWorklet` 에서 프레임 수집 → 피치 검출은 **MPM(McLeod Pitch Method) 또는 YIN** (자기상관 계열, 단음 악기에 강건). 창 2048–4096 샘플.
 - 표시: 음이름 + 센트 편차 바늘(±50센트), 안정화 필터(중앙값).
 - 기준음 A4 조절 가능: 440 기본, 415/430/442/443 프리셋 (고악기·오케스트라 대응).
+- 마이크 시작은 single-flight이며, 권한·worklet 준비 중 stop/route 이탈 시 lifecycle generation이 늦게 도착한 stream과 graph를 즉시 정리한다.
 - 완전 독립 모듈 — 다른 기능과 의존성 없음.
 
 ---
@@ -448,13 +495,24 @@ erDiagram
 ### REST (FastAPI, JWT 인증)
 
 ```
-POST /auth/…                      # 가입/로그인 (이메일 + OAuth)
+POST /api/auth/register            # 이름+이메일만 저장, password/session 없음, generic 메일 응답
+POST /api/auth/verify-email        # email token + 새 password/확인 → 검증 완료와 session 발급
+POST /api/auth/resend-verification # 이전 verification token 무효화 + generic 재발급
+POST /api/auth/request-password-reset, /api/auth/reset-password
+POST /api/auth/login, /api/auth/google, /api/auth/refresh, /api/auth/logout
+POST /api/users/me/delete-challenge # Google-only 계정의 만료 이메일 proof 요청
+DELETE /api/users/me               # fresh proof, tombstone+outbox commit; 204 뒤 객체 정리는 eventual
 CRUD /groups, /groups/:id/members
 CRUD /projects, /projects/:id/repertoire
 CRUD /repertoire/:id/tempomap     # PUT 시 revision++
-POST /repertoire/:id/scores       # presigned upload → 완료 콜백
+POST /repertoire/:id/scores/presign # pending Score + staging-only presigned target
+POST /scores/:id/complete         # staging→final 멱등 promote + ready/outbox atomic commit
+DELETE /scores/:id                # 논리 삭제+객체 outbox commit; 204 뒤 eventual cleanup
+GET  /repertoire/:id/access       # 현재 owner | leader | member role
+PUT  /scores/:id/settings         # Score metadata + MeasureMap atomic revision write
 CRUD /scores/:id/measure-map, /scores/:id/annotations
-CRUD /repertoire/:id/logs, /logs/:id/todos
+GET  /repertoire/:id/annotations  # 곡 전체 visible annotation
+CRUD /repertoire/:id/logs, /repertoire/:id/todos, /todos/:id
 POST /rooms                       # 연습 세션 개설 → roomId
 ```
 
@@ -475,5 +533,7 @@ POST /rooms                       # 연습 세션 개설 → roomId
 | 백그라운드 동작 | 모바일 앱: 오디오 세션 유지 + 화면 꺼짐 방지 옵션. 웹: Worker 타이머 + Wake Lock API |
 | 블루투스 출력 | 100–300ms 지연. 감지 시 경고 + 캘리브레이션 유도. 앙상블 모드에선 유선/내장 스피커 권장 안내 |
 | OMR 정확도 | 자동 인식은 초안 생성 보조로 포지셔닝. 수동 매핑 도구가 항상 기본 경로 |
-| 오프라인 | 템포맵·악보 로컬 캐시(IndexedDB) → 솔로 연습은 완전 오프라인 가능. 동기 세션만 온라인 필수 |
+| 오프라인 | IndexedDB v3에 원격 템포맵·악보·map·주석·연습일지를 `userId`별로 snapshot. Editor를 포함해 network failure에만 현재 사용자의 읽기 전용 fallback을 허용하고 server-authoritative error는 숨기지 않음. 동기 세션은 온라인 필수 |
+| PWA 보안 이행 | App mount 전 `fmr-api` fail-closed purge + versioned worker 제어권 + 전환 후 재-purge. Service Worker와 nginx의 API cache 금지. 실제 legacy worker/cache upgrade E2E로 검증 |
+| 공급망·런타임 | Python·Node·nginx·uv·PostgreSQL image를 tag+digest로 고정. 생성한 ARM64 server/web image의 default CMD, migration, non-root/read-only 경계, nginx SPA/header/API proxy를 push 전 실제 container smoke |
 | 확장 | WS 게이트웨이 수평 확장 시 Redis pub/sub. 초기엔 단일 인스턴스 |

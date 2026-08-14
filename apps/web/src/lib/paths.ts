@@ -1,11 +1,16 @@
-const viteBaseUrl = import.meta.env.BASE_URL;
+declare const __FMR_MOBILE_SERVER_ORIGIN__: string;
 
-/** React Router basename derived from the same Vite base used for built assets. */
-export const APP_BASENAME = viteBaseUrl === '/' ? '/' : viteBaseUrl.replace(/\/$/, '');
+export const APP_BASE = '/feelmyrythm';
+export const IS_MOBILE_BUILD = import.meta.env.MODE === 'mobile';
+export const ROUTER_BASENAME = IS_MOBILE_BUILD ? '/' : APP_BASE;
 
-/** Prefix an application-local absolute path with the deployment subpath. */
-export function appPath(path: string): string {
-  const absolutePath = path.startsWith('/') ? path : `/${path}`;
-  if (APP_BASENAME === '/') return absolutePath;
-  return `${APP_BASENAME}${absolutePath}`;
+const serverOrigin = IS_MOBILE_BUILD ? __FMR_MOBILE_SERVER_ORIGIN__ : '';
+export const API_BASE = `${serverOrigin}${APP_BASE}/api`;
+const WS_PATH = `${APP_BASE}/ws`;
+
+export function websocketUrl(path: string): string {
+  const origin = serverOrigin || window.location.origin;
+  const url = new URL(`${WS_PATH}${path.startsWith('/') ? path : `/${path}`}`, origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
 }

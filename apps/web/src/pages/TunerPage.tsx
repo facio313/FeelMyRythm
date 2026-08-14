@@ -1,108 +1,230 @@
-/** 튜너 (설계문서 §10) — MPM 피치 검출, A4 프리셋 */
-import { TunerEngine, type TunerReading } from '@feelmyrythm/audio';
-import { useEffect, useRef, useState } from 'react';
+import { TUNER_A4_PRESETS, TunerEngine, type TunerReading } from '@feelmyrythm/audio';
+import { Button, Card, StatusBadge, useToast } from '@feelmyrythm/ui';
+import { AlertTriangle, Mic, MicOff, Radio, Waves } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { PageHeader } from '../components/PageHeader';
 
-const A4_PRESETS = [415, 430, 440, 442, 443];
-
-export default function TunerPage() {
-  const engineRef = useRef<TunerEngine | null>(null);
-  const [active, setActive] = useState(false);
+export function TunerPage() {
+  const { notify } = useToast();
+  const [running, setRunning] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [a4, setA4] = useState(() => {
+    const stored = Number(localStorage.getItem('fmr.tuner.a4') ?? 440);
+    return TUNER_A4_PRESETS.some((preset) => preset === stored) ? stored : 440;
+  });
   const [reading, setReading] = useState<TunerReading | null>(null);
-  const [a4, setA4] = useState(440);
-  const [error, setError] = useState('');
-  const holdRef = useRef<{ reading: TunerReading; at: number } | null>(null);
+  const [startError, setStartError] = useState<string>();
+  const engineRef = useRef<TunerEngine | null>(null);
+  const startRequestRef = useRef(0);
+  const startPendingRef = useRef(false);
+  const presetRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
-    return () => engineRef.current?.stop();
+    const tuner = new TunerEngine({ windowSize: 4096 });
+    tuner.onReading = (nextReading) => {
+      if (engineRef.current === tuner) setReading(nextReading);
+    };
+    engineRef.current = tuner;
+    return () => {
+      startRequestRef.current += 1;
+      startPendingRef.current = false;
+      tuner.onReading = null;
+      tuner.stop();
+      engineRef.current = null;
+    };
   }, []);
 
-  const toggle = async () => {
-    if (active) {
-      engineRef.current?.stop();
-      engineRef.current = null;
-      setActive(false);
-      setReading(null);
-      return;
-    }
+  async function start() {
+    const engine = engineRef.current;
+    if (!engine || startPendingRef.current) return;
+    const request = ++startRequestRef.current;
+    startPendingRef.current = true;
+    setStarting(true);
+    engine.setA4(a4);
+    setStartError(undefined);
     try {
-      const engine = new TunerEngine();
-      engine.a4 = a4;
-      await engine.start((r) => {
-        // 순간 끊김에도 표시 유지 (0.5초 홀드)
-        if (r) {
-          holdRef.current = { reading: r, at: Date.now() };
-          setReading(r);
-        } else if (holdRef.current && Date.now() - holdRef.current.at > 500) {
-          setReading(null);
-        }
+      await engine.start();
+      if (request !== startRequestRef.current || engineRef.current !== engine) {
+        engine.stop();
+        return;
+      }
+      setRunning(true);
+    } catch (error) {
+      if (request !== startRequestRef.current || engineRef.current !== engine) {
+        engine.stop();
+        return;
+      }
+      const description = error instanceof Error ? error.message : String(error);
+      setStartError(description);
+      notify({
+        title: '마이크를 시작하지 못했습니다.',
+        description,
+        tone: 'danger',
       });
-      engineRef.current = engine;
-      setActive(true);
-      setError('');
-    } catch (e) {
-      setError('마이크 권한이 필요합니다: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      if (request === startRequestRef.current && engineRef.current === engine) {
+        startPendingRef.current = false;
+        setStarting(false);
+      }
     }
+  }
+
+  function stop() {
+    startRequestRef.current += 1;
+    startPendingRef.current = false;
+    engineRef.current?.stop();
+    setStarting(false);
+    setRunning(false);
+    setReading(null);
+  }
+
+  const setConcertA = (value: number) => {
+    setA4(value);
+    localStorage.setItem('fmr.tuner.a4', String(value));
+    engineRef.current?.setA4(value);
   };
 
-  useEffect(() => {
-    if (engineRef.current) engineRef.current.a4 = a4;
-  }, [a4]);
+  const handlePresetKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | undefined;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (index - 1 + TUNER_A4_PRESETS.length) % TUNER_A4_PRESETS.length;
+        break;
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (index + 1) % TUNER_A4_PRESETS.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = TUNER_A4_PRESETS.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const nextPreset = TUNER_A4_PRESETS[nextIndex];
+    if (nextPreset === undefined) return;
+    setConcertA(nextPreset);
+    presetRefs.current[nextIndex]?.focus();
+  };
 
-  const cents = reading?.cents ?? 0;
-  const inTune = reading !== null && Math.abs(cents) < 5;
+  const cents = Math.max(-50, Math.min(50, reading?.cents ?? 0));
+  const inTune = reading !== null && Math.abs(reading.cents) <= 3;
 
   return (
-    <div className="mx-auto flex max-w-md flex-col items-center gap-8">
-      <h1 className="section-title">튜너</h1>
-
-      <div
-        className="flex h-40 w-40 flex-col items-center justify-center rounded-full border-4"
-        style={{
-          borderColor: inTune ? 'var(--success)' : reading ? 'var(--border)' : 'var(--border)',
-          transition: 'border-color 0.2s',
-        }}
-      >
-        <span className="tnum text-5xl font-extralight">{reading?.noteName ?? '—'}</span>
-        <span className="tnum text-sm" style={{ color: 'var(--text-secondary)' }}>
-          {reading ? `${reading.freqHz.toFixed(1)} Hz` : '대기 중'}
-        </span>
-      </div>
-
-      {/* 센트 바늘 (±50) */}
-      <div className="relative h-10 w-full max-w-sm">
-        <div className="absolute inset-x-0 top-1/2 h-0.5" style={{ background: 'var(--border)' }} />
-        <div className="absolute left-1/2 top-1 h-8 w-0.5 -translate-x-1/2" style={{ background: 'var(--text-muted)' }} />
+    <div className="page page--narrow tuner-page">
+      <PageHeader
+        eyebrow="Chromatic tuner"
+        title="튜너"
+        description="AudioWorklet으로 수집한 단음 악기 신호를 YIN 알고리즘으로 분석합니다."
+        actions={
+          running ? (
+            <StatusBadge tone="success">
+              <Radio size={13} /> 마이크 사용 중
+            </StatusBadge>
+          ) : (
+            <StatusBadge>마이크 꺼짐</StatusBadge>
+          )
+        }
+      />
+      {startError ? (
+        <Card className="error-panel tuner-error" role="alert">
+          <AlertTriangle size={20} aria-hidden />
+          <div>
+            <strong>마이크 권한을 확인해 주세요.</strong>
+            <span>
+              브라우저 또는 OS 설정에서 이 사이트의 마이크를 허용한 뒤 다시 시도하세요. {startError}
+            </span>
+          </div>
+          <Button onClick={() => void start()}>다시 시도</Button>
+        </Card>
+      ) : null}
+      <Card className="tuner-card">
+        <div className="tuner-note" aria-live="polite" aria-atomic="true">
+          <span className="tuner-note__name">{reading?.name ?? '—'}</span>
+          <span className="tuner-note__octave">{reading?.octave ?? ''}</span>
+        </div>
         <div
-          className="absolute top-0 h-10 w-1 rounded"
-          style={{
-            left: `calc(50% + ${Math.max(-50, Math.min(50, cents))}%)`,
-            background: inTune ? 'var(--success)' : 'var(--accent)',
-            opacity: reading ? 1 : 0.2,
-          }}
-        />
-      </div>
-      <div className="tnum text-sm" style={{ color: 'var(--text-secondary)' }}>
-        {reading ? `${cents > 0 ? '+' : ''}${cents.toFixed(0)} cent` : '\u00a0'}
-      </div>
+          className="tuner-meter"
+          role="meter"
+          aria-label="튜닝 편차"
+          aria-valuemin={-50}
+          aria-valuemax={50}
+          aria-valuenow={reading ? cents : undefined}
+          aria-valuetext={
+            reading
+              ? `${reading.cents >= 0 ? '+' : ''}${reading.cents.toFixed(1)} cent`
+              : '음을 기다리는 중'
+          }
+        >
+          <div className="tuner-meter__ticks" aria-hidden>
+            {[-50, -25, 0, 25, 50].map((value) => (
+              <span key={value} style={{ left: `${value + 50}%` }}>
+                {value}
+              </span>
+            ))}
+          </div>
+          <div
+            className={inTune ? 'tuner-needle tuner-needle--in-tune' : 'tuner-needle'}
+            style={{
+              left: `${cents + 50}%`,
+              transform: `translateX(-50%) rotate(${cents * 0.8}deg)`,
+            }}
+          />
+        </div>
+        <div className="tuner-reading">
+          <strong className="fmr-tabular">
+            {reading
+              ? `${reading.cents >= 0 ? '+' : ''}${reading.cents.toFixed(1)} cent`
+              : '음을 연주하세요'}
+          </strong>
+          <span className="fmr-tabular">
+            {reading
+              ? `${reading.frequency.toFixed(2)} Hz · 명료도 ${Math.round(reading.clarity * 100)}%`
+              : '50–2000 Hz'}
+          </span>
+        </div>
+        <Button
+          className="tuner-mic-button"
+          variant={running ? 'danger' : 'primary'}
+          disabled={starting}
+          onClick={() => (running ? stop() : void start())}
+        >
+          {running ? <MicOff size={22} /> : <Mic size={22} />}
+          {starting ? '마이크 권한 확인 중…' : running ? '마이크 끄기' : '튜닝 시작'}
+        </Button>
+      </Card>
 
-      <div className="flex items-center gap-2">
-        <span className="label m-0">A4 기준</span>
-        {A4_PRESETS.map((v) => (
-          <button
-            key={v}
-            className="btn"
-            style={a4 === v ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-            onClick={() => setA4(v)}
-          >
-            {v}
-          </button>
-        ))}
-      </div>
-
-      <button className={active ? 'btn btn-danger' : 'btn btn-primary'} onClick={toggle}>
-        {active ? '정지' : '튜너 시작'}
-      </button>
-      {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
+      <Card className="concert-a-card">
+        <div>
+          <Waves size={22} aria-hidden />
+          <span>
+            <strong>기준음 A4</strong>
+            <small>고악기·오케스트라 피치에 맞춰 선택하세요.</small>
+          </span>
+        </div>
+        <div className="concert-a-options" role="radiogroup" aria-label="기준음 A4">
+          {TUNER_A4_PRESETS.map((preset, index) => (
+            <Button
+              key={preset}
+              ref={(element) => {
+                presetRefs.current[index] = element;
+              }}
+              role="radio"
+              aria-checked={a4 === preset}
+              tabIndex={a4 === preset ? 0 : -1}
+              variant={a4 === preset ? 'primary' : 'secondary'}
+              onClick={() => setConcertA(preset)}
+              onKeyDown={(event) => handlePresetKeyDown(event, index)}
+            >
+              <span className="fmr-tabular">{preset}</span>
+            </Button>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

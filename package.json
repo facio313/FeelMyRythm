@@ -1,20 +1,41 @@
 {
   "name": "feelmyrythm",
-  "private": true,
   "version": "0.1.0",
-  "workspaces": [
-    "packages/*",
-    "apps/web",
-    "apps/mobile"
-  ],
-  "scripts": {
-    "test": "npm run test -w @feelmyrythm/core",
-    "build": "npm run build -w @feelmyrythm/web",
-    "dev:web": "npm run dev -w @feelmyrythm/web",
-    "dev:server": "cd apps/server && uv run uvicorn app.main:app --reload --port 8000",
-    "test:server": "cd apps/server && uv run pytest -q"
-  },
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r --if-present build",
+    "dev": "corepack pnpm --filter @feelmyrythm/web dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "corepack pnpm -r --if-present typecheck",
+    "test": "corepack pnpm -r --if-present test",
+    "test:coverage": "corepack pnpm -r --if-present test:coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:pwa": "playwright test --config=e2e/pwa.config.ts",
+    "server:lint": "uv run --project apps/server ruff check apps/server && uv run --project apps/server mypy --config-file apps/server/pyproject.toml apps/server/app",
+    "server:test": "uv run --project apps/server pytest apps/server/tests",
+    "audio-quality:check": "python3 -m unittest discover -s scripts/audio_quality/tests -p 'test_*.py' && uv run --project apps/server ruff check scripts/audio_quality && uv run --project apps/server mypy --config-file apps/server/pyproject.toml scripts/audio_quality",
+    "protocol:generate": "uv run --project apps/server python apps/server/scripts/export_openapi.py && openapi-typescript apps/server/openapi.json -o packages/protocol/src/openapi.ts",
+    "protocol:check": "corepack pnpm protocol:generate && git diff --exit-code -- apps/server/openapi.json packages/protocol/src/openapi.ts",
+    "check": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm server:lint && corepack pnpm server:test && corepack pnpm audio-quality:check && corepack pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "openapi-typescript": "^7.10.1",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }
