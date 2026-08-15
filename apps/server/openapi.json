@@ -61,6 +61,150 @@
         "title": "AnnotationCreate",
         "type": "object"
       },
+      "AnnotationEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "annotation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnnotationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "annotationId": {
+            "title": "Annotationid",
+            "type": "string"
+          },
+          "authorId": {
+            "title": "Authorid",
+            "type": "string"
+          },
+          "eventId": {
+            "title": "Eventid",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "upsert",
+              "delete"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "private",
+              "project"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "repertoireId",
+          "operation",
+          "annotationId",
+          "revision",
+          "scope",
+          "authorId"
+        ],
+        "title": "AnnotationEventPayload",
+        "type": "object"
+      },
+      "AnnotationEventServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/AnnotationEventPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ANNOTATION_EVENT",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "AnnotationEventServerMessage",
+        "type": "object"
+      },
+      "AnnotationJoinedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repertoireId",
+          "userId"
+        ],
+        "title": "AnnotationJoinedPayload",
+        "type": "object"
+      },
+      "AnnotationJoinedServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/AnnotationJoinedPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ANNOTATION_JOINED",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "AnnotationJoinedServerMessage",
+        "type": "object"
+      },
       "AnnotationOut": {
         "additionalProperties": false,
         "properties": {
@@ -117,6 +261,51 @@
         "title": "AnnotationOut",
         "type": "object"
       },
+      "AnnotationPingMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/AnnotationPingPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ANNOTATION_PING",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "AnnotationPingMessage",
+        "type": "object"
+      },
+      "AnnotationPingPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "nonce": {
+            "title": "Nonce",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nonce"
+        ],
+        "title": "AnnotationPingPayload",
+        "type": "object"
+      },
       "AnnotationPoint": {
         "additionalProperties": false,
         "properties": {
@@ -138,6 +327,104 @@
           "y"
         ],
         "title": "AnnotationPoint",
+        "type": "object"
+      },
+      "AnnotationPongPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "nonce": {
+            "title": "Nonce",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nonce"
+        ],
+        "title": "AnnotationPongPayload",
+        "type": "object"
+      },
+      "AnnotationPongServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/AnnotationPongPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ANNOTATION_PONG",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "AnnotationPongServerMessage",
+        "type": "object"
+      },
+      "AnnotationSnapshotPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/AnnotationOut"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repertoireId",
+          "annotations"
+        ],
+        "title": "AnnotationSnapshotPayload",
+        "type": "object"
+      },
+      "AnnotationSnapshotServerMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/AnnotationSnapshotPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "ANNOTATION_SNAPSHOT",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "AnnotationSnapshotServerMessage",
         "type": "object"
       },
       "AnnotationUpdate": {
@@ -177,6 +464,52 @@
         ],
         "title": "AnnotationUpdate",
         "type": "object"
+      },
+      "AnnotationWsClientMessage": {
+        "discriminator": {
+          "mapping": {
+            "ANNOTATION_PING": "#/components/schemas/AnnotationPingMessage",
+            "JOIN_ANNOTATIONS": "#/components/schemas/JoinAnnotationsMessage"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/JoinAnnotationsMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotationPingMessage"
+          }
+        ]
+      },
+      "AnnotationWsServerMessage": {
+        "discriminator": {
+          "mapping": {
+            "ANNOTATION_EVENT": "#/components/schemas/AnnotationEventServerMessage",
+            "ANNOTATION_JOINED": "#/components/schemas/AnnotationJoinedServerMessage",
+            "ANNOTATION_PONG": "#/components/schemas/AnnotationPongServerMessage",
+            "ANNOTATION_SNAPSHOT": "#/components/schemas/AnnotationSnapshotServerMessage",
+            "ERROR": "#/components/schemas/ErrorServerMessage"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AnnotationJoinedServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotationSnapshotServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotationEventServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotationPongServerMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ErrorServerMessage"
+          }
+        ]
       },
       "Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post": {
         "properties": {
@@ -616,6 +949,56 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JoinAnnotationsMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/JoinAnnotationsPayload"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requestid"
+          },
+          "type": {
+            "const": "JOIN_ANNOTATIONS",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "JoinAnnotationsMessage",
+        "type": "object"
+      },
+      "JoinAnnotationsPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "repertoireId": {
+            "title": "Repertoireid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repertoireId",
+          "accessToken"
+        ],
+        "title": "JoinAnnotationsPayload",
         "type": "object"
       },
       "JoinRoomMessage": {
@@ -1077,6 +1460,101 @@
           "warnings"
         ],
         "title": "MusicXmlDraftOut",
+        "type": "object"
+      },
+      "OmrDraftCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedMeasureMapRevision": {
+            "minimum": 0.0,
+            "title": "Expectedmeasuremaprevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expectedMeasureMapRevision"
+        ],
+        "title": "OmrDraftCreate",
+        "type": "object"
+      },
+      "OmrDraftOut": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expectedMeasureMapRevision": {
+            "title": "Expectedmeasuremaprevision",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureRegion"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "requestedById": {
+            "title": "Requestedbyid",
+            "type": "string"
+          },
+          "scoreId": {
+            "title": "Scoreid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "scoreId",
+          "requestedById",
+          "expectedMeasureMapRevision",
+          "status",
+          "regions",
+          "warnings",
+          "error",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "OmrDraftOut",
         "type": "object"
       },
       "PasswordResetCompleteIn": {
@@ -2397,6 +2875,10 @@
               "TRANSPORT",
               "ROOM_ROSTER",
               "TEMPOMAP_UPDATED",
+              "ANNOTATION_JOINED",
+              "ANNOTATION_SNAPSHOT",
+              "ANNOTATION_EVENT",
+              "ANNOTATION_PONG",
               "ERROR"
             ],
             "title": "Type",
@@ -5089,6 +5571,53 @@
         ]
       }
     },
+    "/api/omr-drafts/{job_id}": {
+      "get": {
+        "operationId": "get_omr_draft_api_omr_drafts__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmrDraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Omr Draft",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
     "/api/practice-sessions/{session_id}": {
       "get": {
         "operationId": "get_practice_session_api_practice_sessions__session_id__get",
@@ -6835,6 +7364,63 @@
           }
         ],
         "summary": "Put Measure Map",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/scores/{score_id}/omr-drafts": {
+      "post": {
+        "operationId": "create_omr_draft_api_scores__score_id__omr_drafts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OmrDraftCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmrDraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Omr Draft",
         "tags": [
           "scores"
         ]

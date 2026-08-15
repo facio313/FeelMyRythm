@@ -38,9 +38,9 @@ export default defineConfig({
     : {
         webServer: {
           command:
-            'corepack pnpm --filter @feelmyrythm/core --filter @feelmyrythm/audio build && corepack pnpm --filter @feelmyrythm/web dev --host 127.0.0.1 --port 4173 --strictPort',
+            'corepack pnpm build:workspace-libs && corepack pnpm --filter @feelmyrythm/web build:e2e && corepack pnpm --filter @feelmyrythm/web preview --host 127.0.0.1 --port 4173 --strictPort',
           url: localBaseUrl,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
           stdout: 'pipe' as const,
           stderr: 'pipe' as const,

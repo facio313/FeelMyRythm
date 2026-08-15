@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import time
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
 from .access import require_repertoire
 from .models import DeviceCalibration
-from .rooms import Participant, RoomMembershipError, RoomMissingError, TransportPermissionError
+from .redis_rooms import RoomLockTimeoutError
+from .rooms import (
+    Participant,
+    Room,
+    RoomConnectionReplacedError,
+    RoomMembershipError,
+    RoomMissingError,
+    TransportPermissionError,
+)
 from .schemas import (
     JoinRoomMessage,
     PingMessage,
@@ -38,6 +46,29 @@ async def _error(
         {"code": code, "message": message},
         request_id,
     )
+
+
+async def _synchronize_participant(
+    websocket: WebSocket,
+    room: Room,
+    participant: Participant,
+    request_id: str | None,
+) -> Literal["ok", "retry", "closed"]:
+    try:
+        await websocket.app.state.rooms.synchronize_participant(room, participant)
+        return "ok"
+    except RoomConnectionReplacedError:
+        await websocket.close(code=4000, reason="replaced by a newer connection")
+    except RoomMembershipError as exc:
+        await _error(websocket, str(exc), "UNAUTHORIZED", request_id)
+        await websocket.close(code=4401)
+    except RoomMissingError:
+        await _error(websocket, "room not found or expired", "ROOM_NOT_FOUND", request_id)
+        await websocket.close(code=4404)
+    except RoomLockTimeoutError:
+        await _error(websocket, "room state is busy; retry", "ROOM_BUSY", request_id)
+        return "retry"
+    return "closed"
 
 
 @router.websocket("/ws/rooms/{room_id}")
@@ -89,7 +120,16 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                 calibrated=calibrated,
                 bluetooth=first.payload.bluetooth,
             )
-        await websocket.app.state.rooms.join(room, participant, first.request_id)
+        try:
+            await websocket.app.state.rooms.join(room, participant, first.request_id)
+        except RoomMissingError:
+            await _error(websocket, "room not found or expired", "ROOM_NOT_FOUND", first.request_id)
+            await websocket.close(code=4404)
+            return
+        except RoomLockTimeoutError:
+            await _error(websocket, "room state is busy; retry", "ROOM_BUSY", first.request_id)
+            await websocket.close(code=1013, reason="room state is busy; retry")
+            return
 
         while True:
             raw = await websocket.receive_json()
@@ -104,6 +144,16 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                     websocket, "JOIN_ROOM is only valid as the first frame", request_id=message.request_id
                 )
             elif isinstance(message, PingMessage):
+                sync_result = await _synchronize_participant(
+                    websocket,
+                    room,
+                    participant,
+                    message.request_id,
+                )
+                if sync_result != "ok":
+                    if sync_result == "closed":
+                        break
+                    continue
                 await websocket.app.state.rooms.send(
                     websocket,
                     "PONG",
@@ -113,23 +163,32 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                     },
                     message.request_id,
                 )
+                await websocket.app.state.rooms.send_transport(room, websocket, late_join=False)
             elif isinstance(message, ReportRttMessage):
-                try:
-                    websocket.app.state.rooms.refresh_participant_role(room, participant)
-                except RoomMembershipError as exc:
-                    await _error(websocket, str(exc), "UNAUTHORIZED", message.request_id)
-                    await websocket.close(code=4401)
-                    break
                 participant.rtt_ms = message.payload.rtt_ms
+                sync_result = await _synchronize_participant(
+                    websocket,
+                    room,
+                    participant,
+                    message.request_id,
+                )
+                if sync_result != "ok":
+                    if sync_result == "closed":
+                        break
+                    continue
                 await websocket.app.state.rooms.broadcast_roster(room)
             elif isinstance(message, ReadyMessage):
-                try:
-                    websocket.app.state.rooms.refresh_participant_role(room, participant)
-                except RoomMembershipError as exc:
-                    await _error(websocket, str(exc), "UNAUTHORIZED", message.request_id)
-                    await websocket.close(code=4401)
-                    break
                 participant.ready = message.payload.ready
+                sync_result = await _synchronize_participant(
+                    websocket,
+                    room,
+                    participant,
+                    message.request_id,
+                )
+                if sync_result != "ok":
+                    if sync_result == "closed":
+                        break
+                    continue
                 await websocket.app.state.rooms.broadcast_roster(room)
             else:
                 try:
@@ -156,6 +215,20 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                     await _error(websocket, str(exc), "UNAUTHORIZED", message.request_id)
                     await websocket.close(code=4401)
                     break
+                except RoomConnectionReplacedError:
+                    await websocket.close(code=4000, reason="replaced by a newer connection")
+                    break
+                except RoomMissingError:
+                    await _error(
+                        websocket,
+                        "room not found or expired",
+                        "ROOM_NOT_FOUND",
+                        message.request_id,
+                    )
+                    await websocket.close(code=4404)
+                    break
+                except RoomLockTimeoutError:
+                    await _error(websocket, "room state is busy; retry", "ROOM_BUSY", message.request_id)
                 except TransportPermissionError as exc:
                     await websocket.app.state.rooms.broadcast_roster(room)
                     await _error(websocket, str(exc), "FORBIDDEN", message.request_id)

@@ -11,13 +11,21 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
-from . import ws
+from . import annotation_ws, ws
+from .annotation_sync import AnnotationSyncHub
 from .config import Settings, load_settings
 from .db import Database
 from .mailer import MailDeliveryManager, MailSender, make_mail_sender
+from .omr import OmrDraftManager, OmrProcessor
 from .rooms import RoomManager
 from .routers import auth, calibrations, groups, repertoire, rooms, scores
-from .schemas import ServerEnvelope, WsClientMessage, WsServerMessage
+from .schemas import (
+    AnnotationWsClientMessage,
+    AnnotationWsServerMessage,
+    ServerEnvelope,
+    WsClientMessage,
+    WsServerMessage,
+)
 from .security import GoogleAuthVerifier, GoogleTokenVerifier, PasswordVerifier
 from .storage import make_storage
 from .storage_lifecycle import StorageLifecycleWorker
@@ -37,6 +45,8 @@ def _install_protocol_schemas(app: FastAPI) -> None:
         for name, adapter in {
             "WsClientMessage": TypeAdapter(WsClientMessage),
             "WsServerMessage": TypeAdapter(WsServerMessage),
+            "AnnotationWsClientMessage": TypeAdapter(AnnotationWsClientMessage),
+            "AnnotationWsServerMessage": TypeAdapter(AnnotationWsServerMessage),
             "ServerEnvelope": TypeAdapter(ServerEnvelope),
         }.items():
             generated = adapter.json_schema(ref_template="#/components/schemas/{model}")
@@ -54,6 +64,7 @@ def create_app(
     *,
     google_verifier: GoogleTokenVerifier | None = None,
     mail_sender: MailSender | None = None,
+    omr_processor: OmrProcessor | None = None,
 ) -> FastAPI:
     resolved = settings or load_settings()
 
@@ -70,25 +81,32 @@ def create_app(
         )
         storage = make_storage(resolved)
         storage_lifecycle = StorageLifecycleWorker(database, storage, resolved)
+        omr_drafts = OmrDraftManager(database, storage, resolved, omr_processor)
         app.state.settings = resolved
         app.state.database = database
         app.state.storage = storage
         app.state.storage_lifecycle = storage_lifecycle
+        app.state.omr_drafts = omr_drafts
         app.state.google_verifier = google_verifier or GoogleAuthVerifier()
         app.state.password_verifier = PasswordVerifier(resolved.password_verify_concurrency)
         app.state.mail_sender = sender
         app.state.mail_delivery_manager = mail_delivery_manager
         app.state.rooms = RoomManager(database, resolved)
+        app.state.annotation_sync = AnnotationSyncHub(database)
         rooms_started = False
         mail_delivery_manager.start()
         try:
             storage_lifecycle.start()
-            app.state.rooms.start()
+            omr_drafts.start()
+            app.state.annotation_sync.start()
             rooms_started = True
+            await app.state.rooms.start()
             yield
         finally:
+            await app.state.annotation_sync.stop()
             if rooms_started:
                 await app.state.rooms.stop()
+            await omr_drafts.stop()
             await storage_lifecycle.stop()
             await asyncio.to_thread(
                 mail_delivery_manager.close,
@@ -121,6 +139,7 @@ def create_app(
         calibrations.router,
         rooms.router,
         ws.router,
+        annotation_ws.router,
     ):
         application.include_router(router)
 
@@ -128,6 +147,7 @@ def create_app(
     def health() -> dict[str, bool]:
         with application.state.database.session_factory() as db:
             db.execute(text("SELECT 1"))
+        application.state.rooms.check_health()
         return {"ok": True}
 
     _install_protocol_schemas(application)

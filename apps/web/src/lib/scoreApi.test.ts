@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient } from './api';
 import {
   canonicalMeasureNumber,
+  createOmrDraft,
   deleteAnnotation,
   getMeasureMap,
   listAnnotations,
   listRepertoireAnnotations,
+  measureMapFromOmrDraft,
   putMeasureMap,
   scoreMeasureNumber,
   tempoMapFromMusicXmlDraft,
@@ -248,6 +250,37 @@ describe('score API', () => {
         regions: current.regions,
         measureNumberOffset: 0,
       }),
+    );
+  });
+
+  it('starts an OMR job with the current map revision and converts only a completed draft', async () => {
+    const draft = {
+      id: 'omr-1',
+      scoreId: score.id,
+      requestedById: 'leader-1',
+      expectedMeasureMapRevision: 4,
+      status: 'succeeded' as const,
+      regions: [{ page: 1, measureNumber: 1, rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } }],
+      warnings: ['best effort'],
+      error: null,
+      createdAt: '2026-08-15T00:00:00Z',
+      updatedAt: '2026-08-15T00:00:01Z',
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse(draft, 202));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createOmrDraft(client(), score.id, 4)).resolves.toEqual(draft);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({ expectedMeasureMapRevision: 4 }),
+    );
+    expect(measureMapFromOmrDraft(draft)).toEqual({
+      scoreId: score.id,
+      measureNumberOffset: 0,
+      regions: [{ id: 'omr-1:0', ...draft.regions[0]! }],
+      updatedAt: draft.updatedAt,
+    });
+    expect(() => measureMapFromOmrDraft({ ...draft, status: 'running' })).toThrow(
+      '완료되지 않은 OMR 작업',
     );
   });
 

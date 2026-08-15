@@ -60,7 +60,7 @@ interface ScoreSettingsRecord {
   measureMap: MeasureMapRecord;
 }
 
-interface AnnotationRecord {
+export interface AnnotationRecord {
   id: string;
   scoreId: string;
   authorId: string;
@@ -94,6 +94,23 @@ export interface MusicXmlDraft {
   jumps: Array<Record<string, unknown>>;
   countIn: Record<string, unknown>;
   warnings: string[];
+}
+
+export interface OmrDraft {
+  id: string;
+  scoreId: string;
+  requestedById: string;
+  expectedMeasureMapRevision: number;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  regions: Array<{
+    page: number;
+    measureNumber: number;
+    rect: { x: number; y: number; w: number; h: number };
+  }>;
+  warnings: string[];
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const canonicalMeasureNumber = (
@@ -323,13 +340,42 @@ export async function putMeasureMap(
   return measureMapFromRecord(record);
 }
 
+export async function createOmrDraft(
+  client: ApiClient,
+  scoreId: string,
+  expectedMeasureMapRevision: number,
+): Promise<OmrDraft> {
+  return client.post<OmrDraft>(`/scores/${segment(scoreId)}/omr-drafts`, {
+    expectedMeasureMapRevision,
+  });
+}
+
+export async function getOmrDraft(client: ApiClient, jobId: string): Promise<OmrDraft> {
+  return client.get<OmrDraft>(`/omr-drafts/${segment(jobId)}`);
+}
+
+export function measureMapFromOmrDraft(draft: OmrDraft): LocalMeasureMap {
+  if (draft.status !== 'succeeded') {
+    throw new Error('완료되지 않은 OMR 작업은 마디 맵으로 바꿀 수 없습니다.');
+  }
+  return {
+    scoreId: draft.scoreId,
+    measureNumberOffset: 0,
+    regions: draft.regions.map((region, index) => ({
+      id: `${draft.id}:${index}`,
+      ...region,
+    })),
+    updatedAt: draft.updatedAt,
+  };
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const numberOr = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
-function annotationFromRecord(record: AnnotationRecord): VersionedAnnotation {
+export function annotationFromRecord(record: AnnotationRecord): VersionedAnnotation {
   const kind =
     record.data.kind === 'pen' || record.data.kind === 'stamp' || record.data.kind === 'text'
       ? record.data.kind

@@ -80,8 +80,7 @@ export async function bootstrap(dependencies: BootstrapDependencies = {}): Promi
   try {
     const establishPwaRuntime = dependencies.establishPwaRuntime ?? establishSafePwaRuntime;
     await establishPwaRuntime({
-      enableServiceWorker:
-        dependencies.pwaEnabled ?? (import.meta.env.PROD && import.meta.env.MODE !== 'mobile'),
+      enableServiceWorker: dependencies.pwaEnabled ?? (import.meta.env.PROD && __FMR_PWA_ENABLED__),
     });
 
     const loadApp = dependencies.loadApp ?? (() => import('./App'));

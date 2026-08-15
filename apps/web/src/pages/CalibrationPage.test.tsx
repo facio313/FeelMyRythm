@@ -229,8 +229,10 @@ describe('CalibrationPage device and persistence states', () => {
 
     expect(await screen.findByText('무선 장치 감지됨')).toBeInTheDocument();
     expect(stopTrack).toHaveBeenCalledOnce();
-    expect(values.get('fmr.bluetoothDetectionStatus')).toBe('detected');
-    expect(values.get('fmr.bluetoothDetected')).toBe('true');
+    await waitFor(() => {
+      expect(values.get('fmr.bluetoothDetectionStatus')).toBe('detected');
+      expect(values.get('fmr.bluetoothDetected')).toBe('true');
+    });
   });
 
   it('supports not-detected, manual override, and devicechange while preserving the legacy key', async () => {
@@ -250,7 +252,7 @@ describe('CalibrationPage device and persistence states', () => {
     await act(async () => deviceChangeListener?.(new Event('devicechange')));
 
     expect(await screen.findByText('무선 장치 감지됨')).toBeInTheDocument();
-    expect(values.get('fmr.bluetoothDetected')).toBe('true');
+    await waitFor(() => expect(values.get('fmr.bluetoothDetected')).toBe('true'));
     cleanup();
     expect(mediaDevices.removeEventListener).toHaveBeenCalledWith(
       'devicechange',

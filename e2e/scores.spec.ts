@@ -12,6 +12,23 @@ const scoreSvg = `
   </g>
 </svg>`;
 
+const remoteRepertoireId = '55555555-5555-4555-8555-555555555555';
+const remoteScoreId = '66666666-6666-4666-8666-666666666666';
+const remoteAuthState = {
+  tokens: {
+    accessToken: 'scores-e2e-access',
+    refreshToken: 'scores-e2e-refresh',
+    tokenType: 'bearer',
+  },
+  user: {
+    id: 'leader-omr',
+    email: 'omr@example.test',
+    displayName: 'OMR Leader',
+    emailVerifiedAt: '2026-08-15T00:00:00Z',
+    hasPassword: true,
+  },
+};
+
 test('shows a recoverable error when a PDF cannot be rendered', async ({ page }) => {
   await page.goto('/feelmyrythm/scores');
   await page.locator('input[type="file"]').setInputFiles({
@@ -22,6 +39,253 @@ test('shows a recoverable error when a PDF cannot be rendered', async ({ page })
 
   await expect(page.getByRole('alert')).toContainText('PDF 페이지를 표시하지 못했습니다.');
   await expect(page.getByRole('button', { name: '다시 시도' })).toBeVisible();
+});
+
+test('previews a persistent Audiveris draft and saves it with its pinned map revision', async ({
+  page,
+}) => {
+  let jobPolls = 0;
+  let savedBody: Record<string, unknown> | undefined;
+  const regions = [
+    { page: 1, measureNumber: 1, rect: { x: 0.1, y: 0.2, w: 0.35, h: 0.12 } },
+    { page: 1, measureNumber: 2, rect: { x: 0.5, y: 0.2, w: 0.35, h: 0.12 } },
+  ];
+  await page.addInitScript((session) => {
+    localStorage.setItem('fmr.auth.session.v1', JSON.stringify(session));
+  }, remoteAuthState);
+  await page.addInitScript(() => {
+    class AnnotationSocket extends EventTarget {
+      static readonly OPEN = 1;
+      readonly OPEN = 1;
+      readyState = 0;
+
+      constructor(readonly url: string) {
+        super();
+        Object.assign(window, { __fmrAnnotationSocket: this });
+        queueMicrotask(() => {
+          this.readyState = AnnotationSocket.OPEN;
+          this.dispatchEvent(new Event('open'));
+        });
+      }
+
+      send(raw: string) {
+        const message = JSON.parse(raw) as { type: string; payload: { repertoireId?: string } };
+        if (message.type !== 'JOIN_ANNOTATIONS') return;
+        queueMicrotask(() => {
+          this.serverMessage({
+            type: 'ANNOTATION_JOINED',
+            payload: { repertoireId: message.payload.repertoireId, userId: 'leader-omr' },
+          });
+          this.serverMessage({
+            type: 'ANNOTATION_SNAPSHOT',
+            payload: { repertoireId: message.payload.repertoireId, annotations: [] },
+          });
+        });
+      }
+
+      close() {
+        this.readyState = 3;
+      }
+
+      serverMessage(message: unknown) {
+        this.dispatchEvent(
+          new MessageEvent('message', {
+            data: JSON.stringify(message),
+          }),
+        );
+      }
+    }
+    Object.assign(window, { WebSocket: AnnotationSocket });
+  });
+  await page.route('**/feelmyrythm/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/feelmyrythm/api', '');
+    const score = {
+      id: remoteScoreId,
+      repertoireId: remoteRepertoireId,
+      kind: 'full',
+      instrument: '',
+      filename: 'omr.svg',
+      contentType: 'image/svg+xml',
+      sizeBytes: scoreSvg.length,
+      uploadStatus: 'ready',
+      createdAt: '2026-08-15T00:00:00Z',
+      updatedAt: '2026-08-15T00:00:00Z',
+    };
+    const job = {
+      id: 'omr-job-1',
+      scoreId: remoteScoreId,
+      requestedById: remoteAuthState.user.id,
+      expectedMeasureMapRevision: 0,
+      status: jobPolls > 0 ? 'succeeded' : 'running',
+      regions: jobPolls > 0 ? regions : [],
+      warnings: jobPolls > 0 ? ['모든 마디를 확인하세요.'] : [],
+      error: null,
+      createdAt: '2026-08-15T00:00:00Z',
+      updatedAt: '2026-08-15T00:00:01Z',
+    };
+
+    if (request.method() === 'GET' && path === `/repertoire/${remoteRepertoireId}/scores`) {
+      await route.fulfill({ json: [score] });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/repertoire/${remoteRepertoireId}/access`) {
+      await route.fulfill({ json: { role: 'leader' } });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/repertoire/${remoteRepertoireId}/tempomap`) {
+      const data = {
+        id: 'omr-map',
+        repertoireItemId: remoteRepertoireId,
+        revision: 1,
+        totalMeasures: 2,
+        sections: [
+          {
+            id: 'omr-section',
+            startMeasure: 1,
+            endMeasure: 2,
+            timeSignature: { num: 4, denom: 4 },
+            bpm: 100,
+            beatUnit: 'quarter',
+          },
+        ],
+        jumps: [],
+        countIn: { measures: 1, useSectionMeter: true },
+      };
+      await route.fulfill({
+        json: {
+          id: data.id,
+          repertoireId: remoteRepertoireId,
+          revision: 1,
+          data,
+          createdById: remoteAuthState.user.id,
+          createdAt: '2026-08-15T00:00:00Z',
+        },
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/scores/${remoteScoreId}`) {
+      await route.fulfill({ json: score });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/scores/${remoteScoreId}/download`) {
+      await route.fulfill({
+        json: {
+          url: 'http://127.0.0.1:4173/omr-score.svg',
+          expiresAt: '2026-08-15T01:00:00Z',
+        },
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/scores/${remoteScoreId}/measure-map`) {
+      await route.fulfill({ status: 404, json: { detail: 'measure map not found' } });
+      return;
+    }
+    if (
+      request.method() === 'GET' &&
+      (path === `/repertoire/${remoteRepertoireId}/annotations` ||
+        path === `/repertoire/${remoteRepertoireId}/logs`)
+    ) {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    if (request.method() === 'POST' && path === `/scores/${remoteScoreId}/omr-drafts`) {
+      await route.fulfill({ status: 202, json: job });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/omr-drafts/omr-job-1') {
+      jobPolls += 1;
+      await route.fulfill({ json: { ...job, status: 'succeeded', regions } });
+      return;
+    }
+    if (request.method() === 'PUT' && path === `/scores/${remoteScoreId}/measure-map`) {
+      savedBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          id: 'saved-omr-map',
+          scoreId: remoteScoreId,
+          revision: 1,
+          regions,
+          measureNumberOffset: 0,
+          updatedAt: '2026-08-15T00:00:02Z',
+        },
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { detail: `${request.method()} ${path}` } });
+  });
+  await page.route('**/omr-score.svg', (route) =>
+    route.fulfill({ contentType: 'image/svg+xml', body: scoreSvg }),
+  );
+
+  await page.goto(`/feelmyrythm/repertoire/${remoteRepertoireId}/scores/${remoteScoreId}`);
+  await expect(page.getByText('Audiveris OMR 초안')).toBeVisible();
+  await expect(page.getByText('공동 필기 실시간 연결됨')).toBeVisible();
+  await page.evaluate(
+    ({ repertoireId, scoreId }) => {
+      const socket = (
+        window as unknown as {
+          __fmrAnnotationSocket: { serverMessage: (message: unknown) => void };
+        }
+      ).__fmrAnnotationSocket;
+      socket.serverMessage({
+        type: 'ANNOTATION_EVENT',
+        payload: {
+          eventId: 'live-annotation-upsert',
+          repertoireId,
+          operation: 'upsert',
+          annotationId: 'live-annotation-1',
+          revision: 1,
+          scope: 'project',
+          authorId: 'remote-member',
+          annotation: {
+            id: 'live-annotation-1',
+            scoreId,
+            authorId: 'remote-member',
+            scope: 'project',
+            revision: 1,
+            data: {
+              kind: 'text',
+              page: 1,
+              payload: { x: 0.5, y: 0.3, text: '실시간 포르테', anchorType: 'page' },
+            },
+            createdAt: '2026-08-15T00:00:00Z',
+            updatedAt: '2026-08-15T00:00:01Z',
+          },
+        },
+      });
+    },
+    { repertoireId: remoteRepertoireId, scoreId: remoteScoreId },
+  );
+  await expect(page.getByText('실시간 포르테')).toBeVisible();
+  await page.evaluate((repertoireId) => {
+    const socket = (
+      window as unknown as {
+        __fmrAnnotationSocket: { serverMessage: (message: unknown) => void };
+      }
+    ).__fmrAnnotationSocket;
+    socket.serverMessage({
+      type: 'ANNOTATION_EVENT',
+      payload: {
+        eventId: 'live-annotation-delete',
+        repertoireId,
+        operation: 'delete',
+        annotationId: 'live-annotation-1',
+        revision: 1,
+        scope: 'project',
+        authorId: 'remote-member',
+        annotation: null,
+      },
+    });
+  }, remoteRepertoireId);
+  await expect(page.getByText('실시간 포르테')).toHaveCount(0);
+  await page.getByRole('button', { name: 'OMR 초안 생성' }).click();
+  await expect(page.getByText('2개 마디 영역을 인식했습니다.')).toBeVisible();
+  await page.getByRole('button', { name: '초안 영역 미리보기' }).click();
+  await expect(page.locator('.measure-region--omr-draft')).toHaveCount(2);
+  await page.getByRole('button', { name: '초안을 마디 맵으로 저장' }).click();
+  await expect(page.getByText(/2마디 매핑됨/)).toBeVisible();
+  expect(savedBody).toMatchObject({ expectedRevision: 0, regions });
 });
 
 test('maps a score, preserves canonical measure across parts, and persists practice-aware pen notes', async ({

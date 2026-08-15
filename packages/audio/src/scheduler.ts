@@ -1,5 +1,6 @@
 import {
   canCancelScheduledAudio,
+  canScheduleAudioBatch,
   type AudioEngine,
   type CancellableAudioEngine,
   type ClickKind,
@@ -228,14 +229,27 @@ export class LookaheadScheduler {
   tick(): void {
     if (!this.running) return;
     const now = this.engine.now();
-    const horizon = now + this.lookaheadSec;
+    const horizon =
+      this.engine.schedulingStrategy === 'entireTimeline'
+        ? Number.POSITIVE_INFINITY
+        : now + this.lookaheadSec;
     let consumed = 0;
+    const due: ScheduledBeat[] = [];
     for (const pending of this.pending) {
       const beat = pending.scheduled;
       if (beat.audioTime > horizon + Number.EPSILON) break;
       consumed += 1;
       if (beat.audioTime < now - this.lateToleranceSec) continue;
-      this.engine.scheduleClick(beat.audioTime, beat.kind);
+      due.push(beat);
+    }
+    if (canScheduleAudioBatch(this.engine) && due.length > 0) {
+      this.engine.scheduleClicks(
+        due.map((beat) => ({ atAudioTime: beat.audioTime, kind: beat.kind })),
+      );
+    } else {
+      for (const beat of due) this.engine.scheduleClick(beat.audioTime, beat.kind);
+    }
+    for (const beat of due) {
       this.beatQueue.push(beat);
       this.onScheduledBeat?.(beat);
     }

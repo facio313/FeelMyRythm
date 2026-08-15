@@ -390,7 +390,7 @@ flowchart LR
 
 - `vite build --mode mobile`은 상대 경로 `./`를 사용해 [`apps/mobile/web`](../apps/mobile)로 출력한다.
 - 네이티브 번들은 로컬 HTML을 열지만 REST/WS는 `https://bonifacio.work/feelmyrythm/api|ws`로 보낸다.
-- [`nativeBridge.ts`](../apps/mobile/src/nativeBridge.ts)가 keep-awake, haptics, system bar와 딥링크를 추상화한다.
+- [`nativeAudio.ts`](../apps/mobile/src/nativeAudio.ts)가 Web Audio와 네이티브 오디오 clock 사이의 batch scheduling 경계를 제공하고, [`nativeBridge.ts`](../apps/mobile/src/nativeBridge.ts)가 keep-awake, haptics, system bar와 딥링크를 추상화한다.
 - [`secureStorage.ts`](../apps/mobile/src/secureStorage.ts)는 브라우저 localStorage와 iOS Keychain/Android Keystore 경계를 분리한다.
 - 웹 번들 변경 뒤에는 `corepack pnpm --filter @feelmyrythm/mobile sync`로 세 복사본과 동적 chunk까지 검증한다.
 
@@ -751,7 +751,7 @@ corepack pnpm --filter @feelmyrythm/mobile open:ios
 corepack pnpm --filter @feelmyrythm/mobile open:android
 ```
 
-`sync`는 Vite mobile mode의 상대 base로 `apps/mobile/web`을 만들고 iOS·Android native public에 복사한 뒤 code-split 자산까지 검증한다. signing archive/bundle은 별도 환경변수와 실제 Xcode/Android SDK가 필요하며 자세한 내용은 [`apps/mobile/README.md`](../apps/mobile/README.md)를 따른다.
+`sync`는 Vite mobile mode의 상대 base로 `apps/mobile/web`을 만들고 iOS·Android native public에 복사한 뒤 code-split 자산과 native audio plugin 계약까지 검증한다. signing archive/bundle은 별도 환경변수와 실제 Xcode/Android SDK가 필요하며 자세한 내용은 [`apps/mobile/README.md`](../apps/mobile/README.md)를 따른다.
 
 ## 16. 검증 명령과 테스트 배치
 
@@ -801,6 +801,8 @@ flowchart LR
 | 객체 저장 | S3 bucket/region/credentials, CORS, staging lifecycle |
 | 모바일 | signing, AASA/assetlinks, store metadata와 privacy URL |
 | 배포 | GHCR access, 제한 deploy key, rollback·post-health 절차 |
+
+실제 값을 주입한 뒤에는 [운영 preflight와 release runbook](./OPERATIONS.md)을 따른다. 기본 preflight는 read-only이며 S3 canary와 test mail은 각각 명시적인 opt-in flag가 있어야만 실행한다.
 
 ## 18. 반드시 지킬 불변 조건
 

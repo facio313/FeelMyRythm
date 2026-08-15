@@ -49,6 +49,7 @@ def test_production_settings_require_secret_postgres_and_migrations() -> None:
         "smtp_from_email": "noreply@example.com",
         "web_app_base_url": "https://example.com/feelmyrythm",
         "public_api_base_url": "https://example.com/feelmyrythm",
+        "redis_url": "redis://redis.example.test:6379/0",
     }
     with pytest.raises(ValidationError, match="FMR_STORAGE_BACKEND=s3"):
         Settings(**production_base)
@@ -159,6 +160,14 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     assert settings.late_upload_guard_seconds == 86400
     assert settings.staging_redelete_interval_seconds == 900
     assert settings.local_upload_temp_ttl_seconds == 3600
+    assert settings.omr_enabled is False
+    assert settings.omr_audiveris_command == "audiveris"
+    assert settings.omr_worker_count == 1
+    assert settings.omr_timeout_seconds == 300
+    assert settings.redis_url == "redis://USER:PASSWORD@redis:6379/0"
+    assert settings.room_presence_ttl_seconds == 45
+    assert settings.room_lock_seconds == 5
+    assert settings.room_lock_wait_seconds == 2
 
 
 def test_production_compose_passes_required_runtime_settings() -> None:
@@ -167,6 +176,8 @@ def test_production_compose_passes_required_runtime_settings() -> None:
 
     required_lines = {
         "FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}",
+        "FMR_REDIS_URL: ${FMR_REDIS_URL:?set the shared Redis URL}",
+        "FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}",
         "FMR_STORAGE_BACKEND: s3",
         "FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}",
         "FMR_S3_REGION: ${FMR_S3_REGION:?set the production score bucket region}",
@@ -180,6 +191,8 @@ def test_production_compose_passes_required_runtime_settings() -> None:
         "FMR_PENDING_UPLOAD_GRACE_SECONDS: ${FMR_PENDING_UPLOAD_GRACE_SECONDS:-900}",
         "FMR_LATE_UPLOAD_GUARD_SECONDS: ${FMR_LATE_UPLOAD_GUARD_SECONDS:-86400}",
         "FMR_STAGING_REDELETE_INTERVAL_SECONDS: ${FMR_STAGING_REDELETE_INTERVAL_SECONDS:-900}",
+        "FMR_OMR_ENABLED: ${FMR_OMR_ENABLED:-false}",
+        "FMR_OMR_AUDIVERIS_COMMAND: ${FMR_OMR_AUDIVERIS_COMMAND:-audiveris}",
     }
     assert all(line in compose for line in required_lines)
 
@@ -198,6 +211,8 @@ def test_production_settings_reject_known_jwt_sentinels(unsafe_secret: str) -> N
 def test_openapi_exposes_http_and_websocket_source_schemas(client: TestClient) -> None:
     document = client.get("/openapi.json").json()
     assert "/api/repertoire/{repertoire_id}/tempomap" in document["paths"]
+    assert "/api/scores/{score_id}/omr-drafts" in document["paths"]
+    assert "/api/omr-drafts/{job_id}" in document["paths"]
     for auth_path in (
         "/api/auth/register",
         "/api/auth/verify-email",
@@ -263,6 +278,7 @@ def test_all_declared_domain_tables_are_created(client: TestClient) -> None:
         "scores",
         "storage_deletion_jobs",
         "measure_maps",
+        "omr_draft_jobs",
         "annotations",
         "practice_logs",
         "todos",

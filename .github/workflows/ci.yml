@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - codex
-      - 'codex/**'
+      - 'codex-feature-*'
       - dev
       - main
 
@@ -39,6 +39,55 @@ jobs:
       - run: pnpm test:e2e
       - run: pnpm test:e2e:pwa
 
+  android-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @feelmyrythm/mobile sync:android
+      - name: Install pinned Android native toolchain
+        run: sdkmanager 'platforms;android-36' 'ndk;27.3.13750724' 'cmake;3.22.1'
+      - name: Compile Android native debug shell
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --stacktrace
+
+  ios-native:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @feelmyrythm/mobile sync:ios
+      - name: Compile iOS simulator shell without signing
+        run: >-
+          xcodebuild
+          -project apps/mobile/ios/App/App.xcodeproj
+          -scheme App
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
   server:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -56,6 +105,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:8.2.7-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -66,14 +124,18 @@ jobs:
           version: 0.11.9
           python-version: 3.13.15
       - run: uv sync --project apps/server --frozen --all-groups
+      - run: uv run --project apps/server ruff format --check apps/server
       - run: uv run --project apps/server ruff check apps/server
-      - run: uv run --project apps/server mypy --config-file apps/server/pyproject.toml apps/server/app
+      - run: uv run --project apps/server mypy --config-file apps/server/pyproject.toml apps/server/app apps/server/scripts/production_preflight.py
       - run: uv run --project apps/server pytest apps/server/tests
+        env:
+          FMR_REDIS_TEST_URL: redis://127.0.0.1:6379/0
       - name: Test Alembic against PostgreSQL
         env:
           FMR_POSTGRES_TEST_URL: postgresql+psycopg://feelmyrythm:ci-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/feelmyrythm
         run: uv run --project apps/server pytest apps/server/tests/test_postgres_migration.py
       - run: uv run --project apps/server python -m unittest discover -s scripts/audio_quality/tests -p 'test_*.py'
+      - run: uv run --project apps/server ruff format --check scripts/audio_quality
       - run: uv run --project apps/server ruff check scripts/audio_quality
       - run: uv run --project apps/server mypy --config-file apps/server/pyproject.toml scripts/audio_quality
 

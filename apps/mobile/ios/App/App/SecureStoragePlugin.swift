@@ -89,5 +89,6 @@ public final class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
 public final class FMRBridgeViewController: CAPBridgeViewController {
     public override func capacitorDidLoad() {
         bridge?.registerPluginInstance(SecureStoragePlugin())
+        bridge?.registerPluginInstance(NativeAudioPlugin())
     }
 }

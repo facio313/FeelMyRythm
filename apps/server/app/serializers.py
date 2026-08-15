@@ -11,6 +11,7 @@ from .models import (
     Group,
     GroupMember,
     MeasureMap,
+    OmrDraftJob,
     PracticeLog,
     Project,
     RepertoireItem,
@@ -26,6 +27,7 @@ from .schemas import (
     GroupOut,
     LogAnchor,
     MeasureMapOut,
+    OmrDraftOut,
     PracticeLogOut,
     ProjectOut,
     RepertoireOut,
@@ -127,6 +129,10 @@ def score_out(score: Score) -> ScoreOut:
 
 def measure_map_out(row: MeasureMap) -> MeasureMapOut:
     return MeasureMapOut.model_validate(row)
+
+
+def omr_draft_out(row: OmrDraftJob) -> OmrDraftOut:
+    return OmrDraftOut.model_validate(row)
 
 
 def annotation_out(row: Annotation) -> AnnotationOut:

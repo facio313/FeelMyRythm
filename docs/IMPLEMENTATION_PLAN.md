@@ -32,6 +32,8 @@ graph LR
 ## 2. 단계별 상세
 
 > 기간은 1인 개발, 파트타임 기준의 감. 각 단계 끝의 **DoD(완료 기준)** 를 통과해야 다음 단계로.
+>
+> 모든 Phase의 DoD에는 문서 동기화가 포함된다. 앱의 코드·설정·스키마·UI·빌드·배포 동작이 바뀌면 해당 내용을 설명하는 기존 설계·기능·사용자·아키텍처·운영 문서를 같은 변경에서 함께 수정해야 한다. 관련 문서가 이전 동작을 설명한 채 남아 있으면 해당 Phase나 작업은 완료가 아니다.
 
 ### Phase 0 — 프로젝트 기반 (약 1주)
 
@@ -87,7 +89,7 @@ graph LR
 
 | 작업 | 내용 |
 |---|---|
-| 서버 WS | FastAPI WebSocket 엔드포인트: 방 관리, `TransportState`, PING/PONG 서버 타임스탬프 — uvloop, 수신 즉시 타임스탬프 기록 (§6.2–6.3) |
+| 서버 WS | FastAPI WebSocket 엔드포인트: Redis 공유 방 상태·presence TTL·분산 lock·pub/sub fan-out, `TransportState`, PING/PONG 권위 상태 복구 — uvloop, 수신 즉시 타임스탬프 기록 (§6.2–6.3) |
 | core: 시계동기 | min-RTT 필터 offset 추정기 + 드리프트 평활 — **순수 함수로 작성, 시뮬레이션 단위 테스트** (지연 분포를 주입해 오차 검증) |
 | 클라: 변환 체인 | serverTime → performance.now() → audioCtx time 매핑 유지 |
 | 세션 UX | 방 개설/입장, 참가자 목록·RTT 표시, 리더 권한, "26마디부터 시작" → 전원 예비박 동기 시작. ready/start/stop은 acknowledgment/5초 timeout 전까지 pending으로 중복 전송을 막고, clipboard 실패 시 선택 가능한 초대 URL을 제공 (§6.4) |
@@ -113,7 +115,7 @@ graph LR
 | 권한 | `/repertoire/:id/access` role로 leader/owner 전용 upload·metadata·map UI를 선제 제한하고 서버에서 재검증 |
 | 오프라인 | IndexedDB schema v3의 `userId` 복합 키 store에 원격 템포맵·악보·map·주석·연습일지를 성공 응답 단위로 snapshot. 구형 unscoped remote row는 migration에서 폐기하고 network failure만 현재 사용자의 읽기 전용 fallback 허용 |
 | compact UI | 좁은 화면의 악보 도구를 safe-area를 고려한 fixed bottom overlay로 배치하고 악보를 reflow하지 않음 |
-| (후순위 서브트랙) | Audiveris 서버 OMR로 PDF 매핑 초안 생성 — 정확도 검증 후에만 노출 |
+| OMR 보조 | Audiveris 서버 OMR을 persistent background job으로 실행하고 PDF/이미지 마디맵 초안을 생성. 시작 revision을 고정하며 미리보기·명시적 저장 전에는 기존 맵을 변경하지 않음 |
 
 **DoD**: MusicXML 업로드 → 마디 수 자동 인식·템포맵 초안 생성. PDF 업로드 → 10분 내 수동 매핑 완료 → atomic settings 저장·재생 하이라이트·파트보 점프 동작. network failure에서는 snapshot으로 열리고, 403/404/409/5xx는 캐시로 숨기지 않는다.
 
@@ -121,7 +123,7 @@ graph LR
 
 | 작업 | 내용 |
 |---|---|
-| 필기 | 악보 벡터 오버레이 (펜/텍스트/셈여림 스탬프). `/repertoire/:id/annotations`의 measure anchor는 파트 간 재투영하고 page anchor는 원본 score에 유지. 개인/프로젝트 공유 (§7.3) |
+| 필기 | 악보 벡터 오버레이 (펜/텍스트/셈여림 스탬프). `/repertoire/:id/annotations`의 measure anchor는 파트 간 재투영하고 page anchor는 원본 score에 유지. 개인/프로젝트 공유와 REST commit 이후 WebSocket fan-out, 재접속 DB snapshot 복구 (§7.3) |
 | 연습일지 | 레파토리별 일지 (마크다운), 마디 위치 앵커 첨부 |
 | 할일 | 일지·레파토리에 Todo (담당자·기한·완료), 프로젝트 대시보드에 집계 |
 
@@ -142,8 +144,8 @@ graph LR
 |---|---|
 | Capacitor | iOS/Android 프로젝트, 아이콘·스플래시, 딥링크(방 초대 링크) |
 | 설치 첫인상 | PWA `id`/scope/start URL·`ko-KR`·category, 분리된 `any`/`maskable` PNG, Apple touch icon을 검증. 다크/라이트는 `theme-color`와 Capacitor SystemBars까지 동기화 |
-| 네이티브 보강 | 오디오 세션(무음 스위치 무시·백그라운드 유지), Keep-Awake, Haptics(박 동기 진동) |
-| 지연 검증 | 실기기 매트릭스에서 Phase 4 DoD 재검증. **미달 시에만** `NativeAudioEngine` 플러그인 개발 (§5.1 — 인터페이스 뒤 교체라 상위 코드 무변경) |
+| 네이티브 보강 | `NativeAudioEngine` 구현 완료: iOS AVAudioEngine/.playback session, Android Oboe low-latency callback/foreground media service, 전체 timeline batch·경계 취소. Keep-Awake와 Haptics도 동일 bridge 수명에 연결 |
+| 지연 검증 | 실기기 매트릭스에서 Phase 4 DoD 재검증. iOS/Android 녹음 파형으로 화면 꺼짐·인터럽트·기기 간 ±10ms를 확인하고 calibration 값을 기록 |
 | 출시 | TestFlight/내부 테스트 → 스토어 심사 |
 
 **DoD**: 실기기 2대(iOS+Android)에서 화면 꺼짐 상태 포함 동기 재생 오차 기준 충족, 스토어 제출.
@@ -175,7 +177,7 @@ graph LR
 
 | 리스크 | 영향 | 대응·검증 시점 |
 |---|---|---|
-| WKWebView 오디오 지연/백그라운드 제약 | 아키텍처 재고 수준 | **Phase 1 말 스모크 테스트로 조기 확인**. 문제 시 NativeAudioEngine 경로 (인터페이스 교체만) |
+| WKWebView 오디오 지연/백그라운드 제약 | 아키텍처 재고 수준 | NativeAudioEngine 전체-timeline queue와 Android foreground service로 WebView timer 의존 제거. 실제 기기 파형 gate는 유지 |
 | 블루투스 출력 지연 | 동기 체감 파괴 | 설계에 캘리브레이션·경고 내장 (Phase 4). 제거 불가능한 물리 제약으로 UX로 관리 |
 | OMR(PDF 자동 인식) 정확도 | 기대 불일치 | 수동 매핑을 기본 경로로 설계, OMR은 초안 보조로만. Phase 5 후반에 별도 검증 |
 | 반복 구조 엣지케이스 (D.S. al Coda 중첩 등) | 잘못된 전개 | 실제 악보 픽스처 테스트 축적, 편집기에서 전개 결과 미리보기 제공 |

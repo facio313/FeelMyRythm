@@ -7,12 +7,14 @@ const MOBILE_SERVER_ORIGIN = 'https://bonifacio.work';
 
 export default defineConfig(({ mode }) => {
   const mobile = mode === 'mobile';
+  const e2e = mode === 'e2e';
 
   return {
     base: mobile ? './' : '/feelmyrythm/',
     ...(mobile ? { build: { outDir: '../mobile/web', emptyOutDir: true } } : {}),
     define: {
       __FMR_MOBILE_SERVER_ORIGIN__: JSON.stringify(MOBILE_SERVER_ORIGIN),
+      __FMR_PWA_ENABLED__: JSON.stringify(!mobile && !e2e),
     },
     plugins: [
       react(),
@@ -27,7 +29,7 @@ export default defineConfig(({ mode }) => {
           ]
         : []),
       VitePWA({
-        disable: mobile,
+        disable: mobile || e2e,
         filename: 'sw.js',
         injectRegister: false,
         registerType: 'autoUpdate',

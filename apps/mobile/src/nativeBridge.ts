@@ -3,6 +3,9 @@ import { App } from '@capacitor/app';
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { subscribeToDeepLinks } from './deepLink';
+import { createNativeAudioEngine, type NativeAudioEngine } from './nativeAudio';
+
+export { NativeAudioEngine, createNativeAudioEngine } from './nativeAudio';
 
 export { platformStorage } from './secureStorage';
 
@@ -13,6 +16,7 @@ export interface NativeBridge {
   beatHaptic(accent: 0 | 1 | 2): Promise<void>;
   setSystemBarsTheme(theme: 'dark' | 'light'): Promise<void>;
   onDeepLink(listener: (path: string) => void): Promise<() => void>;
+  createAudioEngine?(options?: { volume?: number }): NativeAudioEngine | null;
 }
 
 export const nativeBridge: NativeBridge = {
@@ -44,5 +48,8 @@ export const nativeBridge: NativeBridge = {
   async onDeepLink(listener) {
     if (!Capacitor.isNativePlatform()) return () => undefined;
     return subscribeToDeepLinks(App, listener);
+  },
+  createAudioEngine(options) {
+    return createNativeAudioEngine(options);
   },
 };

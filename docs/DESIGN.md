@@ -41,7 +41,7 @@
 | 영역 | 선택 | 
 |---|---|
 | 언어 | 클라이언트: TypeScript / 서버: **Python 3.13+** |
-| 코어/오디오 | 순수 TS 패키지 + Web Audio API (AudioWorklet) — 박 계산·시계동기는 클라이언트에서 실행되므로 TS 유지 |
+| 코어/오디오 | 순수 TS 타임라인·시계동기 + 웹 Web Audio / 모바일 AVAudioEngine·Oboe 어댑터 |
 | 웹 프론트 | **React 19 (최신) + Vite**, PWA |
 | UI 스타일 | Tailwind CSS 4 + Radix UI 프리미티브 — 상세는 [UI 디자인 시스템](./UI_DESIGN.md) |
 | 모바일 포팅 | **Capacitor** (웹 빌드를 그대로 래핑 + 네이티브 플러그인) |
@@ -58,13 +58,13 @@
 |---|---|---|---|---|
 | 웹 개발자 역량 재사용 | 100% | 부분 (RN 학습 필요) | 낮음 (Dart) | 100% |
 | 코드 공유율 (웹↔앱) | UI까지 거의 전부 | 로직만, UI 재작업 | 웹은 canvas 렌더로 별도 세계 | 전부 |
-| 오디오 정밀 타이밍 | Web Audio로 충분, 필요시 플러그인 | 네이티브 모듈 필수 | 플러그인 필수 | Web Audio |
+| 오디오 정밀 타이밍 | Web Audio + 네이티브 플러그인 구현 | 네이티브 모듈 필수 | 플러그인 필수 | Web Audio |
 | iOS 백그라운드/오디오 세션 제어 | 플러그인으로 가능 | 가능 | 가능 | **불가/제한** (탈락 사유) |
 | 스토어 배포 | O | O | O | X (iOS 설치 UX 열악) |
 
 - **PWA만으로는 부족한 이유**: iOS Safari는 화면 잠금/백그라운드에서 오디오·타이머를 강하게 제한한다. 연습 중 화면이 꺼지면 메트로놈이 멈추는 것은 치명적. → 네이티브 셸 필요.
 - **React Native가 아닌 이유**: 이 앱의 성능 민감 지점은 UI가 아니라 **오디오 스케줄링**이다. RN을 써도 오디오는 결국 네이티브 모듈을 짜야 하므로, UI까지 재작업하는 RN보다 웹 UI를 그대로 쓰고 오디오만 필요시 플러그인화하는 Capacitor가 유리하다.
-- **알려진 리스크와 대응**: WKWebView(iOS)의 오디오 출력 지연이 기기별로 다를 수 있음 → §6.5 기기별 캘리브레이션으로 흡수. 그래도 부족하면 `AudioEngine` 인터페이스 구현체만 네이티브(AVAudioEngine/Oboe) 플러그인으로 교체(§5.1). 코어 로직은 무변경.
+- **알려진 리스크와 대응**: WKWebView 타이머 중단을 오디오 경로에서 제거하기 위해 `AudioEngine` 인터페이스 뒤에 AVAudioEngine/Oboe 구현을 둔다(§5.1). 기기별 출력 지연은 §6.5 캘리브레이션으로 흡수하고 실제 파형으로 최종 검증한다. 코어 로직은 플랫폼과 무관하다.
 - **native 인증 경계**: Google Identity Services의 웹 button은 Capacitor WebView에서 신뢰할 수 있는 native 로그인으로 간주하지 않는다. Sign in with Apple과 native Google 연동 전까지 모든 Capacitor 빌드는 Google button/SDK를 숨기고 이메일 가입·로그인·복구만 제공한다. 브라우저 배포는 기존 Google 로그인을 유지한다.
 
 ### 2.3 서버 스택 근거 — Python은 적합, 프레임워크는 Flask보다 FastAPI
@@ -82,7 +82,7 @@
 
 - Flask로 불가능한 것은 아니다(Flask-SocketIO로 구현 사례 많음). 하지만 이 서버의 핵심이 WS 게이트웨이인 이상, WS가 1급 기능인 FastAPI가 구조적으로 맞다. CRUD 작성 경험도 Flask와 거의 동일한 난이도.
 - BaaS 실시간 기능(Firebase RTDB, Supabase Realtime)은 지연 제어가 안 되므로 배제 — 자체 WS 게이트웨이 필수라는 결론은 동일.
-- 운영 형태: FastAPI 단일 앱으로 REST + WS를 함께 서빙. **WS 게이트웨이는 단일 프로세스(단일 이벤트 루프)로 시작** — 방 상태가 메모리에 있으므로. 수평 확장이 필요해지면 Redis pub/sub 도입. 서버 시각은 epoch 기준 `time.time_ns()`를 ms로 변환해 사용.
+- 운영 형태: FastAPI 앱이 REST + WS를 함께 서빙한다. production은 공유 Redis에 room metadata·participant presence·분산 lock을 두고 pub/sub으로 각 인스턴스의 로컬 WebSocket에 transport/roster/replacement를 fan-out한다. 서버 시각은 epoch 기준 `time.time_ns()`를 ms로 변환해 사용한다.
 
 ---
 
@@ -111,7 +111,7 @@ graph TB
     subgraph Client["클라이언트 (웹 / Capacitor 앱)"]
         UI["UI 레이어<br/>비주얼 메트로놈 · 에디터 · 악보뷰어"]
         CORE["core<br/>TempoMap → PerformanceTimeline<br/>ClockSync 추정기"]
-        AE["AudioEngine<br/>(Web Audio 룩어헤드 스케줄러)"]
+        AE["AudioEngine<br/>Web Audio lookahead / AVAudioEngine / Oboe"]
         TUNER["TunerEngine<br/>(마이크 → 피치 검출)"]
         UI --> CORE
         CORE --> AE
@@ -255,6 +255,7 @@ buildCountIn(map: TempoMap, from: seekPoint): Beat[]                            
 
 ```ts
 interface AudioEngine {
+  readonly schedulingStrategy?: 'lookahead' | 'entireTimeline';
   /** 절대 시각(오디오 클럭 기준)에 클릭음 예약 */
   scheduleClick(atAudioTime: number, kind: 'downbeat' | 'beat' | 'sub' | 'countIn'): void;
   now(): number;                    // 오디오 클럭 현재 시각 (초)
@@ -263,8 +264,9 @@ interface AudioEngine {
 }
 ```
 
-- 기본 구현: `WebAudioEngine` (웹·Capacitor 공용).
-- iOS/Android에서 지연·백그라운드 문제가 실측으로 확인될 때만 `NativeAudioEngine`(Capacitor 플러그인, AVAudioEngine/Oboe)을 추가. 상위 코드는 무변경.
+- 브라우저 구현: `WebAudioEngine`. Worker는 120ms lookahead 안의 `AudioBuffer`만 예약한다.
+- Capacitor 구현: `NativeAudioEngine`. 전체 타임라인을 한 native batch로 넘겨 WebView가 suspend되어도 iOS `AVAudioEngine` 또는 Android Oboe callback이 절대 monotonic 시각에 클릭을 재생한다.
+- `cancelScheduledFrom()`은 다음 마디 revision 전환과 stop에서 경계 이후 native queue를 제거한다. Android는 `mediaPlayback` foreground service, audio focus, MediaStyle stop action, 자연 종료 deadline을 함께 관리한다.
 
 ### 5.2 룩어헤드 스케줄러 (Two Clocks 패턴)
 
@@ -345,7 +347,7 @@ interface TransportState {
 - 로컬 타임라인 자연 종료 시 리더가 `CMD_STOP`을 보내 서버를 `stopped`로 정리한다. `4000/4400/4404` close는 terminal, `4401`은 현재 auth session에서 token을 한 번만 갱신한 뒤 재거부 시 terminal이다.
 - ready/start/stop 조작은 전송 즉시 pending으로 전환해 같은 명령을 다시 보내지 않는다. 서버의 roster/transport 변경으로 acknowledgment하거나 5초 후 timeout·재시도 안내로 해제한다.
 - 초대 링크 복사가 Clipboard API 미지원·권한 거부로 실패하면 같은 URL을 선택 가능한 read-only input과 재시도 조작으로 제공한다.
-- 서버 상태는 메모리 + (멀티 인스턴스 시) Redis. 방은 마지막 참가자 퇴장 후 일정 시간 뒤 소멸.
+- production 서버 상태는 PostgreSQL `PracticeSession` + Redis room state를 권위 경계로 삼고, 프로세스 메모리에는 해당 인스턴스의 socket만 둔다. presence는 heartbeat TTL, room은 logical expiry sorted set으로 회수하며 PING 응답 뒤 최신 transport를 다시 보내 pub/sub 유실을 복구한다.
 
 ### 6.4 동기 시작 시퀀스
 
@@ -384,7 +386,7 @@ sequenceDiagram
 | 포맷 | 마디 인식 | 렌더링 | 비고 |
 |---|---|---|---|
 | **MusicXML** (.musicxml/.mxl) | **자동·정확** — 마디 수, 박자표, 템포 지시, 도돌이까지 파싱 → **템포맵 초안 자동 생성** | OSMD(OpenSheetMusicDisplay) 또는 Verovio | 최우선 지원 경로 |
-| PDF | 수동 매핑 기본 + (후순위) 서버측 OMR(Audiveris)로 초안 보조 | PDF.js | OMR은 베스트 에포트로 고지 |
+| PDF/이미지 | 수동 매핑 기본 + 서버측 OMR(Audiveris) 초안 보조 | PDF.js | persistent job·bounded worker·원자 claim/orphan 복구, revision 고정, OMR은 베스트 에포트로 고지하고 자동 저장 금지 |
 | 이미지 (스캔/사진) | PDF와 동일 | 이미지 뷰어 | |
 
 - **수동 마디 매핑 도구**: 시스템(단) 단위로 드래그 → 마디 경계선 클릭으로 분할 → 마디 번호 자동 부여(시작 번호·못갖춘마디 보정 가능). 페이지당 1분 내 작업이 목표. 결과물이 `MeasureMap`.
@@ -424,7 +426,7 @@ interface MeasureMap {
 - 펜·시스템 매핑은 pointer down에서 현재 `pointerId`를 capture하고 move/up에서 그 pointer만 반영한다. 스타일러스 필기 중 다른 손가락이 닿아도 스트로크에 섞지 않으며 `pointercancel`은 임시 상태를 폐기한다.
 - page anchor는 원본 `scoreId`·page의 정규화 좌표에 고정한다. measure anchor는 곡의 canonical 마디 번호를 저장하고, 파트 전환 시 대상 `MeasureMap`과 `measureNumberOffset`으로 다시 배치한다.
 - `GET /repertoire/:id/annotations`는 그 곡의 모든 Score에서 현재 사용자가 볼 수 있는 project 주석과 본인의 private 주석을 반환해 measure anchor의 파트 간 이동을 지원한다. 기존 `GET /scores/:id/annotations`는 score별 조회 경로로 유지한다.
-- 저장은 JSON(원본 파일 불변). 공유 범위: 개인 / 프로젝트 공유. 실시간 공동 필기는 후순위(단순 last-write-wins부터).
+- 저장은 JSON(원본 파일 불변). 공유 범위는 개인 / 프로젝트 공유다. mutation은 revision을 검사하는 REST commit만 수행하고, `/ws/repertoires/:id/annotations`는 commit 이후의 upsert/delete만 fan-out한다. 첫 `JOIN_ANNOTATIONS`와 모든 재접속에서 가시 주석의 DB snapshot을 보내 누락 이벤트를 복구하며, private 이벤트는 작성자에게만 전달한다. client는 `(annotationId, revision, delete tombstone)`으로 중복·역순 이벤트를 무시한다.
 
 ### 7.4 권한·오프라인 snapshot
 
@@ -536,4 +538,4 @@ POST /rooms                       # 연습 세션 개설 → roomId
 | 오프라인 | IndexedDB v3에 원격 템포맵·악보·map·주석·연습일지를 `userId`별로 snapshot. Editor를 포함해 network failure에만 현재 사용자의 읽기 전용 fallback을 허용하고 server-authoritative error는 숨기지 않음. 동기 세션은 온라인 필수 |
 | PWA 보안 이행 | App mount 전 `fmr-api` fail-closed purge + versioned worker 제어권 + 전환 후 재-purge. Service Worker와 nginx의 API cache 금지. 실제 legacy worker/cache upgrade E2E로 검증 |
 | 공급망·런타임 | Python·Node·nginx·uv·PostgreSQL image를 tag+digest로 고정. 생성한 ARM64 server/web image의 default CMD, migration, non-root/read-only 경계, nginx SPA/header/API proxy를 push 전 실제 container smoke |
-| 확장 | WS 게이트웨이 수평 확장 시 Redis pub/sub. 초기엔 단일 인스턴스 |
+| 확장 | Redis shared room state + participant TTL + distributed lock + pub/sub fan-out. Redis 없는 development/test만 단일 인스턴스 메모리 fallback |

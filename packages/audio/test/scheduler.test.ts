@@ -69,6 +69,16 @@ class ManualTimer implements SchedulerTimer {
   }
 }
 
+class NativeBatchEngine extends FakeEngine {
+  readonly schedulingStrategy = 'entireTimeline' as const;
+  batchCalls = 0;
+
+  scheduleClicks(clicks: readonly { atAudioTime: number; kind: ClickKind }[]): void {
+    this.batchCalls += 1;
+    for (const click of clicks) this.scheduleClick(click.atAudioTime, click.kind);
+  }
+}
+
 function timeline(secondMeasureBeats = [1, 1.5]): PerformanceTimelineLike {
   return {
     tempoMapRevision: 1,
@@ -150,6 +160,27 @@ describe('LookaheadScheduler', () => {
       isCountIn: true,
       countdown: 2,
     });
+  });
+
+  it('hands the full timeline to a native batch engine before WebView suspension', () => {
+    const engine = new NativeBatchEngine();
+    const scheduler = new LookaheadScheduler(engine, { timer: new ManualTimer() });
+    engine.time = 10;
+
+    scheduler.start({
+      timeline: timeline(),
+      anchorTimelineTimeSec: 0,
+      anchorAudioTime: 10,
+    });
+
+    expect(engine.batchCalls).toBe(1);
+    expect(engine.scheduled).toEqual([
+      { at: 10, kind: 'downbeat' },
+      { at: 10.5, kind: 'beat' },
+      { at: 11, kind: 'downbeat' },
+      { at: 11.5, kind: 'sub' },
+    ]);
+    expect(scheduler.beatQueue.size).toBe(4);
   });
 });
 

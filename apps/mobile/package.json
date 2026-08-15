@@ -13,9 +13,11 @@
     "test": "vitest run",
     "verify:web-assets": "node scripts/verify-web-assets.mjs web",
     "verify:native-assets": "node scripts/verify-web-assets.mjs web ios/App/App/public android/app/src/main/assets/public",
-    "sync": "corepack pnpm run build:web && cap sync && corepack pnpm run verify:native-assets",
-    "sync:ios": "corepack pnpm run build:web && cap sync ios && node scripts/verify-web-assets.mjs web ios/App/App/public",
-    "sync:android": "corepack pnpm run build:web && cap sync android && node scripts/verify-web-assets.mjs web android/app/src/main/assets/public",
+    "verify:native-audio": "node scripts/verify-native-audio.mjs",
+    "generate:association-files": "node scripts/association-files.mjs",
+    "sync": "corepack pnpm run build:web && cap sync && corepack pnpm run verify:native-assets && corepack pnpm run verify:native-audio",
+    "sync:ios": "corepack pnpm run build:web && cap sync ios && node scripts/verify-web-assets.mjs web ios/App/App/public && corepack pnpm run verify:native-audio",
+    "sync:android": "corepack pnpm run build:web && cap sync android && node scripts/verify-web-assets.mjs web android/app/src/main/assets/public && corepack pnpm run verify:native-audio",
     "archive:ios": "corepack pnpm run sync:ios && sh scripts/archive-ios.sh",
     "verify:android-signing": "node scripts/verify-android-signing.mjs",
     "bundle:android": "corepack pnpm run verify:android-signing && corepack pnpm run sync:android && cd android && ./gradlew bundleRelease",
@@ -23,6 +25,7 @@
     "open:android": "cap open android"
   },
   "dependencies": {
+    "@feelmyrythm/audio": "workspace:*",
     "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",

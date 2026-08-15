@@ -4,7 +4,7 @@ import {
   OffsetServerPerformanceMapper,
   ServerAudioMapper,
   TimelineTransport,
-  WebAudioEngine,
+  type AudioEngine,
   type ScheduledBeat,
 } from '@feelmyrythm/audio';
 import {
@@ -18,6 +18,7 @@ import {
 import { nativeBridge } from '@feelmyrythm/mobile';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BeatFrame } from '@feelmyrythm/ui';
+import { createPlatformAudioEngine, type ManagedAudioEngine } from './audioEngine';
 
 export interface MetronomePosition {
   measureNumber: number;
@@ -87,7 +88,7 @@ function primaryBeatCount(timeline: PerformanceTimeline, entryIndex: number): nu
 }
 
 function frameFor(
-  engine: WebAudioEngine | null,
+  engine: AudioEngine | null,
   transport: TimelineTransport | null,
   timeline: PerformanceTimeline,
   fallback: MetronomePosition,
@@ -167,10 +168,11 @@ export function lateJoinEntry(
 export function useMetronome(map: TempoMap): MetronomeController {
   const timeline = useMemo(() => expandTimeline(map), [map]);
   const timelineRef = useRef(timeline);
-  const engineRef = useRef<WebAudioEngine | null>(null);
+  const engineRef = useRef<ManagedAudioEngine | null>(null);
   const transportRef = useRef<TimelineTransport | null>(null);
   const wakeLockRef = useRef<BrowserWakeLockAdapter | null>(null);
   const playbackPowerActiveRef = useRef(false);
+  const playbackRequestedRef = useRef(false);
   const audioClockRef = useRef(new AudioPerformanceMapper());
   const startRequestRef = useRef(0);
   const visualOffsetMsRef = useRef(readVisualOffsetMs());
@@ -198,6 +200,21 @@ export function useMetronome(map: TempoMap): MetronomeController {
     void wakeLock.acquire().catch(() => undefined);
     void nativeBridge.keepAwake();
   }, []);
+
+  const bindExternalStop = useCallback(
+    (engine: ManagedAudioEngine) => {
+      if (!('onStopped' in engine)) return;
+      engine.onStopped = () => {
+        if (engineRef.current !== engine) return;
+        startRequestRef.current += 1;
+        playbackRequestedRef.current = false;
+        transportRef.current?.stop();
+        setPlaying(false);
+        releasePlaybackPower();
+      };
+    },
+    [releasePlaybackPower],
+  );
 
   useEffect(() => {
     const previous = timelineRef.current;
@@ -267,6 +284,7 @@ export function useMetronome(map: TempoMap): MetronomeController {
   useEffect(
     () => () => {
       startRequestRef.current += 1;
+      playbackRequestedRef.current = false;
       transportRef.current?.stop();
       releasePlaybackPower();
       void wakeLockRef.current?.dispose();
@@ -278,57 +296,74 @@ export function useMetronome(map: TempoMap): MetronomeController {
   const start = useCallback(
     async (measure = 1, pass = 1, withCountIn = true) => {
       const request = ++startRequestRef.current;
+      playbackRequestedRef.current = true;
       visualOffsetMsRef.current = readVisualOffsetMs();
       transportRef.current?.stop();
       const engine =
         engineRef.current ??
-        new WebAudioEngine({
-          volume: Number(localStorage.getItem('fmr.volume') ?? 0.75),
-        });
+        createPlatformAudioEngine(Number(localStorage.getItem('fmr.volume') ?? 0.75));
       engineRef.current = engine;
-      await engine.start();
-      if (request !== startRequestRef.current) return;
-      audioClockRef.current.clear();
-      audioClockRef.current.sampleNow(engine, performance.now());
-      const transport = new TimelineTransport(engine);
-      transportRef.current = transport;
-      const anchorTimelineTimeSec = seekPoint(timelineRef.current, measure, pass);
-      const storedCountIn = localStorage.getItem('fmr.countInMeasures');
-      const preferredCountInMeasures: 1 | 2 =
-        storedCountIn === '1' || storedCountIn === '2'
-          ? (Number(storedCountIn) as 1 | 2)
-          : map.countIn.measures;
-      const localPlaybackMap = {
-        ...map,
-        countIn: { ...map.countIn, measures: preferredCountInMeasures },
-      };
-      const rawCountIn = withCountIn ? buildCountIn(localPlaybackMap, anchorTimelineTimeSec) : [];
-      const countInBeatCount = Math.max(1, ...rawCountIn.map((beat) => beat.beatIndex + 1));
-      const countIn = rawCountIn.map((beat) => ({
-        timeSec: beat.timeSec - anchorTimelineTimeSec,
-        accent: beat.accent,
-        countdown: countInBeatCount - beat.beatIndex,
-      }));
-      const firstRelative = countIn[0]?.timeSec ?? 0;
-      const anchorAudioTime = engine.now() + 0.12 - Math.min(0, firstRelative);
-      await transport.start({
-        timeline: timelineRef.current,
-        anchorTimelineTimeSec,
-        anchorAudioTime,
-        countIn,
-      });
-      if (request !== startRequestRef.current) {
-        transport.stop();
-        return;
+      bindExternalStop(engine);
+      let transport: TimelineTransport | null = null;
+      try {
+        await engine.start();
+        if (request !== startRequestRef.current) {
+          if (!playbackRequestedRef.current) engine.stop();
+          return;
+        }
+        audioClockRef.current.clear();
+        audioClockRef.current.sampleNow(engine, performance.now());
+        transport = new TimelineTransport(engine);
+        transportRef.current = transport;
+        const anchorTimelineTimeSec = seekPoint(timelineRef.current, measure, pass);
+        const storedCountIn = localStorage.getItem('fmr.countInMeasures');
+        const preferredCountInMeasures: 1 | 2 =
+          storedCountIn === '1' || storedCountIn === '2'
+            ? (Number(storedCountIn) as 1 | 2)
+            : map.countIn.measures;
+        const localPlaybackMap = {
+          ...map,
+          countIn: { ...map.countIn, measures: preferredCountInMeasures },
+        };
+        const rawCountIn = withCountIn ? buildCountIn(localPlaybackMap, anchorTimelineTimeSec) : [];
+        const countInBeatCount = Math.max(1, ...rawCountIn.map((beat) => beat.beatIndex + 1));
+        const countIn = rawCountIn.map((beat) => ({
+          timeSec: beat.timeSec - anchorTimelineTimeSec,
+          accent: beat.accent,
+          countdown: countInBeatCount - beat.beatIndex,
+        }));
+        const firstRelative = countIn[0]?.timeSec ?? 0;
+        const anchorAudioTime = engine.now() + 0.12 - Math.min(0, firstRelative);
+        await transport.start({
+          timeline: timelineRef.current,
+          anchorTimelineTimeSec,
+          anchorAudioTime,
+          countIn,
+        });
+        if (request !== startRequestRef.current) {
+          transport.stop();
+          if (!playbackRequestedRef.current) engine.stop();
+          return;
+        }
+        transport.scheduler.onEnded = () => {
+          playbackRequestedRef.current = false;
+          setPlaying(false);
+          releasePlaybackPower();
+        };
+        keepPlaybackAwake();
+        setPlaying(true);
+      } catch (error) {
+        if (request === startRequestRef.current) {
+          playbackRequestedRef.current = false;
+          transport?.stop();
+          engine.stop();
+          setPlaying(false);
+          releasePlaybackPower();
+        }
+        throw error;
       }
-      transport.scheduler.onEnded = () => {
-        setPlaying(false);
-        releasePlaybackPower();
-      };
-      keepPlaybackAwake();
-      setPlaying(true);
     },
-    [keepPlaybackAwake, map, releasePlaybackPower],
+    [bindExternalStop, keepPlaybackAwake, map, releasePlaybackPower],
   );
 
   const startSynchronized = useCallback(
@@ -346,78 +381,97 @@ export function useMetronome(map: TempoMap): MetronomeController {
       withCountIn?: boolean;
     }) => {
       const request = ++startRequestRef.current;
+      playbackRequestedRef.current = true;
       visualOffsetMsRef.current = readVisualOffsetMs();
       transportRef.current?.stop();
       const engine =
         engineRef.current ??
-        new WebAudioEngine({
-          volume: Number(localStorage.getItem('fmr.volume') ?? 0.75),
-        });
+        createPlatformAudioEngine(Number(localStorage.getItem('fmr.volume') ?? 0.75));
       engineRef.current = engine;
-      await engine.start();
-      if (request !== startRequestRef.current) return;
-      audioClockRef.current.clear();
-      audioClockRef.current.sampleNow(engine, performance.now());
-      const transport = new TimelineTransport(engine);
-      transportRef.current = transport;
-      const timeline = timelineRef.current;
-      let anchorTimelineTimeSec = seekPoint(timeline, measure, pass);
-      const rawCountIn = withCountIn ? buildCountIn(map, anchorTimelineTimeSec) : [];
-      let countIn = rawCountIn.map((beat, index) => ({
-        timeSec: beat.timeSec - anchorTimelineTimeSec,
-        accent: beat.accent,
-        countdown:
-          Math.max(...rawCountIn.map((candidate) => candidate.beatIndex)) + 1 - beat.beatIndex,
-        index,
-      }));
-      const firstRelative = countIn[0]?.timeSec ?? 0;
-      const mapper = new ServerAudioMapper(
-        new OffsetServerPerformanceMapper(serverOffsetMs),
-        audioClockRef.current,
-        () => engine.outputLatency(),
-      );
-      const manualOffsetSec = Number(localStorage.getItem('fmr.calibrationOffsetMs') ?? 0) / 1_000;
-      let anchorAudioTime =
-        mapper.serverToScheduledAudio(serverStartTimeMs, manualOffsetSec) - firstRelative;
+      bindExternalStop(engine);
+      let transport: TimelineTransport | null = null;
+      try {
+        await engine.start();
+        if (request !== startRequestRef.current) {
+          if (!playbackRequestedRef.current) engine.stop();
+          return;
+        }
+        audioClockRef.current.clear();
+        audioClockRef.current.sampleNow(engine, performance.now());
+        transport = new TimelineTransport(engine);
+        transportRef.current = transport;
+        const timeline = timelineRef.current;
+        let anchorTimelineTimeSec = seekPoint(timeline, measure, pass);
+        const rawCountIn = withCountIn ? buildCountIn(map, anchorTimelineTimeSec) : [];
+        let countIn = rawCountIn.map((beat, index) => ({
+          timeSec: beat.timeSec - anchorTimelineTimeSec,
+          accent: beat.accent,
+          countdown:
+            Math.max(...rawCountIn.map((candidate) => candidate.beatIndex)) + 1 - beat.beatIndex,
+          index,
+        }));
+        const firstRelative = countIn[0]?.timeSec ?? 0;
+        const mapper = new ServerAudioMapper(
+          new OffsetServerPerformanceMapper(serverOffsetMs),
+          audioClockRef.current,
+          () => engine.outputLatency(),
+        );
+        const manualOffsetSec =
+          Number(localStorage.getItem('fmr.calibrationOffsetMs') ?? 0) / 1_000;
+        let anchorAudioTime =
+          mapper.serverToScheduledAudio(serverStartTimeMs, manualOffsetSec) - firstRelative;
 
-      if (anchorAudioTime + firstRelative < engine.now() - 0.02) {
-        const mainServerTime = serverStartTimeMs - firstRelative * 1000;
-        const serverNow = performance.now() + serverOffsetMs;
-        const anchorStillSchedulable = anchorAudioTime >= engine.now() - 0.02;
-        const currentTimelineTime = anchorStillSchedulable
-          ? anchorTimelineTimeSec
-          : anchorTimelineTimeSec + Math.max(0, serverNow - mainServerTime) / 1000;
-        const nextEntry = lateJoinEntry(timeline, currentTimelineTime, anchorStillSchedulable);
-        if (!nextEntry) throw new Error('동기 타임라인의 다음 마디 경계가 없습니다.');
-        anchorTimelineTimeSec = nextEntry.startTimeSec;
-        const nextBoundaryServerTime =
-          mainServerTime + (nextEntry.startTimeSec - seekPoint(timeline, measure, pass)) * 1000;
-        anchorAudioTime = mapper.serverToScheduledAudio(nextBoundaryServerTime, manualOffsetSec);
-        countIn = [];
-      }
+        if (anchorAudioTime + firstRelative < engine.now() - 0.02) {
+          const mainServerTime = serverStartTimeMs - firstRelative * 1000;
+          const serverNow = performance.now() + serverOffsetMs;
+          const anchorStillSchedulable = anchorAudioTime >= engine.now() - 0.02;
+          const currentTimelineTime = anchorStillSchedulable
+            ? anchorTimelineTimeSec
+            : anchorTimelineTimeSec + Math.max(0, serverNow - mainServerTime) / 1000;
+          const nextEntry = lateJoinEntry(timeline, currentTimelineTime, anchorStillSchedulable);
+          if (!nextEntry) throw new Error('동기 타임라인의 다음 마디 경계가 없습니다.');
+          anchorTimelineTimeSec = nextEntry.startTimeSec;
+          const nextBoundaryServerTime =
+            mainServerTime + (nextEntry.startTimeSec - seekPoint(timeline, measure, pass)) * 1000;
+          anchorAudioTime = mapper.serverToScheduledAudio(nextBoundaryServerTime, manualOffsetSec);
+          countIn = [];
+        }
 
-      await transport.start({
-        timeline,
-        anchorTimelineTimeSec,
-        anchorAudioTime,
-        countIn,
-      });
-      if (request !== startRequestRef.current) {
-        transport.stop();
-        return;
+        await transport.start({
+          timeline,
+          anchorTimelineTimeSec,
+          anchorAudioTime,
+          countIn,
+        });
+        if (request !== startRequestRef.current) {
+          transport.stop();
+          if (!playbackRequestedRef.current) engine.stop();
+          return;
+        }
+        transport.scheduler.onEnded = () => {
+          playbackRequestedRef.current = false;
+          setPlaying(false);
+          releasePlaybackPower();
+        };
+        keepPlaybackAwake();
+        setPlaying(true);
+      } catch (error) {
+        if (request === startRequestRef.current) {
+          playbackRequestedRef.current = false;
+          transport?.stop();
+          engine.stop();
+          setPlaying(false);
+          releasePlaybackPower();
+        }
+        throw error;
       }
-      transport.scheduler.onEnded = () => {
-        setPlaying(false);
-        releasePlaybackPower();
-      };
-      keepPlaybackAwake();
-      setPlaying(true);
     },
-    [keepPlaybackAwake, map, releasePlaybackPower],
+    [bindExternalStop, keepPlaybackAwake, map, releasePlaybackPower],
   );
 
   const stop = useCallback(() => {
     startRequestRef.current += 1;
+    playbackRequestedRef.current = false;
     transportRef.current?.stop();
     setPlaying(false);
     releasePlaybackPower();

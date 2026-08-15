@@ -9,7 +9,7 @@ import {
   FileMusic,
   FileText,
   Highlighter,
-  Map,
+  Map as MapIcon,
   MousePointer2,
   PenLine,
   Play,
@@ -37,6 +37,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MarkdownContent } from '../components/MarkdownContent';
 import { ApiError } from '../lib/api';
+import { AnnotationSyncClient, type AnnotationConnectionState } from '../lib/annotationClient';
 import { useAuth } from '../lib/auth';
 import { localDb, type LocalMeasureMap, type LocalScore } from '../lib/localDb';
 import { musicXmlToTempoMap, readMusicXml, renderMusicXml } from '../lib/musicxml';
@@ -49,13 +50,16 @@ import {
   canonicalMeasureNumber,
   createAnnotation,
   createMusicXmlDraft,
+  createOmrDraft,
   deleteAnnotation as deleteRemoteAnnotation,
   downloadScore,
   getMeasureMap as getRemoteMeasureMap,
+  getOmrDraft,
   getScore as getRemoteScore,
   listRepertoireAnnotations,
   listScores as listRemoteScores,
   localScoreListItem,
+  measureMapFromOmrDraft,
   putMeasureMap as putRemoteMeasureMap,
   scoreMeasureNumber,
   scoreListItem,
@@ -64,6 +68,7 @@ import {
   updateScoreSettings,
   uploadScore,
   type MusicXmlDraft,
+  type OmrDraft,
   type ScoreListItem,
   type ScoreRecord,
   type VersionedAnnotation,
@@ -92,6 +97,14 @@ interface PendingTempoDraft {
   draft: MusicXmlDraft;
   filename: string;
   repertoireItemId: string;
+}
+
+function annotationRevision(annotation: unknown, fallback = 0): number {
+  if (typeof annotation !== 'object' || annotation === null || !('revision' in annotation)) {
+    return fallback;
+  }
+  const revision = annotation.revision;
+  return typeof revision === 'number' && Number.isInteger(revision) ? revision : fallback;
 }
 
 function localPracticeMarkers(repertoireItemId: string, scoreId: string): PracticeAnchorMarker[] {
@@ -393,7 +406,7 @@ export function ScoresPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { notify } = useToast();
-  const { client, user } = useAuth();
+  const { client, tokens, user } = useAuth();
   const queryString = searchParams.toString();
   const queryRepertoireId = searchParams.get('repertoire')?.trim() || undefined;
   const requestedMeasure = Number(searchParams.get('measure'));
@@ -413,6 +426,9 @@ export function ScoresPage() {
   const [measureMap, setMeasureMap] = useState<LocalMeasureMap>();
   const [measureMapRevision, setMeasureMapRevision] = useState(0);
   const [annotations, setAnnotations] = useState<VersionedAnnotation[]>([]);
+  const annotationVersionsRef = useRef(new Map<string, { revision: number; deleted: boolean }>());
+  const [annotationConnectionState, setAnnotationConnectionState] =
+    useState<AnnotationConnectionState>('idle');
   const [currentMeasure, setCurrentMeasure] = useState(initialMeasure);
   const currentMeasureRef = useRef(initialMeasure);
   const [mode, setMode] = useState<AnnotationMode>('view');
@@ -431,6 +447,10 @@ export function ScoresPage() {
   const [instrument, setInstrument] = useState('');
   const [measureNumberOffset, setMeasureNumberOffset] = useState(0);
   const [pendingTempoDraft, setPendingTempoDraft] = useState<PendingTempoDraft>();
+  const [omrDraft, setOmrDraft] = useState<OmrDraft>();
+  const [omrRequesting, setOmrRequesting] = useState(false);
+  const [omrPollingError, setOmrPollingError] = useState<string>();
+  const [showOmrPreview, setShowOmrPreview] = useState(false);
   const [savingMetadata, setSavingMetadata] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [usingOfflineCache, setUsingOfflineCache] = useState(false);
@@ -648,7 +668,12 @@ export function ScoresPage() {
       setSelected(undefined);
       setMeasureMap(undefined);
       setMeasureMapRevision(0);
+      setOmrDraft(undefined);
+      setOmrRequesting(false);
+      setOmrPollingError(undefined);
+      setShowOmrPreview(false);
       setAnnotations([]);
+      annotationVersionsRef.current.clear();
       setPracticeMarkers([]);
       setUsingOfflineCache(false);
       setSavingMetadata(false);
@@ -756,6 +781,12 @@ export function ScoresPage() {
           setFirstMeasure(nextMeasureNumber(remoteMap?.map));
           setMeasureMapRevision(remoteMap?.revision ?? 0);
           setMeasureNumberOffset(remoteMap?.map.measureNumberOffset ?? 0);
+          annotationVersionsRef.current = new Map(
+            notes.map((annotation) => [
+              annotation.id,
+              { revision: annotationRevision(annotation), deleted: false },
+            ]),
+          );
           setAnnotations(notes);
           setScoreDataWarnings(warnings);
           setPage(
@@ -820,6 +851,12 @@ export function ScoresPage() {
             setMeasureMap(map);
             setFirstMeasure(nextMeasureNumber(map));
             setMeasureNumberOffset(map?.measureNumberOffset ?? 0);
+            annotationVersionsRef.current = new Map(
+              notes.map((annotation) => [
+                annotation.id,
+                { revision: annotationRevision(annotation), deleted: false },
+              ]),
+            );
             setAnnotations(notes);
             setUsingOfflineCache(true);
             setMode('view');
@@ -859,6 +896,143 @@ export function ScoresPage() {
     scoreReloadToken,
     scores.data,
   ]);
+
+  useEffect(() => {
+    if (
+      !remoteMode ||
+      !repertoireItemId ||
+      !tokens?.accessToken ||
+      !selected ||
+      selected.id !== scoreId ||
+      usingOfflineCache
+    ) {
+      return;
+    }
+    const targetRepertoireId = repertoireItemId;
+    let active = true;
+    const sync = new AnnotationSyncClient(targetRepertoireId, tokens.accessToken, {
+      onSnapshot: (snapshot) => {
+        if (!active || activeRepertoireIdRef.current !== targetRepertoireId) return;
+        annotationVersionsRef.current = new Map(
+          snapshot.map((annotation) => [
+            annotation.id,
+            { revision: annotationRevision(annotation), deleted: false },
+          ]),
+        );
+        setAnnotations(snapshot);
+        const scoreIds = new Set([
+          ...snapshot.map((annotation) => annotation.scoreId),
+          ...(scores.data ?? []).map((item) => item.id),
+        ]);
+        void Promise.all(
+          [...scoreIds].map((id) =>
+            localDb.replaceAnnotations(
+              id,
+              snapshot.filter((annotation) => annotation.scoreId === id),
+              remoteCacheScope,
+            ),
+          ),
+        ).catch((error: unknown) => {
+          if (!active) return;
+          notify({
+            title: '실시간 필기의 오프라인 사본을 갱신하지 못했습니다.',
+            description: error instanceof Error ? error.message : String(error),
+            tone: 'info',
+          });
+        });
+      },
+      onEvent: (event) => {
+        if (!active || activeRepertoireIdRef.current !== targetRepertoireId) return;
+        const known = annotationVersionsRef.current.get(event.annotationId);
+        if (
+          known &&
+          (known.revision > event.revision ||
+            (known.revision === event.revision && known.deleted && event.operation === 'upsert'))
+        ) {
+          return;
+        }
+        if (event.operation === 'delete') {
+          annotationVersionsRef.current.set(event.annotationId, {
+            revision: event.revision,
+            deleted: true,
+          });
+          setAnnotations((current) =>
+            current.filter((annotation) => annotation.id !== event.annotationId),
+          );
+          void localDb
+            .deleteAnnotation(event.annotationId, remoteCacheScope)
+            .catch(() => undefined);
+          return;
+        }
+        const annotation = event.annotation;
+        if (!annotation) return;
+        annotationVersionsRef.current.set(annotation.id, {
+          revision: annotationRevision(annotation, event.revision),
+          deleted: false,
+        });
+        setAnnotations((current) => {
+          const index = current.findIndex((item) => item.id === annotation.id);
+          if (index < 0) return [...current, annotation];
+          return current.map((item) => (item.id === annotation.id ? annotation : item));
+        });
+        void localDb.putAnnotation(annotation, remoteCacheScope).catch(() => undefined);
+      },
+      onStatus: ({ state }) => {
+        if (active) setAnnotationConnectionState(state);
+      },
+      onUnauthorized: async (rejectedAccessToken) => {
+        try {
+          const refreshed = await client.refreshAccessToken(rejectedAccessToken);
+          return refreshed.accessToken;
+        } catch {
+          return null;
+        }
+      },
+    });
+    sync.connect();
+    return () => {
+      active = false;
+      sync.disconnect();
+    };
+  }, [
+    client,
+    notify,
+    remoteCacheScope,
+    remoteMode,
+    repertoireItemId,
+    scoreId,
+    scores.data,
+    selected,
+    tokens?.accessToken,
+    usingOfflineCache,
+  ]);
+
+  useEffect(() => {
+    const jobId = omrDraft?.id;
+    const scoreAtStart = omrDraft?.scoreId;
+    if (!jobId || !scoreAtStart || !['pending', 'running'].includes(omrDraft.status)) return;
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await getOmrDraft(client, jobId);
+        if (!active || activeScoreIdRef.current !== scoreAtStart) return;
+        setOmrDraft(next);
+        setOmrPollingError(undefined);
+        if (next.status === 'pending' || next.status === 'running') {
+          timer = window.setTimeout(() => void poll(), 1_000);
+        }
+      } catch (error) {
+        if (!active || activeScoreIdRef.current !== scoreAtStart) return;
+        setOmrPollingError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 500);
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [client, omrDraft?.id, omrDraft?.scoreId, omrDraft?.status]);
 
   useEffect(() => {
     let active = true;
@@ -1189,11 +1363,16 @@ export function ScoresPage() {
           : await createAnnotation(client, annotation);
         await updateOfflineCopy(localDb.putAnnotation(saved, remoteCacheScope), '필기');
         if (activeScoreIdRef.current !== targetScore.id) return;
-        setAnnotations((current) =>
-          editableNearby
+        annotationVersionsRef.current.set(saved.id, {
+          revision: annotationRevision(saved),
+          deleted: false,
+        });
+        setAnnotations((current) => {
+          const exists = current.some((item) => item.id === saved.id);
+          return exists
             ? current.map((item) => (item.id === saved.id ? saved : item))
-            : [...current, saved],
-        );
+            : [...current, saved];
+        });
         return;
       }
       await localDb.putAnnotation(annotation);
@@ -1226,6 +1405,9 @@ export function ScoresPage() {
             '필기 목록',
           );
           if (activeScoreIdRef.current !== targetScore.id) return;
+          annotationVersionsRef.current = new Map(
+            latest.map((item) => [item.id, { revision: annotationRevision(item), deleted: false }]),
+          );
           setAnnotations(latest);
           notify({
             title: '필기가 다른 곳에서 수정되었습니다.',
@@ -1269,7 +1451,15 @@ export function ScoresPage() {
       if (remoteMode)
         await updateOfflineCopy(localDb.putAnnotation(saved, remoteCacheScope), '펜 필기');
       if (activeScoreIdRef.current !== targetScore.id) return;
-      setAnnotations((current) => [...current, saved]);
+      if (remoteMode) {
+        annotationVersionsRef.current.set(saved.id, {
+          revision: annotationRevision(saved),
+          deleted: false,
+        });
+      }
+      setAnnotations((current) =>
+        current.some((item) => item.id === saved.id) ? current : [...current, saved],
+      );
     } catch (error) {
       if (activeScoreIdRef.current !== targetScore.id) return;
       if (remoteMode && error instanceof ApiError && error.status === 409) {
@@ -1314,6 +1504,12 @@ export function ScoresPage() {
         await localDb.deleteAnnotation(annotation.id);
       }
       if (activeScoreIdRef.current !== targetScore.id) return;
+      if (remoteMode) {
+        annotationVersionsRef.current.set(annotation.id, {
+          revision: annotationRevision(annotation),
+          deleted: true,
+        });
+      }
       setAnnotations((current) => current.filter((item) => item.id !== annotation.id));
       notify({ title: '필기를 삭제했습니다.', tone: 'success' });
     } catch (error) {
@@ -1406,6 +1602,105 @@ export function ScoresPage() {
     activeSurfacePointerIdRef.current = null;
     setDragStart(undefined);
     setActivePenPoints([]);
+  };
+
+  const requestOmrDraft = async () => {
+    if (!selected || !remoteMode || usingOfflineCache || !canManageScores) return;
+    const targetScore = selected;
+    setOmrRequesting(true);
+    setOmrPollingError(undefined);
+    setShowOmrPreview(false);
+    try {
+      const created = await createOmrDraft(client, targetScore.id, measureMapRevision);
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      setOmrDraft(created);
+      notify({
+        title: 'OMR 마디맵 초안 생성을 시작했습니다.',
+        description: 'Audiveris가 악보를 분석하는 동안 이 화면을 계속 사용할 수 있습니다.',
+        tone: 'info',
+      });
+    } catch (error) {
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          await refreshScoreSettingsAfterConflict(targetScore);
+        } catch {
+          // The original conflict remains the actionable error shown below.
+        }
+      }
+      notify({
+        title: 'OMR 초안 생성을 시작하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    } finally {
+      if (activeScoreIdRef.current === targetScore.id) setOmrRequesting(false);
+    }
+  };
+
+  const refreshOmrDraft = async () => {
+    if (!omrDraft || activeScoreIdRef.current !== omrDraft.scoreId) return;
+    try {
+      const next = await getOmrDraft(client, omrDraft.id);
+      if (activeScoreIdRef.current !== next.scoreId) return;
+      setOmrDraft(next);
+      setOmrPollingError(undefined);
+    } catch (error) {
+      setOmrPollingError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const applyOmrDraft = async () => {
+    if (!selected || !omrDraft || omrDraft.status !== 'succeeded') return;
+    const targetScore = selected;
+    if (omrDraft.scoreId !== targetScore.id) return;
+    if (omrDraft.expectedMeasureMapRevision !== measureMapRevision) {
+      notify({
+        title: 'OMR 초안의 기준 revision이 오래되었습니다.',
+        description: '현재 마디 맵에 맞춰 OMR 초안을 다시 생성해 주세요.',
+        tone: 'danger',
+      });
+      return;
+    }
+    const replacement = measureMapFromOmrDraft(omrDraft);
+    replacement.measureNumberOffset = measureMap?.measureNumberOffset ?? measureNumberOffset;
+    if (
+      measureMap?.regions.length &&
+      !window.confirm(
+        `현재 ${measureMap.regions.length}개 마디 영역을 OMR 초안 ${replacement.regions.length}개로 교체할까요?`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const saved = await putRemoteMeasureMap(client, replacement, measureMapRevision);
+      await updateOfflineCopy(localDb.putMeasureMap(saved.map, remoteCacheScope), 'OMR 마디 맵');
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      setMeasureMap(saved.map);
+      setMeasureMapRevision(saved.revision);
+      setMeasureNumberOffset(saved.map.measureNumberOffset);
+      setFirstMeasure(nextMeasureNumber(saved.map));
+      setShowOmrPreview(false);
+      notify({
+        title: 'OMR 초안을 마디 맵으로 저장했습니다.',
+        description: '자동 인식 결과를 실제 악보와 대조해 각 영역을 확인해 주세요.',
+        tone: 'success',
+      });
+    } catch (error) {
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          await refreshScoreSettingsAfterConflict(targetScore);
+        } catch {
+          // Keep the conflict message below even when refreshing also fails.
+        }
+      }
+      notify({
+        title: 'OMR 초안을 저장하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    }
   };
 
   const finishSystem = async () => {
@@ -1710,6 +2005,10 @@ export function ScoresPage() {
   const visibleRegions =
     measureMap && selected && measureMap.scoreId === selected.id
       ? measureMap.regions.filter((region) => region.page === page)
+      : [];
+  const visibleOmrRegions =
+    showOmrPreview && omrDraft?.status === 'succeeded' && omrDraft.scoreId === selected?.id
+      ? omrDraft.regions.filter((region) => region.page === page)
       : [];
   const visibleAnnotations = annotations.filter(
     (annotation) =>
@@ -2029,7 +2328,7 @@ export function ScoresPage() {
                     disabled={usingOfflineCache || !canManageScores}
                     onClick={() => setMode('system')}
                   >
-                    <Map size={17} /> 마디 매핑
+                    <MapIcon size={17} /> 마디 매핑
                   </Button>
                   <Button
                     variant={mode === 'pen' ? 'primary' : 'secondary'}
@@ -2219,6 +2518,96 @@ export function ScoresPage() {
                   <Highlighter size={13} /> {measureMap?.regions.length ?? 0}마디 매핑됨
                   {remoteMode ? ` · r${measureMapRevision}` : ''}
                 </StatusBadge>
+                {remoteMode && selected && !usingOfflineCache ? (
+                  <StatusBadge
+                    tone={
+                      annotationConnectionState === 'live'
+                        ? 'success'
+                        : annotationConnectionState === 'offline' ||
+                            annotationConnectionState === 'closed'
+                          ? 'warning'
+                          : 'info'
+                    }
+                  >
+                    {annotationConnectionState === 'live'
+                      ? '공동 필기 실시간 연결됨'
+                      : annotationConnectionState === 'reconnecting'
+                        ? '공동 필기 다시 동기화 중…'
+                        : annotationConnectionState === 'offline'
+                          ? '공동 필기 오프라인'
+                          : annotationConnectionState === 'closed'
+                            ? '공동 필기 권한 확인 필요'
+                            : '공동 필기 연결 중…'}
+                  </StatusBadge>
+                ) : null}
+                {remoteMode &&
+                selected &&
+                (selected.mimeType === 'application/pdf' ||
+                  selected.mimeType.startsWith('image/')) ? (
+                  <section className="omr-draft-panel" aria-labelledby="omr-draft-heading">
+                    <strong id="omr-draft-heading">Audiveris OMR 초안</strong>
+                    <p className="subtle">
+                      자동 인식은 시작점만 제공합니다. 저장하기 전에 모든 페이지와 마디 영역을
+                      확인하세요.
+                    </p>
+                    {!omrDraft ? (
+                      <Button
+                        disabled={omrRequesting || usingOfflineCache || !canManageScores}
+                        onClick={() => void requestOmrDraft()}
+                      >
+                        <MapIcon size={17} aria-hidden />
+                        {omrRequesting ? '요청 중…' : 'OMR 초안 생성'}
+                      </Button>
+                    ) : null}
+                    {omrDraft?.status === 'pending' || omrDraft?.status === 'running' ? (
+                      <div role="status" aria-live="polite" className="omr-draft-status">
+                        <span>
+                          {omrDraft.status === 'pending' ? '분석 대기 중…' : '악보 분석 중…'}
+                        </span>
+                        {omrPollingError ? (
+                          <>
+                            <span className="danger-text">{omrPollingError}</span>
+                            <Button onClick={() => void refreshOmrDraft()}>상태 다시 확인</Button>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {omrDraft?.status === 'failed' ? (
+                      <div role="alert" className="omr-draft-status">
+                        <span>{omrDraft.error ?? 'OMR 분석에 실패했습니다.'}</span>
+                        <Button onClick={() => void requestOmrDraft()}>다시 생성</Button>
+                      </div>
+                    ) : null}
+                    {omrDraft?.status === 'succeeded' ? (
+                      <div className="omr-draft-result">
+                        <span>{omrDraft.regions.length}개 마디 영역을 인식했습니다.</span>
+                        {omrDraft.warnings.map((warning) => (
+                          <span key={warning} className="subtle">
+                            {warning}
+                          </span>
+                        ))}
+                        <div className="omr-draft-actions">
+                          <Button
+                            aria-pressed={showOmrPreview}
+                            onClick={() => setShowOmrPreview((current) => !current)}
+                          >
+                            {showOmrPreview ? '초안 미리보기 닫기' : '초안 영역 미리보기'}
+                          </Button>
+                          <Button
+                            variant="primary"
+                            disabled={usingOfflineCache || !canManageScores}
+                            onClick={() => void applyOmrDraft()}
+                          >
+                            초안을 마디 맵으로 저장
+                          </Button>
+                          <Button variant="ghost" onClick={() => void requestOmrDraft()}>
+                            다시 분석
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
                 {usingOfflineCache ? (
                   <StatusBadge tone="warning">오프라인 읽기 전용</StatusBadge>
                 ) : null}
@@ -2343,6 +2732,18 @@ export function ScoresPage() {
                         width={region.rect.w}
                         height={region.rect.h}
                       />
+                    ))}
+                    {visibleOmrRegions.map((region, index) => (
+                      <rect
+                        key={`omr:${omrDraft?.id}:${index}`}
+                        className="measure-region measure-region--omr-draft"
+                        x={region.rect.x}
+                        y={region.rect.y}
+                        width={region.rect.w}
+                        height={region.rect.h}
+                      >
+                        <title>OMR 초안 {region.measureNumber}마디</title>
+                      </rect>
                     ))}
                     {systemRect ? (
                       <>

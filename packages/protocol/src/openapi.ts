@@ -339,6 +339,23 @@ export interface paths {
         patch: operations["update_log_api_logs__log_id__patch"];
         trace?: never;
     };
+    "/api/omr-drafts/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Omr Draft */
+        get: operations["get_omr_draft_api_omr_drafts__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/practice-sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -726,6 +743,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scores/{score_id}/omr-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Omr Draft */
+        post: operations["create_omr_draft_api_scores__score_id__omr_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scores/{score_id}/settings": {
         parameters: {
             query?: never;
@@ -837,6 +871,66 @@ export interface components {
              */
             scope: "private" | "project";
         };
+        /** AnnotationEventPayload */
+        AnnotationEventPayload: {
+            /** @default null */
+            annotation: components["schemas"]["AnnotationOut"] | null;
+            /** Annotationid */
+            annotationId: string;
+            /** Authorid */
+            authorId: string;
+            /** Eventid */
+            eventId: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "upsert" | "delete";
+            /** Repertoireid */
+            repertoireId: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "private" | "project";
+        };
+        /** AnnotationEventServerMessage */
+        AnnotationEventServerMessage: {
+            payload: components["schemas"]["AnnotationEventPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ANNOTATION_EVENT";
+        };
+        /** AnnotationJoinedPayload */
+        AnnotationJoinedPayload: {
+            /** Repertoireid */
+            repertoireId: string;
+            /** Userid */
+            userId: string;
+        };
+        /** AnnotationJoinedServerMessage */
+        AnnotationJoinedServerMessage: {
+            payload: components["schemas"]["AnnotationJoinedPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ANNOTATION_JOINED";
+        };
         /** AnnotationOut */
         AnnotationOut: {
             /** Authorid */
@@ -867,12 +961,71 @@ export interface components {
              */
             updatedAt: string;
         };
+        /** AnnotationPingMessage */
+        AnnotationPingMessage: {
+            payload: components["schemas"]["AnnotationPingPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ANNOTATION_PING";
+        };
+        /** AnnotationPingPayload */
+        AnnotationPingPayload: {
+            /** Nonce */
+            nonce: string;
+        };
         /** AnnotationPoint */
         AnnotationPoint: {
             /** X */
             x: number;
             /** Y */
             y: number;
+        };
+        /** AnnotationPongPayload */
+        AnnotationPongPayload: {
+            /** Nonce */
+            nonce: string;
+        };
+        /** AnnotationPongServerMessage */
+        AnnotationPongServerMessage: {
+            payload: components["schemas"]["AnnotationPongPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ANNOTATION_PONG";
+        };
+        /** AnnotationSnapshotPayload */
+        AnnotationSnapshotPayload: {
+            /** Annotations */
+            annotations: components["schemas"]["AnnotationOut"][];
+            /** Repertoireid */
+            repertoireId: string;
+        };
+        /** AnnotationSnapshotServerMessage */
+        AnnotationSnapshotServerMessage: {
+            payload: components["schemas"]["AnnotationSnapshotPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ANNOTATION_SNAPSHOT";
         };
         /** AnnotationUpdate */
         AnnotationUpdate: {
@@ -881,6 +1034,8 @@ export interface components {
             /** Expectedrevision */
             expectedRevision: number;
         };
+        AnnotationWsClientMessage: components["schemas"]["JoinAnnotationsMessage"] | components["schemas"]["AnnotationPingMessage"];
+        AnnotationWsServerMessage: components["schemas"]["AnnotationJoinedServerMessage"] | components["schemas"]["AnnotationSnapshotServerMessage"] | components["schemas"]["AnnotationEventServerMessage"] | components["schemas"]["AnnotationPongServerMessage"] | components["schemas"]["ErrorServerMessage"];
         /** Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post */
         Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post: {
             /** File */
@@ -1075,6 +1230,27 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** JoinAnnotationsMessage */
+        JoinAnnotationsMessage: {
+            payload: components["schemas"]["JoinAnnotationsPayload"];
+            /**
+             * Requestid
+             * @default null
+             */
+            requestId: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "JOIN_ANNOTATIONS";
+        };
+        /** JoinAnnotationsPayload */
+        JoinAnnotationsPayload: {
+            /** Accesstoken */
+            accessToken: string;
+            /** Repertoireid */
+            repertoireId: string;
+        };
         /** JoinRoomMessage */
         JoinRoomMessage: {
             payload: components["schemas"]["JoinRoomPayload"];
@@ -1240,6 +1416,43 @@ export interface components {
             title: string | null;
             /** Totalmeasures */
             totalMeasures: number;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** OmrDraftCreate */
+        OmrDraftCreate: {
+            /** Expectedmeasuremaprevision */
+            expectedMeasureMapRevision: number;
+        };
+        /** OmrDraftOut */
+        OmrDraftOut: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Error */
+            error: string | null;
+            /** Expectedmeasuremaprevision */
+            expectedMeasureMapRevision: number;
+            /** Id */
+            id: string;
+            /** Regions */
+            regions: components["schemas"]["MeasureRegion"][];
+            /** Requestedbyid */
+            requestedById: string;
+            /** Scoreid */
+            scoreId: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed";
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
             /** Warnings */
             warnings: string[];
         };
@@ -1776,7 +1989,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "JOINED" | "PONG" | "TRANSPORT" | "ROOM_ROSTER" | "TEMPOMAP_UPDATED" | "ERROR";
+            type: "JOINED" | "PONG" | "TRANSPORT" | "ROOM_ROSTER" | "TEMPOMAP_UPDATED" | "ANNOTATION_JOINED" | "ANNOTATION_SNAPSHOT" | "ANNOTATION_EVENT" | "ANNOTATION_PONG" | "ERROR";
         };
         /** StampAnnotationData */
         StampAnnotationData: {
@@ -3174,6 +3387,37 @@ export interface operations {
             };
         };
     };
+    get_omr_draft_api_omr_drafts__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmrDraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_practice_session_api_practice_sessions__session_id__get: {
         parameters: {
             query?: never;
@@ -4290,6 +4534,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_omr_draft_api_scores__score_id__omr_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                score_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OmrDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmrDraftOut"];
+                };
             };
             /** @description Validation Error */
             422: {

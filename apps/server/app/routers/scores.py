@@ -12,7 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from ..access import can_edit_annotation, require_repertoire, require_score
 from ..config import Settings
 from ..dependencies import CurrentUser, DbSession
-from ..models import Annotation, MeasureMap, Score, new_id, utcnow
+from ..models import Annotation, MeasureMap, OmrDraftJob, Score, new_id, utcnow
+from ..omr import OmrProcessingError
 from ..schemas import (
     AnnotationCreate,
     AnnotationOut,
@@ -20,6 +21,8 @@ from ..schemas import (
     DownloadUrlOut,
     MeasureMapOut,
     MeasureMapWrite,
+    OmrDraftCreate,
+    OmrDraftOut,
     ScoreCompleteIn,
     ScoreOut,
     ScorePresignIn,
@@ -29,7 +32,7 @@ from ..schemas import (
     UploadTargetOut,
 )
 from ..security import verify_upload_token
-from ..serializers import annotation_out, measure_map_out, score_out
+from ..serializers import annotation_out, measure_map_out, omr_draft_out, score_out
 from ..storage import (
     LocalObjectStorage,
     ObjectStoragePromotionError,
@@ -352,6 +355,65 @@ def score_download(score_id: str, request: Request, db: DbSession, user: Current
     return DownloadUrlOut(url=url, expires_at=expires_at)
 
 
+@router.post(
+    "/scores/{score_id}/omr-drafts",
+    response_model=OmrDraftOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_omr_draft(
+    score_id: str,
+    body: OmrDraftCreate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+) -> OmrDraftOut:
+    score, _ = require_score(db, user, score_id, "leader")
+    if score.upload_status != "ready":
+        raise HTTPException(status_code=409, detail="score upload is not complete")
+    if score.content_type != "application/pdf" and not score.content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="OMR supports PDF and image scores only")
+    if not request.app.state.settings.omr_enabled:
+        raise HTTPException(status_code=503, detail="OMR is disabled on this server")
+
+    map_row = db.scalar(select(MeasureMap).where(MeasureMap.score_id == score_id))
+    actual_revision = map_row.revision if map_row else 0
+    if body.expected_measure_map_revision != actual_revision:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "measure map revision changed before OMR started",
+                "expectedRevision": body.expected_measure_map_revision,
+                "actualRevision": actual_revision,
+            },
+        )
+
+    job = OmrDraftJob(
+        score_id=score_id,
+        requested_by_id=user.id,
+        expected_measure_map_revision=actual_revision,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    try:
+        request.app.state.omr_drafts.submit(job.id)
+    except OmrProcessingError as exc:
+        job.status = "failed"
+        job.error = str(exc)[:500]
+        db.commit()
+        db.refresh(job)
+    return omr_draft_out(job)
+
+
+@router.get("/omr-drafts/{job_id}", response_model=OmrDraftOut)
+def get_omr_draft(job_id: str, db: DbSession, user: CurrentUser) -> OmrDraftOut:
+    job = db.get(OmrDraftJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="OMR draft not found")
+    require_score(db, user, job.score_id)
+    return omr_draft_out(job)
+
+
 @router.delete("/scores/{score_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_score(score_id: str, request: Request, db: DbSession, user: CurrentUser) -> Response:
     require_score(db, user, score_id, "leader")
@@ -430,9 +492,13 @@ def delete_measure_map(score_id: str, db: DbSession, user: CurrentUser) -> Respo
     status_code=status.HTTP_201_CREATED,
 )
 def create_annotation(
-    score_id: str, body: AnnotationCreate, db: DbSession, user: CurrentUser
+    score_id: str,
+    body: AnnotationCreate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
 ) -> AnnotationOut:
-    require_score(db, user, score_id)
+    score, _ = require_score(db, user, score_id)
     row = Annotation(
         score_id=score_id,
         author_id=user.id,
@@ -442,7 +508,9 @@ def create_annotation(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return annotation_out(row)
+    result = annotation_out(row)
+    request.app.state.annotation_sync.publish(score.repertoire_id, "upsert", result)
+    return result
 
 
 @router.get("/scores/{score_id}/annotations", response_model=list[AnnotationOut])
@@ -487,12 +555,16 @@ def get_annotation(annotation_id: str, db: DbSession, user: CurrentUser) -> Anno
 
 @router.put("/annotations/{annotation_id}", response_model=AnnotationOut)
 def update_annotation(
-    annotation_id: str, body: AnnotationUpdate, db: DbSession, user: CurrentUser
+    annotation_id: str,
+    body: AnnotationUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
 ) -> AnnotationOut:
     row = db.get(Annotation, annotation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="annotation not found")
-    _, membership = require_score(db, user, row.score_id)
+    score, membership = require_score(db, user, row.score_id)
     if not can_edit_annotation(row, user, membership):
         raise HTTPException(status_code=403, detail="annotation author or leader role required")
     if body.expected_revision != row.revision:
@@ -508,17 +580,26 @@ def update_annotation(
     row.data = body.data.model_dump(by_alias=True, exclude_none=True)
     db.commit()
     db.refresh(row)
-    return annotation_out(row)
+    result = annotation_out(row)
+    request.app.state.annotation_sync.publish(score.repertoire_id, "upsert", result)
+    return result
 
 
 @router.delete("/annotations/{annotation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_annotation(annotation_id: str, db: DbSession, user: CurrentUser) -> Response:
+def delete_annotation(
+    annotation_id: str,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+) -> Response:
     row = db.get(Annotation, annotation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="annotation not found")
-    _, membership = require_score(db, user, row.score_id)
+    score, membership = require_score(db, user, row.score_id)
     if not can_edit_annotation(row, user, membership):
         raise HTTPException(status_code=403, detail="annotation author or leader role required")
+    deleted = annotation_out(row)
     db.delete(row)
     db.commit()
+    request.app.state.annotation_sync.publish(score.repertoire_id, "delete", deleted)
     return Response(status_code=204)

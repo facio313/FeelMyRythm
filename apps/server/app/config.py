@@ -77,9 +77,19 @@ class Settings(BaseSettings):
     staging_redelete_interval_seconds: int = Field(default=900, ge=1)
     local_upload_temp_ttl_seconds: int = Field(default=3600, ge=60)
 
+    omr_enabled: bool = True
+    omr_audiveris_command: str = "audiveris"
+    omr_worker_count: int = Field(default=1, ge=1, le=4)
+    omr_timeout_seconds: int = Field(default=300, ge=10, le=3600)
+
     room_lead_time_ms: int = 3000
     room_ttl_seconds: int = 1800
     room_cleanup_interval_seconds: int = 30
+    room_presence_ttl_seconds: int = Field(default=45, ge=30, le=300)
+    room_lock_seconds: int = Field(default=5, ge=1, le=30)
+    room_lock_wait_seconds: float = Field(default=2.0, ge=0.1, le=30)
+    redis_url: str | None = None
+    redis_key_prefix: str = "fmr"
 
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
@@ -118,6 +128,8 @@ class Settings(BaseSettings):
                 raise ValueError("production FMR_PUBLIC_API_BASE_URL cannot contain a query or fragment")
             if self.smtp_starttls == self.smtp_use_ssl:
                 raise ValueError("production requires exactly one of FMR_SMTP_STARTTLS or FMR_SMTP_USE_SSL")
+            if self.redis_url is None or not self.redis_url.strip():
+                raise ValueError("production requires FMR_REDIS_URL for multi-instance room state")
         if smtp_host_configured != smtp_from_configured:
             raise ValueError("FMR_SMTP_HOST and FMR_SMTP_FROM_EMAIL must be configured together")
         if bool(self.smtp_username) != bool(self.smtp_password):
@@ -134,6 +146,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "FMR_STAGING_REDELETE_INTERVAL_SECONDS cannot exceed FMR_LATE_UPLOAD_GUARD_SECONDS"
             )
+        if self.omr_enabled and not self.omr_audiveris_command.strip():
+            raise ValueError("FMR_OMR_AUDIVERIS_COMMAND is required when OMR is enabled")
+        if self.redis_url is not None:
+            redis_url = urlsplit(self.redis_url)
+            if redis_url.scheme not in {"redis", "rediss"} or not redis_url.hostname:
+                raise ValueError("FMR_REDIS_URL must be an absolute redis:// or rediss:// URL")
+        if not self.redis_key_prefix.strip() or any(
+            character.isspace() for character in self.redis_key_prefix
+        ):
+            raise ValueError("FMR_REDIS_KEY_PREFIX must be non-empty and contain no whitespace")
         return self
 
     @cached_property

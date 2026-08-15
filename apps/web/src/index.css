@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '@feelmyrythm/ui/tokens.css';
+@import '@feelmyrythm/ui/primitives.css';
 
 .sr-only {
   position: absolute;
@@ -1410,6 +1411,31 @@ p {
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
+.omr-draft-panel,
+.omr-draft-status,
+.omr-draft-result {
+  display: grid;
+  gap: 8px;
+}
+.omr-draft-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.omr-draft-panel p {
+  margin: 0;
+}
+.omr-draft-status {
+  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
+  border-radius: 10px;
+  padding: 10px;
+}
+.omr-draft-actions {
+  display: grid;
+  gap: 8px;
+}
+.danger-text {
+  color: var(--danger);
+}
 .score-metadata summary {
   min-height: 44px;
   display: flex;
@@ -1528,6 +1554,12 @@ p {
   fill: rgb(212 168 83 / 20%);
   stroke: var(--accent);
   stroke-width: 0.003;
+}
+.measure-region--omr-draft {
+  fill: rgb(106 165 221 / 16%);
+  stroke: var(--info);
+  stroke-width: 0.003;
+  stroke-dasharray: 0.01 0.006;
 }
 .system-selection {
   fill: rgb(106 165 221 / 10%);
@@ -2931,6 +2963,8 @@ input[type='range']::-webkit-slider-thumb {
 
   .editor-save-bar .fmr-button {
     width: 100%;
+    min-height: 48px;
+    flex-basis: 48px;
   }
 
   .dashboard-callout,

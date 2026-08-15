@@ -1,6 +1,6 @@
 # FeelMyRythm 구현 기능 카탈로그
 
-함께 읽을 문서: [사용자 지침서](./USER_GUIDE.md) · [아키텍처와 코드 읽기 가이드](./ARCHITECTURE_AND_CODE_GUIDE.md) · [구현 회고](./IMPLEMENTATION_RETROSPECTIVE.md)
+함께 읽을 문서: [사용자 지침서](./USER_GUIDE.md) · [아키텍처와 코드 읽기 가이드](./ARCHITECTURE_AND_CODE_GUIDE.md) · [구현 회고](./IMPLEMENTATION_RETROSPECTIVE.md) · [운영 준비와 검증](./OPERATIONS.md)
 
 이 문서는 현재 저장소에 실제로 구현된 기능을 사용자 화면, 핵심 동작, 구현 근거로 연결한
 목록이다. [DESIGN.md](./DESIGN.md)나 [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)의
@@ -30,7 +30,7 @@
 | 튜너·출력 보정 | 크로매틱 튜너와 장치별 클릭 출력 지연 측정·보정 | `/tuner`, `/calibration` | 구현 |
 | 계정·협업 공간 | 이메일·Google 인증, 계정 삭제, 그룹·역할·프로젝트·레퍼토리 관리 | `/login`, `/dashboard`, `/settings` | 구현 / 설정 필요 |
 | 오프라인·PWA | 로컬 연습 데이터, 계정별 서버 snapshot, 설치형 PWA와 안전한 캐시 이행 | 앱 시작 및 설정 | 구현 |
-| 모바일 | 같은 웹 앱의 iOS·Android 래핑, 보안 저장소, 딥 링크, Keep Awake·햅틱 | [apps/mobile](../apps/mobile) | 구현 / 외부 검증 필요 |
+| 모바일 | 같은 웹 앱의 iOS·Android 래핑, 네이티브 저지연 오디오, 보안 저장소, 딥 링크, Keep Awake·햅틱 | [apps/mobile](../apps/mobile) | 구현 / 외부 검증 필요 |
 | 반응형·접근성 | 256px부터 초광폭까지 재배치, 키보드·터치·펜·스크린 리더 경로 | 모든 화면 | 구현 |
 | 서버·배포·검증 | REST/WS, PostgreSQL migration, 객체 생명주기, immutable ARM64 배포 게이트 | [apps/server](../apps/server), [.github](../.github) | 구현 / 외부 검증 필요 |
 
@@ -166,6 +166,7 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | 웹·API 원점 분리 | WebView local origin에서는 상대 UI 자산을 쓰되 REST/WS는 운영 `https://bonifacio.work`로 연결한다. | Vite mobile mode와 path helper가 UI base와 server origin을 별도 계산한다. | [vite.config.ts](../apps/web/vite.config.ts), [paths.ts](../apps/web/src/lib/paths.ts) |
 | 네이티브 보안 저장 | native 인증 envelope는 WebView localStorage가 아니라 iOS Keychain 또는 Android Keystore 보호 저장소에 둔다. | 공용 TypeScript plugin contract와 Swift/Java 구현이 있으며 Android backup·data extraction을 차단한다. | [secureStorage.ts](../apps/mobile/src/secureStorage.ts), [SecureStoragePlugin.swift](../apps/mobile/ios/App/App/SecureStoragePlugin.swift), [SecureStoragePlugin.java](../apps/mobile/android/app/src/main/java/work/bonifacio/feelmyrythm/SecureStoragePlugin.java) |
 | 딥 링크 | custom URL과 제한된 HTTPS 링크로 방, 가입 완료, reset, 탈퇴 proof 화면을 연다. | 허용 host·정확한 route·fragment key를 allowlist하고 query, 복수 credential, 신뢰하지 않는 origin을 거부한다. | [deepLink.ts](../apps/mobile/src/deepLink.ts), [deepLink.test.ts](../apps/mobile/src/deepLink.test.ts) |
+| 네이티브 저지연 오디오 | 재생을 시작하면 WebView가 중단돼도 전체 클릭 타임라인이 네이티브 오디오 clock에서 계속된다. | iOS는 AVAudioEngine queue와 playback session을, Android는 Oboe low-latency stream과 mediaPlayback foreground service를 사용한다. 정지·교체·자연 종료를 공용 adapter로 되돌린다. | [nativeAudio.ts](../apps/mobile/src/nativeAudio.ts), [NativeAudioPlugin.swift](../apps/mobile/ios/App/App/NativeAudioPlugin.swift), [NativeAudioPlugin.java](../apps/mobile/android/app/src/main/java/work/bonifacio/feelmyrythm/NativeAudioPlugin.java) |
 | 네이티브 기능 bridge | 재생 중 Keep Awake, 박별 햅틱, 테마별 system bar, cold/live deep link를 웹 코드가 한 인터페이스로 호출한다. | 플랫폼 지원 실패가 웹 UI 전체를 막지 않도록 best-effort 경계를 둔다. | [nativeBridge.ts](../apps/mobile/src/nativeBridge.ts) |
 | 서명 빌드 진입점 | 환경변수가 없으면 실패하는 iOS archive와 Android App Bundle script를 제공한다. | signing asset과 password를 저장소 밖에 두고 플랫폼별 검증 뒤 sync/build한다. | [archive-ios.sh](../apps/mobile/scripts/archive-ios.sh), [verify-android-signing.mjs](../apps/mobile/scripts/verify-android-signing.mjs), [README.md](../apps/mobile/README.md) |
 
@@ -218,13 +219,13 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 
 | 항목 | 상태 | 현재 제공되는 것 | 완료 판정에 필요한 것 |
 | --- | --- | --- | --- |
-| iOS 무음 스위치·잠금·백그라운드 오디오 | 외부 검증 필요 | audio session/background mode 선언, Web Audio engine, Keep Awake | 서명된 실제 iPhone에서 무음·잠금·전화/오디오 인터럽트 장시간 측정 |
-| Android 백그라운드·제조사 절전 | 외부 검증 필요 | Capacitor shell, Keep Awake, Web Audio, 마이크 권한 | 서명된 실제 Android 기기와 제조사별 절전 상태 검증 |
+| iOS 무음 스위치·잠금·백그라운드 오디오 | 외부 검증 필요 | AVAudioEngine 전체-timeline queue, playback session/background mode, interruption resume, Keep Awake | 서명된 실제 iPhone에서 무음·잠금·전화/오디오 인터럽트 장시간 측정 |
+| Android 백그라운드·제조사 절전 | 외부 검증 필요 | Oboe low-latency stream, mediaPlayback foreground service/audio focus/notification stop, Keep Awake | 서명된 실제 Android 기기와 제조사별 절전 상태 검증 |
 | 기기 간 ±10ms 동기 기준 | 외부 검증 필요 | 시계 estimator, server anchor, calibration, 파형 분석 도구 | 2–3대 실제 기기의 동시 녹음 파형과 장시간 drift 측정 |
-| Universal Links·Android App Links | 외부 검증 필요 | 제한된 associated-domain/intent-filter와 URL parser | 운영 AASA/`assetlinks.json`, 실제 Team ID·release 인증서, 설치 기기 검증 |
+| Universal Links·Android App Links | 외부 검증 필요 | 제한된 associated-domain/intent-filter·URL parser, signed identity 기반 association generator와 public preflight | 운영 게시 후 실제 설치 기기 검증 |
 | 스토어 archive·제출 | 외부 검증 필요 | signing 값을 요구하는 archive/bundle script와 개인정보·탈퇴 공개 화면 | 실제 인증서·provisioning·keystore, 설치·스토어 심사 |
-| SMTP·Google OAuth 운영 | 설정 필요 / 외부 검증 필요 | provider adapter, token 검증, bounded queue, UI | 실제 client ID·도메인·SMTP quota/반송/전달률 및 abuse 정책 |
-| S3·공용 cksDB·RPi 배포 | 설정 필요 / 외부 검증 필요 | S3 backend, outbox worker, PostgreSQL migration, immutable deploy workflow | 실제 bucket CORS/lifecycle, DB backup/restore, forced deploy와 rollback rehearsal |
+| SMTP·Google OAuth 운영 | 설정 필요 / 외부 검증 필요 | provider adapter, token 검증, bounded queue, TLS/auth 및 opt-in delivery preflight | 실제 client ID·도메인·SMTP quota/반송/전달률 및 abuse 정책 |
+| S3·공용 cksDB·RPi 배포 | 설정 필요 / 외부 검증 필요 | S3 backend/outbox, CORS·lifecycle/canary preflight, Alembic-head 검사, immutable deploy workflow | 실제 DB backup/restore, forced deploy와 rollback rehearsal |
 | CDN/IP abuse 제한 | 의도적 외부 경계 | 앱 내부 cooldown, dummy bcrypt, bounded verifier | trusted proxy/CDN에서 IP rate limit, CAPTCHA와 provider quota 설정 |
 | native Google/Apple 로그인 | 의도적 비범위 | native에서는 이메일 인증 로그인만 제공 | 제3자 native 로그인과 스토어 정책을 별도 설계·구현하기 전에는 제공하지 않음 |
 | 서버의 beat 스트리밍 | 의도적 비범위 | revision·anchor·서버 시각만 합의 | 추가 구현 대상이 아니라 결정론적 로컬 전개를 지키기 위한 설계 원칙 |

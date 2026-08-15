@@ -1,4 +1,3 @@
-import { WebAudioEngine } from '@feelmyrythm/audio';
 import { median } from '@feelmyrythm/core';
 import { Button, Card, Field, StatusBadge, useToast } from '@feelmyrythm/ui';
 import {
@@ -12,6 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { useAuth } from '../lib/auth';
+import { createPlatformAudioEngine, type ManagedAudioEngine } from '../lib/audioEngine';
 import { localDb, type DeviceCalibration } from '../lib/localDb';
 import { useAsync } from '../lib/useAsync';
 
@@ -116,7 +116,7 @@ function errorMessage(error: unknown): string {
 export function CalibrationPage() {
   const { notify } = useToast();
   const { user, client } = useAuth();
-  const engineRef = useRef<WebAudioEngine | undefined>(undefined);
+  const engineRef = useRef<ManagedAudioEngine | undefined>(undefined);
   const engineGenerationRef = useRef(0);
   const bluetoothGenerationRef = useRef(0);
   const mountedRef = useRef(true);
@@ -240,7 +240,7 @@ export function CalibrationPage() {
     setPhase('starting');
     setOperationError(null);
 
-    const engine = new WebAudioEngine();
+    const engine = createPlatformAudioEngine();
     engineRef.current = engine;
     try {
       await engine.start();

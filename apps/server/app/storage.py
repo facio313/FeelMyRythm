@@ -32,6 +32,7 @@ class ObjectStorage(Protocol):
     def exists(self, storage_key: str, expected_size: int) -> bool: ...
     def promote(self, staging_key: str, storage_key: str, expected_size: int) -> None: ...
     def delete(self, storage_key: str) -> None: ...
+    def download_to(self, storage_key: str, target: Path) -> None: ...
 
 
 class ObjectStoragePromotionError(RuntimeError):
@@ -121,6 +122,12 @@ class LocalObjectStorage:
     def delete(self, storage_key: str) -> None:
         self.resolve_key(storage_key).unlink(missing_ok=True)
 
+    def download_to(self, storage_key: str, target: Path) -> None:
+        source = self.resolve_key(storage_key)
+        if not source.is_file():
+            raise FileNotFoundError(storage_key)
+        shutil.copyfile(source, target)
+
 
 class S3ObjectStorage:
     def __init__(self, settings: Settings) -> None:
@@ -185,6 +192,9 @@ class S3ObjectStorage:
 
     def delete(self, storage_key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=storage_key)
+
+    def download_to(self, storage_key: str, target: Path) -> None:
+        self.client.download_file(self.bucket, storage_key, str(target))
 
 
 def make_storage(settings: Settings) -> ObjectStorage:

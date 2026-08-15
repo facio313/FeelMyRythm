@@ -9,6 +9,18 @@ const powerMocks = vi.hoisted(() => ({
   disposeWakeLock: vi.fn(async () => undefined),
   keepAwake: vi.fn(async () => undefined),
   allowSleep: vi.fn(async () => undefined),
+  createAudioEngine: vi.fn(
+    () =>
+      null as null | {
+        onStopped: (() => void) | null;
+        start(): Promise<void>;
+        now(): number;
+        outputLatency(): number;
+        stop(): void;
+        setVolume(): void;
+        dispose(): Promise<void>;
+      },
+  ),
 }));
 
 vi.mock('@feelmyrythm/audio', () => {
@@ -92,6 +104,7 @@ vi.mock('@feelmyrythm/mobile', () => ({
     beatHaptic: vi.fn(async () => undefined),
     keepAwake: powerMocks.keepAwake,
     allowSleep: powerMocks.allowSleep,
+    createAudioEngine: powerMocks.createAudioEngine,
   },
 }));
 
@@ -157,6 +170,7 @@ beforeEach(() => {
   powerMocks.disposeWakeLock.mockClear();
   powerMocks.keepAwake.mockClear();
   powerMocks.allowSleep.mockClear();
+  powerMocks.createAudioEngine.mockReset().mockReturnValue(null);
   vi.stubGlobal(
     'requestAnimationFrame',
     vi.fn(() => 1),
@@ -225,6 +239,70 @@ describe('visual frame calibration', () => {
 });
 
 describe('natural playback power cleanup', () => {
+  it('stops an audio session that finishes starting after the user has cancelled playback', async () => {
+    let finishStart: (() => void) | undefined;
+    const nativeEngine = {
+      onStopped: null as (() => void) | null,
+      start: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishStart = resolve;
+          }),
+      ),
+      now: vi.fn(() => 1),
+      outputLatency: vi.fn(() => 0),
+      stop: vi.fn(),
+      setVolume: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    powerMocks.createAudioEngine.mockReturnValue(nativeEngine);
+    const { result } = renderHook(() => useMetronome(map));
+    let pendingStart: Promise<void> | undefined;
+
+    act(() => {
+      pendingStart = result.current.start(1, 1, false);
+    });
+    act(() => result.current.stop());
+    await act(async () => {
+      finishStart?.();
+      await pendingStart;
+    });
+
+    expect(nativeEngine.stop).toHaveBeenCalledTimes(1);
+    expect(result.current.playing).toBe(false);
+    expect(powerMocks.keepAwake).not.toHaveBeenCalled();
+  });
+
+  it('closes the current audio session when synchronized start validation fails', async () => {
+    const nativeEngine = {
+      onStopped: null as (() => void) | null,
+      start: vi.fn(async () => undefined),
+      now: vi.fn(() => 100),
+      outputLatency: vi.fn(() => 0),
+      stop: vi.fn(),
+      setVolume: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    powerMocks.createAudioEngine.mockReturnValue(nativeEngine);
+    const { result } = renderHook(() => useMetronome(map));
+
+    await expect(
+      act(async () =>
+        result.current.startSynchronized({
+          measure: 1,
+          pass: 1,
+          serverStartTimeMs: 0,
+          serverOffsetMs: 0,
+          withCountIn: false,
+        }),
+      ),
+    ).rejects.toThrow('다음 마디 경계');
+
+    expect(nativeEngine.stop).toHaveBeenCalledTimes(1);
+    expect(result.current.playing).toBe(false);
+    expect(powerMocks.keepAwake).not.toHaveBeenCalled();
+  });
+
   it.each(['local', 'synchronized'] as const)(
     'releases browser and native wake controls exactly once after %s playback ends',
     async (mode) => {
@@ -263,4 +341,27 @@ describe('natural playback power cleanup', () => {
       expect(powerMocks.allowSleep).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('stops the transport and releases power after a native media control stop', async () => {
+    const nativeEngine = {
+      onStopped: null as (() => void) | null,
+      start: vi.fn(async () => undefined),
+      now: vi.fn(() => 1),
+      outputLatency: vi.fn(() => 0),
+      stop: vi.fn(),
+      setVolume: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    powerMocks.createAudioEngine.mockReturnValue(nativeEngine);
+    const { result } = renderHook(() => useMetronome(map));
+
+    await act(async () => result.current.start(1, 1, false));
+    expect(result.current.playing).toBe(true);
+
+    act(() => nativeEngine.onStopped?.());
+
+    expect(result.current.playing).toBe(false);
+    expect(powerMocks.releaseWakeLock).toHaveBeenCalledTimes(1);
+    expect(powerMocks.allowSleep).toHaveBeenCalledTimes(1);
+  });
 });

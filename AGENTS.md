@@ -19,7 +19,7 @@ Each AI agent may only work within its own tool branch and below.
 | `anthropic`        | Claude Code           |
 | `cursor`           | Cursor                |
 | `codex`            | OpenAI Codex          |
-| `{tool}/feature-*` | Each respective agent |
+| `{tool}-feature-*` | Each respective agent |
 
 - Agents **must not** commit, merge, or push to `main` or `dev` without an explicit user request.
 - When the user explicitly asks, agents may assist with `main`/`dev` operations.
@@ -37,6 +37,24 @@ Each AI agent may only work within its own tool branch and below.
 | Codex-only instructions                       | `AGENTS.md` (Codex reads this directly) |
 
 개별 파일(`CLAUDE.md`, `.cursor/rules/`)은 `AGENTS.md`를 가리키는 thin wrapper다.
+
+### 3. App Changes → Always Update Related Documentation
+
+앱의 코드·설정·스키마·UI·빌드·배포 동작을 변경할 때는 **그 내용을 설명하는 기존 관련 문서를 같은 작업에서 반드시 수정**한다. 코드만 바꾸고 문서를 이전 상태로 남긴 작업은 완료로 간주하지 않는다.
+
+| App change                          | Documents to update when they cover the changed surface                                   |
+| ----------------------------------- | ----------------------------------------------------------------------------------------- |
+| 사용자 기능·화면·조작 흐름          | `docs/FEATURES.md`, `docs/USER_GUIDE.md`, root/app `README.md`                            |
+| 도메인 규칙·동기화·오디오·보안 계약 | `docs/DESIGN.md`, `AGENTS.md`                                                             |
+| 구현 상태·단계·완료 기준            | `docs/IMPLEMENTATION_PLAN.md`, `docs/IMPLEMENTATION_RETROSPECTIVE.md`                     |
+| UI·반응형·접근성 계약               | `docs/UI_DESIGN.md`, `docs/RESPONSIVE_UX.md`                                              |
+| 패키지 구조·API·런타임 경계         | `docs/ARCHITECTURE_AND_CODE_GUIDE.md`, 해당 app/package `README.md`, 생성된 protocol 계약 |
+| 환경변수·빌드·운영·배포 절차        | `.env.example`, `docs/OPERATIONS.md`, root/app `README.md`                                |
+| 모바일 네이티브 동작·서명·딥링크    | `apps/mobile/README.md`, 관련 설계·운영 문서                                              |
+
+- 변경된 동작을 실제로 설명하는 문서가 여러 개면 한 문서만 고르지 말고 모두 동기화한다.
+- 관련 기존 문서가 없는 영역은 이 규칙만으로 새 문서 생성을 강제하지 않지만, 전역 계약이 새로 생기면 `AGENTS.md`에 기록한다.
+- 완료 보고에는 함께 수정한 문서를 명시한다.
 
 ---
 
@@ -71,7 +89,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 | 서버   | Python 3.13 + FastAPI + SQLAlchemy 2                                  |
 | DB     | PostgreSQL (운영은 공용 `cksDB`, 로컬 개발은 SQLite 가능)             |
 | 코어   | `packages/core` 순수 TS (템포맵·시계동기)                             |
-| 오디오 | `packages/audio` Web Audio 룩어헤드 스케줄러                          |
+| 오디오 | 웹 Web Audio 룩어헤드 + 모바일 AVAudioEngine/Oboe 네이티브 큐         |
 | 모바일 | Capacitor (웹 빌드 래핑)                                              |
 | 배포   | GitHub-hosted ARM64 Actions → GHCR immutable images → RPi 제한 배포기 |
 
@@ -99,18 +117,18 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 ### Flow
 
 ```
-codex/feature-name ──┐
-cursor/feature-name ─┤→ {tool} → dev → main
-anthropic/feat-name ─┘
+codex-feature-name ──┐
+cursor-feature-name ─┤→ {tool} → dev → main
+anthropic-feat-name ─┘
 ```
 
 1. Branch off the tool branch for any new feature:
    ```bash
-   git checkout -b cursor/tempo-editor cursor
+   git checkout -b cursor-feature-tempo-editor cursor
    ```
 2. Merge completed feature back into the tool branch:
    ```bash
-   git checkout cursor && git merge cursor/tempo-editor
+   git checkout cursor && git merge cursor-feature-tempo-editor
    ```
 3. Merge tool branch into `dev` after validation (user):
    ```bash
@@ -121,7 +139,7 @@ anthropic/feat-name ─┘
 ### Naming Rules
 
 - Tool branches: `codex`, `cursor`, `anthropic`
-- Feature branches: `{tool}/{kebab-case-feature}` — e.g. `cursor/sync-session`
+- Feature branches: `{tool}-feature-{kebab-case-feature}` — e.g. `cursor-feature-sync-session`
 - English kebab-case only.
 
 ---
@@ -162,8 +180,10 @@ anthropic/feat-name ─┘
 - 동기 룸은 생성 시 템포맵 revision을 고정하고, 모든 참가자는 그 정확한 revision을 내려받아 로컬에서 같은 타임라인을 전개한다.
 - `GET /repertoire/{id}/access`의 `role`로 leader/owner 전용 악보 UI를 선제 제한하되, 서버 권한 검사를 대체하지 않는다.
 - 마디 앵커 주석은 `GET /repertoire/{id}/annotations`로 곡의 모든 파트에서 조회하고 대상 파트의 `MeasureMap`에 재투영한다. 페이지 좌표 앵커는 생성한 `scoreId`에만 표시한다.
+- 공동 주석은 REST 저장을 유일한 mutation 경계로 유지하고 `/ws/repertoires/{id}/annotations`에서 commit 이후 upsert/delete 이벤트만 전송한다. 첫 frame은 `JOIN_ANNOTATIONS`이며 접속·재접속마다 현재 사용자가 볼 수 있는 전체 DB snapshot을 먼저 보내 누락·중복 이벤트를 복구한다. private 주석은 작성자 연결에만 전송하고, 각 이벤트/keepalive에서 멤버십을 다시 확인한다.
 - 비로그인 웹 데이터는 기존 local IndexedDB/localStorage store에 남고, 로그인한 공유 데이터만 REST API를 사용한다. IndexedDB schema v3는 원격 템포맵·악보 원본·`MeasureMap`·주석·연습일지를 `userId`별 store에 마지막 성공 응답으로 snapshot한다. network failure일 때만 현재 사용자의 snapshot을 읽기 전용으로 사용하며, 이 규칙은 Editor의 원격 템포맵에도 동일하게 적용되어 편집·가져오기·저장을 잠근다.
 - 악보 원본은 final key와 분리된 presigned staging key에 인증 헤더 없이 업로드한다. complete는 잠근 pending `Score`를 기준으로 staging을 final로 멱등 promote한 뒤 `ready`와 staging 삭제 outbox를 한 transaction으로 확정한다. pending은 목록·GET에서 숨기고, 만료 reaper가 client 정리 실패를 회수하며 레파토리 악보 수는 `ready`만 집계한다.
+- PDF·이미지 OMR은 revision에 묶인 persistent `OmrDraftJob`으로 Audiveris를 bounded background worker에서 실행한다. worker는 pending job을 원자 claim하고 timeout을 넘긴 orphan만 복구해 rolling startup이 다른 인스턴스의 정상 작업을 되돌리지 않는다. 결과는 정규화된 마디 영역의 best-effort 초안이며 기존 `MeasureMap`을 자동으로 덮어쓰지 않는다. 사용자가 미리보기 후 명시적으로 저장할 때도 시작 시점 revision으로 충돌을 검사한다.
 - 악보 좌표는 zoom과 무관한 score page surface 기준 0–1 정규화 값이다. 재생 중 수동 페이지 이동은 auto-follow를 멈추고 명시적인 resume CTA를 제공하며, compact 악보 도구는 고정 하단 overlay다.
 
 ### Application UX and install surface
@@ -177,8 +197,9 @@ anthropic/feat-name ─┘
 ### Realtime and audio
 
 - WebSocket 주소는 `/ws/rooms/{roomId}`이며 첫 frame은 반드시 access token을 담은 `JOIN_ROOM`이다. 이후 `PING`/`PONG`, `REPORT_RTT`, `READY`, `CMD_START`, `CMD_STOP`, `CMD_SEEK` envelope를 사용한다.
+- production room metadata·presence·분산 lock은 필수 `FMR_REDIS_URL`의 공유 Redis에 저장한다. 인스턴스별 WebSocket은 Redis pub/sub으로 transport/roster/replacement를 fan-out하며 participant presence는 heartbeat TTL로 정리한다. transport 상태는 PostgreSQL `PracticeSession`과 Redis state를 분산 lock 안에서 갱신하고 PING마다 권위 상태를 다시 전송해 pub/sub 유실을 복구한다.
 - 서버 wire time은 `time.time_ns()` 기반 integer nanoseconds다. 브라우저 경계에서 milliseconds로 변환하고, min-RTT offset과 완만한 drift 보정을 거쳐 server → performance → audio clock 순서로 매핑한다.
-- 클릭은 미리 만든 `AudioBuffer`와 Worker lookahead scheduler로 예약한다. 재생 클릭과 beat 시각화에 `setTimeout`을 사용하지 않으며, 시각화는 audio clock 기반 `requestAnimationFrame`으로 구동한다.
+- 브라우저 클릭은 미리 만든 `AudioBuffer`와 Worker lookahead scheduler로 예약한다. Capacitor는 같은 `AudioEngine` 계약 뒤에서 전체 결정론적 클릭 타임라인을 native batch로 넘기고 iOS `AVAudioEngine`, Android Oboe low-latency stream으로 재생한다. 재생 클릭과 beat 시각화에 `setTimeout`을 사용하지 않으며, 시각화는 audio clock 기반 `requestAnimationFrame`으로 구동한다.
 - 네트워크 단절 중에는 이미 시작한 로컬 오디오를 중단하지 않는다. 재접속·늦은 합류는 서버 transport anchor를 받아 다음 마디 경계에서 합류한다.
 - WS close `4000`(새 연결로 교체), `4400`(잘못된 요청), `4404`(없는/만료된 방)는 terminal이다. `4401`은 현재 auth generation에서 access token을 한 번만 갱신하고 재거부되면 종료하며, 실제 network close만 backoff 재연결한다.
 - 로컬 타임라인이 자연 종료되면 리더 client가 `CMD_STOP`을 보내 서버 transport도 `stopped`로 정리한다. route/auth identity가 바뀌면 기존 예약 오디오를 즉시 중단한다.
@@ -186,7 +207,7 @@ anthropic/feat-name ─┘
 ### Mobile boundary
 
 - 브라우저 web은 `/feelmyrythm/` 절대 base를 유지한다. Capacitor는 Vite `mobile` 모드의 상대 base와 `apps/mobile/web` 산출물을 iOS/Android에 동기화하고, REST/WS만 `https://bonifacio.work` 원점으로 연결한다.
-- 웹은 공용 `nativeBridge`만 호출하며 Keep Awake, app lifecycle/deep link, haptics 같은 네이티브 세부 구현을 직접 알지 않는다.
+- 웹은 공용 `nativeBridge`만 호출하며 native audio, Keep Awake, app lifecycle/deep link, haptics 같은 네이티브 세부 구현을 직접 알지 않는다. Android native audio는 `mediaPlayback` foreground service와 MediaStyle stop action을 재생 수명에 맞춰 유지하고, iOS는 `.playback` audio session과 `UIBackgroundModes/audio`를 사용한다.
 - 브라우저 인증은 token+user를 단일 `fmr.auth.session.v1` envelope로 원자 저장하며, refresh 결과는 시작 auth generation이 현재와 같을 때만 반영한다. refresh endpoint의 권위 있는 401만 세션을 폐기하고 network/5xx는 현재 identity와 token을 보존한 채 재시도 가능한 오류로 전달한다. `hasPassword`가 없는 구형 user envelope는 `/users/me`로 갱신한다. native refresh token은 iOS Keychain `ThisDeviceOnly` 또는 Android Keystore로 보호하고 WebView backup·평문 저장소에 남기지 않는다.
 - password 가입의 첫 단계는 이름+이메일만 받고 password를 저장하지 않는다. 발급·재발급 때마다 이전 링크를 무효화하는 만료 전용 서명 토큰을 연 사용자가 새 password+확인을 제출해야만 이메일 검증, password hash 생성, access/refresh 발급을 원자적으로 완료한다. 검증 전 login과 그룹 초대를 차단하며 legacy 미검증 hash도 완료 시 반드시 덮어쓴다.
 - 비밀번호 재설정 요청은 계정 존재를 숨기고 per-email cooldown을 적용한다. 만료·1회용 reset token으로 password를 바꾸면 auth generation을 증가시키고 기존 refresh session을 전부 폐기한다. 가입·재발급·reset·탈퇴 메일은 SMTP enqueue 전에 last-attempt를 commit해 전송 실패·queue overflow도 cooldown을 유지한다. SMTP I/O는 고정 worker 수와 bounded queue를 가진 비동기 delivery manager만 수행해 요청 응답을 기다리게 하지 않으며, queue full/provider 오류 로그에는 이메일·서명 URL을 남기지 않는다.
@@ -195,10 +216,12 @@ anthropic/feat-name ─┘
 - Capacitor native WebView에서는 웹 Google GIS button/SDK를 노출하지 않고 이메일 가입·로그인만 제공한다. 브라우저에서는 Google 로그인을 유지한다.
 - `DELETE /api/users/me`는 `{ email, currentPassword? | googleIdToken? | accountDeleteToken? }` 중 계정 유형에 맞는 fresh proof 하나를 요구한다. Google-only 탈퇴 확인 메일 token은 purpose/email/Google subject/auth generation에 묶고 URL fragment에서 즉시 제거해 메모리에만 보관한다. 로그아웃 또는 다른 계정 상태에서는 secret 없는 login route state로 올바른 계정 전환을 안내하고, id+정규화 email이 일치한 뒤에만 메모리 proof로 삭제 modal을 재개한다. 성공·취소·대체 재인증 때 proof를 폐기한다. 성공 시 소유 그룹을 삭제하고 다른 그룹의 membership·개인 annotation/log·calibration/session credential을 제거하며 Todo assignee를 비운 뒤 동일 User id를 `Deleted user` tombstone으로 익명화한다.
 - 로컬·동기 재생은 같은 power lifecycle을 사용한다. 자연 종료, 명시적 stop, unmount 중 먼저 도착한 경계가 Browser WakeLock과 native KeepAwake를 정확히 한 번 해제한다.
+- AASA와 `assetlinks.json`은 release Team ID와 실제 Android keystore alias SHA-256으로 generator에서 만들며, Android bundle 전 fingerprint 일치를 검증한다. 운영 게시물은 production preflight가 app identity와 session/login/settings의 좁은 경로 범위를 확인한다.
 - 무음 스위치, 백그라운드/화면 꺼짐 오디오, 기기 간 ±10 ms 기준은 시뮬레이터가 아니라 실제 iOS/Android 기기와 녹음 파형으로 최종 검증한다.
 
 ### Deployment gate
 
 - 운영 publish/deploy는 `Validate` workflow가 성공한 정확한 commit SHA에 대해서만 시작한다. publish job은 `packages:write`, RPi deploy job은 `packages:read` 최소 권한으로 분리한다.
 - Validate에는 JS/Python 전체 check, protocol 생성 일치, 일반 Playwright와 전용 PWA upgrade E2E, PostgreSQL Alembic smoke가 포함되어야 한다.
+- 운영 승인 전 `production:preflight`로 PostgreSQL Alembic head, Redis, SMTP TLS/auth, S3 CORS/staging lifecycle, public health와 mobile association identity를 fail-closed 검증한다. S3 canary와 test mail은 명시적 opt-in에서만 외부 상태를 바꾼다.
 - server/web Dockerfile의 Python·Node·nginx·uv base와 CI/deploy PostgreSQL은 version tag와 image digest를 함께 고정한다. 운영 server는 read-only root filesystem과 `/tmp` 전용 tmpfs로 실행한다. ARM64 runtime image를 registry에 push하기 전 그 정확한 tag를 같은 read-only 경계로 실행해 server default CMD의 Alembic migration·health·non-root 상태와 nginx SPA·header·API proxy `no-store`를 통합 smoke한다.

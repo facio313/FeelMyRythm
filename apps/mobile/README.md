@@ -30,11 +30,11 @@ adb shell am start -W -a android.intent.action.VIEW -d 'https://bonifacio.work/f
 
 ## Audio and wake behavior
 
-- iOS는 `AVAudioSession.Category.playback`을 활성화해 무음 스위치와 독립적으로 재생하고, `UIBackgroundModes/audio`를 선언한다.
+- iOS `NativeAudioEngine`은 사용자 재생 제스처에서만 `AVAudioSession.Category.playback`과 `AVAudioEngine`을 활성화해 무음 스위치와 독립적으로 재생하고, `UIBackgroundModes/audio`에서 native queue를 계속 소비한다.
 - iOS와 Android 모두 튜너용 마이크 권한을 선언한다. 권한은 WebView가 실제로 마이크를 요청할 때 사용자에게 표시된다.
-- Android의 하드웨어 볼륨 키는 music stream을 제어한다.
+- Android `NativeAudioEngine`은 Oboe 1.10.0 low-latency float stream으로 전체 타임라인을 재생한다. `mediaPlayback` foreground service는 audio focus, MediaStyle 정지 action, 자연 종료를 관리하며 하드웨어 볼륨 키는 music stream을 제어한다.
 - `@capacitor-community/keep-awake`는 재생 중 화면 꺼짐을 막고 정지 시 다시 허용한다. Android 구현은 `FLAG_KEEP_SCREEN_ON`을 사용하므로 별도 `WAKE_LOCK` 권한이 필요하지 않다.
-- 현재 오디오 엔진은 Web Audio다. OS가 앱을 완전히 background/suspend한 상태의 지속 재생은 정적 설정만으로 보장할 수 없다. 문서 설계대로 실기기 검증에서 미달할 때에만 `NativeAudioEngine`과 Android foreground media service를 추가한다.
+- 브라우저는 Web Audio 120ms lookahead를 유지한다. Capacitor에서는 공용 TS 스케줄러가 결정론적 전체 클릭 목록을 native batch로 넘기므로 WebView Worker가 suspend되어도 재생이 지속된다. 템포맵 교체와 stop은 `cancelScheduledFrom`으로 native queue를 원자적으로 자른다.
 
 ## Authentication storage
 
@@ -45,13 +45,14 @@ adb shell am start -W -a android.intent.action.VIEW -d 'https://bonifacio.work/f
 
 ## Release signing
 
-서명 파일과 비밀번호는 저장소에 두지 않는다. Android App Bundle은 다음 네 값을 모두 환경으로 주입해야 하며, 하나라도 없으면 `bundleRelease`가 실패한다.
+서명 파일과 비밀번호는 저장소에 두지 않는다. Android App Bundle은 다음 다섯 값을 모두 환경으로 주입해야 한다. 공개 SHA-256 fingerprint가 실제 keystore alias와 다르면 `bundleRelease` 전에 실패한다.
 
 ```sh
 FMR_ANDROID_KEYSTORE_PATH=/absolute/path/to/release.keystore \
 FMR_ANDROID_KEYSTORE_PASSWORD='…' \
 FMR_ANDROID_KEY_ALIAS='…' \
 FMR_ANDROID_KEY_PASSWORD='…' \
+FMR_ANDROID_CERT_SHA256='AA:BB:…' \
 pnpm bundle:android
 ```
 
@@ -62,6 +63,14 @@ FMR_IOS_DEVELOPMENT_TEAM='XXXXXXXXXX' pnpm archive:ios
 ```
 
 실제 값, `.p12`, provisioning profile, keystore, `google-services.json`은 플랫폼 `.gitignore`로 차단한다.
+
+같은 Team ID와 Android fingerprint로 운영 프록시에 게시할 두 파일을 생성한다. 출력물은 반드시 도메인 root의 `/.well-known/`에 redirect 없이 `application/json`으로 제공한다.
+
+```sh
+FMR_IOS_DEVELOPMENT_TEAM='XXXXXXXXXX' \
+FMR_ANDROID_CERT_SHA256='AA:BB:…' \
+pnpm generate:association-files -- --output-dir /safe/staging/well-known
+```
 
 ## Release checks
 

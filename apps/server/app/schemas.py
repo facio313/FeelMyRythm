@@ -116,7 +116,18 @@ class MessageOut(ApiModel):
 
 Role = Literal["owner", "leader", "member"]
 TransportStatus = Literal["idle", "armed", "playing", "stopped"]
-ServerMessageType = Literal["JOINED", "PONG", "TRANSPORT", "ROOM_ROSTER", "TEMPOMAP_UPDATED", "ERROR"]
+ServerMessageType = Literal[
+    "JOINED",
+    "PONG",
+    "TRANSPORT",
+    "ROOM_ROSTER",
+    "TEMPOMAP_UPDATED",
+    "ANNOTATION_JOINED",
+    "ANNOTATION_SNAPSHOT",
+    "ANNOTATION_EVENT",
+    "ANNOTATION_PONG",
+    "ERROR",
+]
 
 
 class GroupCreate(ApiModel):
@@ -537,6 +548,26 @@ class ScoreSettingsOut(ApiModel):
     measure_map: MeasureMapOut
 
 
+OmrDraftStatus = Literal["pending", "running", "succeeded", "failed"]
+
+
+class OmrDraftCreate(ApiModel):
+    expected_measure_map_revision: int = Field(ge=0)
+
+
+class OmrDraftOut(ApiModel):
+    id: str
+    score_id: str
+    requested_by_id: str
+    expected_measure_map_revision: int
+    status: OmrDraftStatus
+    regions: list[MeasureRegion]
+    warnings: list[str]
+    error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 AnnotationScope = Literal["private", "project"]
 
 
@@ -614,6 +645,90 @@ class AnnotationOut(ApiModel):
     data: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+
+class JoinAnnotationsPayload(ApiModel):
+    repertoire_id: str
+    access_token: str
+
+
+class AnnotationPingPayload(ApiModel):
+    nonce: str
+
+
+class JoinAnnotationsMessage(ApiModel):
+    type: Literal["JOIN_ANNOTATIONS"]
+    request_id: str | None = None
+    payload: JoinAnnotationsPayload
+
+
+class AnnotationPingMessage(ApiModel):
+    type: Literal["ANNOTATION_PING"]
+    request_id: str | None = None
+    payload: AnnotationPingPayload
+
+
+AnnotationWsClientMessage = Annotated[
+    JoinAnnotationsMessage | AnnotationPingMessage,
+    Field(discriminator="type"),
+]
+
+
+class AnnotationJoinedPayload(ApiModel):
+    repertoire_id: str
+    user_id: str
+
+
+class AnnotationSnapshotPayload(ApiModel):
+    repertoire_id: str
+    annotations: list[AnnotationOut]
+
+
+class AnnotationEventPayload(ApiModel):
+    event_id: str
+    repertoire_id: str
+    operation: Literal["upsert", "delete"]
+    annotation_id: str
+    revision: int
+    scope: AnnotationScope
+    author_id: str
+    annotation: AnnotationOut | None = None
+
+    @model_validator(mode="after")
+    def validate_annotation_shape(self) -> AnnotationEventPayload:
+        if self.operation == "upsert" and self.annotation is None:
+            raise ValueError("upsert annotation events require annotation")
+        if self.operation == "delete" and self.annotation is not None:
+            raise ValueError("delete annotation events cannot include annotation")
+        return self
+
+
+class AnnotationPongPayload(ApiModel):
+    nonce: str
+
+
+class AnnotationJoinedServerMessage(ApiModel):
+    type: Literal["ANNOTATION_JOINED"]
+    request_id: str | None = None
+    payload: AnnotationJoinedPayload
+
+
+class AnnotationSnapshotServerMessage(ApiModel):
+    type: Literal["ANNOTATION_SNAPSHOT"]
+    request_id: str | None = None
+    payload: AnnotationSnapshotPayload
+
+
+class AnnotationEventServerMessage(ApiModel):
+    type: Literal["ANNOTATION_EVENT"]
+    request_id: str | None = None
+    payload: AnnotationEventPayload
+
+
+class AnnotationPongServerMessage(ApiModel):
+    type: Literal["ANNOTATION_PONG"]
+    request_id: str | None = None
+    payload: AnnotationPongPayload
 
 
 class LogAnchor(ApiModel):
@@ -924,6 +1039,16 @@ WsServerMessage = Annotated[
     | TransportServerMessage
     | RosterServerMessage
     | RevisionServerMessage
+    | ErrorServerMessage,
+    Field(discriminator="type"),
+]
+
+
+AnnotationWsServerMessage = Annotated[
+    AnnotationJoinedServerMessage
+    | AnnotationSnapshotServerMessage
+    | AnnotationEventServerMessage
+    | AnnotationPongServerMessage
     | ErrorServerMessage,
     Field(discriminator="type"),
 ]

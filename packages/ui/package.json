@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "sideEffects": [
-    "./src/tokens.css"
+    "./src/tokens.css",
+    "./src/primitives.css"
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./src/tokens.css"
+    "./tokens.css": "./src/tokens.css",
+    "./primitives.css": "./src/primitives.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
