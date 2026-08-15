@@ -15,6 +15,32 @@ function symmetricSample(t0: number, rttMs: number, offsetMs: number): ClockSync
   };
 }
 
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let next = Math.imul(state ^ (state >>> 15), 1 | state);
+    next ^= next + Math.imul(next ^ (next >>> 7), 61 | next);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function ntpSampleWithQueuingJitter(options: {
+  rng: () => number;
+  clientSendTimeMs: number;
+  trueOffsetMs: number;
+  baseOneWayMs: number;
+  maxJitterMs: number;
+}): ClockSyncSample {
+  const forwardMs = options.baseOneWayMs + options.rng() * options.maxJitterMs;
+  const backMs = options.baseOneWayMs + options.rng() * options.maxJitterMs;
+  return {
+    clientSendTimeMs: options.clientSendTimeMs,
+    serverTimeMs: options.clientSendTimeMs + forwardMs + options.trueOffsetMs,
+    clientReceiveTimeMs: options.clientSendTimeMs + forwardMs + backMs,
+  };
+}
+
 describe('clock offset estimation', () => {
   it('selects the minimum-RTT offset from a burst', () => {
     const samples = [
@@ -44,6 +70,49 @@ describe('clock offset estimation', () => {
     });
 
     expect(estimateClockOffset(samples).offsetMs).toBe(trueOffset);
+  });
+
+  it('keeps offset error under 5ms when queuing jitter reaches 50ms', () => {
+    const baseOneWayMs = 8;
+    const maxJitterMs = 50;
+    const usableExtraRttMs = 10;
+    const seeds = [1, 7, 99, 20260815];
+
+    for (const seed of seeds) {
+      const rng = mulberry32(seed);
+      const trueOffsetMs = 1_700_000_000_000 + rng() * 2_000;
+      const samples: ClockSyncSample[] = [];
+      let minExtraRttMs = Number.POSITIVE_INFINITY;
+
+      for (let index = 0; index < 512; index += 1) {
+        const sample = ntpSampleWithQueuingJitter({
+          rng,
+          clientSendTimeMs: index * 100,
+          trueOffsetMs,
+          baseOneWayMs,
+          maxJitterMs,
+        });
+        samples.push(sample);
+        minExtraRttMs = Math.min(
+          minExtraRttMs,
+          sample.clientReceiveTimeMs - sample.clientSendTimeMs - 2 * baseOneWayMs,
+        );
+        if (samples.length >= 24 && minExtraRttMs < usableExtraRttMs) break;
+      }
+
+      expect(samples.length).toBeGreaterThanOrEqual(8);
+      expect(
+        samples.some(
+          (sample) => sample.clientReceiveTimeMs - sample.clientSendTimeMs > 2 * baseOneWayMs + 1,
+        ),
+      ).toBe(true);
+
+      const estimate = estimateClockOffset(samples);
+      const extraRttMs = estimate.rttMs - 2 * baseOneWayMs;
+      expect(extraRttMs).toBeLessThan(usableExtraRttMs);
+      expect(Math.abs(estimate.offsetMs - trueOffsetMs)).toBeLessThanOrEqual(extraRttMs / 2 + 1e-9);
+      expect(Math.abs(estimate.offsetMs - trueOffsetMs)).toBeLessThan(5);
+    }
   });
 
   it('uses EMA for accepted drift samples and rejects RTT outliers', () => {

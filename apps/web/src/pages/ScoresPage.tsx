@@ -1,27 +1,7 @@
 import { assertValidTempoMap, type TempoMap } from '@feelmyrythm/core';
 import type { components } from '@feelmyrythm/protocol';
-import { Button, Card, EmptyState, Field, StatusBadge, useToast } from '@feelmyrythm/ui';
-import {
-  BookOpen,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FileMusic,
-  FileText,
-  Highlighter,
-  Map as MapIcon,
-  MousePointer2,
-  PenLine,
-  Play,
-  Save,
-  Square,
-  Stamp,
-  Trash2,
-  Type,
-  Upload,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+import { Button, Card, EmptyState, useToast } from '@feelmyrythm/ui';
+import { BookOpen, Save, Upload } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -31,16 +11,14 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
-import { MarkdownContent } from '../components/MarkdownContent';
 import { ApiError } from '../lib/api';
 import { AnnotationSyncClient, type AnnotationConnectionState } from '../lib/annotationClient';
 import { useAuth } from '../lib/auth';
 import { localDb, type LocalMeasureMap, type LocalScore } from '../lib/localDb';
-import { musicXmlToTempoMap, readMusicXml, renderMusicXml } from '../lib/musicxml';
+import { musicXmlToTempoMap, readMusicXml } from '../lib/musicxml';
 import {
   listPracticeLogs,
   practiceAnchorMarkers,
@@ -70,332 +48,47 @@ import {
   type MusicXmlDraft,
   type OmrDraft,
   type ScoreListItem,
-  type ScoreRecord,
   type VersionedAnnotation,
 } from '../lib/scoreApi';
 import { useAsync } from '../lib/useAsync';
 import { createDefaultTempoMap } from '../lib/defaultTempoMap';
 import { useMetronome } from '../lib/useMetronome';
-
-interface NormalizedRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+import { ScorePartTabs } from './scores/ScorePartTabs';
+import { ScoreStage } from './scores/ScoreStage';
+import { ScoreTools } from './scores/ScoreTools';
+import { annotationRevision, localPracticeMarkers } from './scores/annotationHelpers';
+import { percentRectToNormalized, regionsFromSystem } from './scores/scoreGeometry';
+import { nextPartIndex } from './scores/scorePartNavigation';
+import {
+  currentMeasurePracticeMarkers,
+  editablePageAnnotations,
+  projectedMeasureAnnotations,
+  projectedPracticeMarkers,
+  visibleOmrPageRegions,
+  visiblePageAnnotations,
+  visiblePageRegions,
+} from './scores/scoreVisibility';
+import { useScoreSurfaceGestures } from './scores/useScoreSurfaceGestures';
+import {
+  MUSIC_XML_MIME,
+  draftJumpSummary,
+  draftSectionSummary,
+  isMusicXmlName,
+  isNetworkFailure,
+  localScoreFromRemote,
+  mergeRemoteScoreMetadata,
+  nextMeasureNumber,
+  scoreContentType,
+  supportsScore,
+} from './scores/scoreFiles';
+import type { AnnotationMode, AnnotationScope, NormalizedRect, PenPoint } from './scores/types';
 
 type ServerTempoMap = components['schemas']['TempoMapOut'];
-type AnnotationMode = 'view' | 'system' | 'boundaries' | 'pen' | 'text' | 'stamp';
-type AnnotationScope = 'private' | 'project';
-
-interface PenPoint {
-  x: number;
-  y: number;
-}
 
 interface PendingTempoDraft {
   draft: MusicXmlDraft;
   filename: string;
   repertoireItemId: string;
-}
-
-function annotationRevision(annotation: unknown, fallback = 0): number {
-  if (typeof annotation !== 'object' || annotation === null || !('revision' in annotation)) {
-    return fallback;
-  }
-  const revision = annotation.revision;
-  return typeof revision === 'number' && Number.isInteger(revision) ? revision : fallback;
-}
-
-function localPracticeMarkers(repertoireItemId: string, scoreId: string): PracticeAnchorMarker[] {
-  try {
-    const raw = localStorage.getItem(`fmr.practice.${repertoireItemId}`);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((entry): PracticeAnchorMarker[] => {
-      if (typeof entry !== 'object' || entry === null) return [];
-      const value = entry as Record<string, unknown>;
-      const measureNumber = Number(value.measureNumber);
-      if (!Number.isInteger(measureNumber) || measureNumber < 1) return [];
-      return [
-        {
-          logId: typeof value.id === 'string' ? value.id : crypto.randomUUID(),
-          authorName: typeof value.authorDisplayName === 'string' ? value.authorDisplayName : '나',
-          content: typeof value.bodyMarkdown === 'string' ? value.bodyMarkdown : '',
-          measureNumber,
-          scoreId,
-        },
-      ];
-    });
-  } catch {
-    return [];
-  }
-}
-
-function penPoints(payload: Record<string, unknown>): PenPoint[] {
-  const points = payload.points;
-  if (!Array.isArray(points)) return [];
-  return points.flatMap((point): PenPoint[] => {
-    if (typeof point !== 'object' || point === null) return [];
-    const x = Number((point as Record<string, unknown>).x);
-    const y = Number((point as Record<string, unknown>).y);
-    return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
-  });
-}
-
-const MUSIC_XML_MIME = 'application/vnd.recordare.musicxml+xml';
-
-const isMusicXmlName = (name: string): boolean => /\.(?:musicxml|mxl|xml)$/i.test(name);
-
-function scoreContentType(file: File): string {
-  if (file.type && file.type !== 'application/octet-stream') return file.type;
-  const lower = file.name.toLowerCase();
-  if (lower.endsWith('.pdf')) return 'application/pdf';
-  if (lower.endsWith('.mxl')) return 'application/zip';
-  if (lower.endsWith('.musicxml') || lower.endsWith('.xml')) return MUSIC_XML_MIME;
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  return file.type;
-}
-
-function supportsScore(file: File, contentType: string): boolean {
-  return (
-    contentType === 'application/pdf' ||
-    contentType.startsWith('image/') ||
-    contentType.includes('musicxml') ||
-    isMusicXmlName(file.name)
-  );
-}
-
-function isNetworkFailure(error: unknown): boolean {
-  return error instanceof TypeError && /fetch|network|load/i.test(error.message);
-}
-
-function nextMeasureNumber(map?: LocalMeasureMap): number {
-  return Math.max(0, ...(map?.regions.map((region) => region.measureNumber) ?? [])) + 1;
-}
-
-function draftSectionSummary(section: Record<string, unknown>, index: number): string {
-  const start = Number(section.startMeasure);
-  const end = Number(section.endMeasure);
-  const bpm = Number(section.bpm);
-  const signature = section.timeSignature;
-  const signatureRecord =
-    typeof signature === 'object' && signature !== null
-      ? (signature as Record<string, unknown>)
-      : undefined;
-  const num = signatureRecord?.num;
-  const denom = signatureRecord?.denom;
-  const meter = `${typeof num === 'number' || typeof num === 'string' ? num : '?'}/${
-    typeof denom === 'number' || typeof denom === 'string' ? denom : '?'
-  }`;
-  return `구간 ${index + 1}: ${Number.isFinite(start) ? start : '?'}–${Number.isFinite(end) ? end : '?'}마디 · ${meter} · ${Number.isFinite(bpm) ? bpm : '?'} BPM`;
-}
-
-function draftJumpSummary(jump: Record<string, unknown>, index: number): string {
-  const type = typeof jump.type === 'string' ? jump.type : `이동 ${index + 1}`;
-  const details = ['startMeasure', 'endMeasure', 'fromMeasure', 'targetMeasure', 'times', 'pass']
-    .flatMap((key) =>
-      typeof jump[key] === 'number' || typeof jump[key] === 'string'
-        ? [`${key} ${String(jump[key])}`]
-        : [],
-    )
-    .join(' · ');
-  return details ? `${type} · ${details}` : type;
-}
-
-export async function localScoreFromRemote(
-  record: ScoreRecord,
-  downloaded: Blob,
-): Promise<LocalScore> {
-  let blob = downloaded;
-  let mimeType = record.contentType;
-  if (isMusicXmlName(record.filename)) {
-    const source = new File([downloaded], record.filename, { type: record.contentType });
-    const xml = await readMusicXml(source);
-    blob = new Blob([xml], { type: MUSIC_XML_MIME });
-    mimeType = MUSIC_XML_MIME;
-  }
-  return localScoreWithMetadata(record, blob, mimeType);
-}
-
-function localScoreWithMetadata(record: ScoreRecord, blob: Blob, mimeType: string): LocalScore {
-  return {
-    id: record.id,
-    repertoireItemId: record.repertoireId,
-    name: record.filename,
-    kind: record.kind,
-    ...(record.instrument ? { instrument: record.instrument } : {}),
-    mimeType,
-    blob,
-    updatedAt: record.updatedAt,
-  };
-}
-
-export function mergeRemoteScoreMetadata(record: ScoreRecord, score: LocalScore): LocalScore {
-  return localScoreWithMetadata(record, score.blob, score.mimeType);
-}
-
-function useObjectUrl(blob?: Blob) {
-  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : undefined), [blob]);
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [url]);
-  return url;
-}
-
-function PdfPage({
-  blob,
-  pageNumber,
-  onPageCount,
-}: {
-  blob: Blob;
-  pageNumber: number;
-  onPageCount: (count: number) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [renderError, setRenderError] = useState<string>();
-  const [renderAttempt, setRenderAttempt] = useState(0);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let cancelled = false;
-    let destroyLoadingTask: (() => Promise<void>) | undefined;
-    void (async () => {
-      try {
-        const data = await blob.arrayBuffer();
-        if (cancelled) return;
-        const [{ GlobalWorkerOptions, getDocument }, pdfWorker] = await Promise.all([
-          import('pdfjs-dist'),
-          import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-        ]);
-        if (cancelled) return;
-        GlobalWorkerOptions.workerSrc = pdfWorker.default;
-        const loadingTask = getDocument({ data });
-        destroyLoadingTask = () => loadingTask.destroy();
-        const pdf = await loadingTask.promise;
-        if (cancelled) return;
-        onPageCount(pdf.numPages);
-        const page = await pdf.getPage(Math.min(pageNumber, pdf.numPages));
-        const base = page.getViewport({ scale: 1 });
-        const width = canvas.parentElement?.clientWidth ?? 800;
-        const viewport = page.getViewport({ scale: Math.min(2.5, width / base.width) });
-        const ratio = window.devicePixelRatio || 1;
-        canvas.width = Math.round(viewport.width * ratio);
-        canvas.height = Math.round(viewport.height * ratio);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        const context = canvas.getContext('2d');
-        if (!context) return;
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        await page.render({ canvas, canvasContext: context, viewport }).promise;
-        if (!cancelled) setRenderError(undefined);
-      } catch (error) {
-        if (!cancelled) {
-          setRenderError(error instanceof Error ? error.message : 'PDF를 렌더링하지 못했습니다.');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      void destroyLoadingTask?.();
-    };
-  }, [blob, onPageCount, pageNumber, renderAttempt]);
-  return (
-    <>
-      {renderError ? (
-        <div className="score-render-error" role="alert">
-          <strong>PDF 페이지를 표시하지 못했습니다.</strong>
-          <span>{renderError}</span>
-          <Button
-            onClick={() => {
-              setRenderError(undefined);
-              setRenderAttempt((current) => current + 1);
-            }}
-          >
-            다시 시도
-          </Button>
-        </div>
-      ) : null}
-      <canvas
-        ref={canvasRef}
-        className="score-canvas"
-        aria-label={`PDF ${pageNumber}페이지`}
-        hidden={Boolean(renderError)}
-      />
-    </>
-  );
-}
-
-function MusicXmlPage({ blob }: { blob: Blob }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [renderError, setRenderError] = useState<string>();
-  const [renderAttempt, setRenderAttempt] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    void blob
-      .text()
-      .then(async (xml) => {
-        if (!cancelled && containerRef.current) await renderMusicXml(containerRef.current, xml);
-        if (!cancelled) setRenderError(undefined);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setRenderError(
-            error instanceof Error ? error.message : 'MusicXML을 렌더링하지 못했습니다.',
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [blob, renderAttempt]);
-  return (
-    <>
-      {renderError ? (
-        <div className="score-render-error" role="alert">
-          <strong>MusicXML 악보를 표시하지 못했습니다.</strong>
-          <span>{renderError}</span>
-          <Button
-            onClick={() => {
-              setRenderError(undefined);
-              setRenderAttempt((current) => current + 1);
-            }}
-          >
-            다시 시도
-          </Button>
-        </div>
-      ) : null}
-      <div ref={containerRef} className="musicxml-sheet" hidden={Boolean(renderError)} />
-    </>
-  );
-}
-
-function ScoreSurface({
-  score,
-  page,
-  onPageCount,
-}: {
-  score: LocalScore;
-  page: number;
-  onPageCount: (count: number) => void;
-}) {
-  const imageUrl = useObjectUrl(score.mimeType.startsWith('image/') ? score.blob : undefined);
-  if (score.mimeType === 'application/pdf') {
-    return <PdfPage blob={score.blob} pageNumber={page} onPageCount={onPageCount} />;
-  }
-  if (score.mimeType.includes('musicxml') || score.name.endsWith('.musicxml')) {
-    return <MusicXmlPage blob={score.blob} />;
-  }
-  if (imageUrl) {
-    return <img className="score-image" src={imageUrl} alt={score.name} draggable={false} />;
-  }
-  return <div className="unsupported-score">이 악보 형식은 미리보기를 지원하지 않습니다.</div>;
 }
 
 export function ScoresPage() {
@@ -1190,93 +883,6 @@ export function ScoresPage() {
     }
   }
 
-  const pointerPosition = (event: ReactPointerEvent): { x: number; y: number } => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
-    };
-  };
-
-  const scoreSurfaceKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape' && mode !== 'view') {
-      event.preventDefault();
-      setMode('view');
-      return;
-    }
-    if ((mode === 'text' || mode === 'stamp') && event.key === 'Enter') {
-      event.preventDefault();
-      void saveAnnotation({ x: 0.5, y: 0.5 }, 'measure');
-      return;
-    }
-    if (mode !== 'view' || !measureMap) return;
-    const measures = [...new Set(measureMap.regions.map((region) => region.measureNumber))]
-      .flatMap((measureNumber) => {
-        const canonical = canonicalMeasureNumber(measureNumber, measureMap.measureNumberOffset);
-        return canonical === undefined
-          ? []
-          : [
-              {
-                measureNumber,
-                canonical,
-                page: measureMap.regions.find((region) => region.measureNumber === measureNumber)
-                  ?.page,
-              },
-            ];
-      })
-      .sort((left, right) => left.canonical - right.canonical);
-    const currentIndex = measures.findIndex((entry) => entry.canonical >= currentMeasure);
-    const targetIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? measures.length - 1
-          : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-            ? Math.max(0, (currentIndex < 0 ? measures.length : currentIndex) - 1)
-            : event.key === 'ArrowRight' || event.key === 'ArrowDown'
-              ? Math.min(measures.length - 1, Math.max(0, currentIndex + 1))
-              : -1;
-    const target = measures[targetIndex];
-    if (!target) return;
-    event.preventDefault();
-    void selectCanonicalMeasure(target.canonical, target.page);
-  };
-
-  const pointerDown = (event: ReactPointerEvent) => {
-    if (activeSurfacePointerIdRef.current !== null) return;
-    if (mode === 'system') {
-      event.preventDefault();
-      activeSurfacePointerIdRef.current = event.pointerId;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      setDragStart(pointerPosition(event));
-      return;
-    }
-    if (mode === 'pen') {
-      event.preventDefault();
-      activeSurfacePointerIdRef.current = event.pointerId;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      setActivePenPoints([pointerPosition(event)]);
-    }
-  };
-
-  const pointerMove = (event: ReactPointerEvent) => {
-    if (
-      mode !== 'pen' ||
-      activeSurfacePointerIdRef.current !== event.pointerId ||
-      !event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      return;
-    }
-    const point = pointerPosition(event);
-    setActivePenPoints((current) => {
-      const previous = current.at(-1);
-      if (previous && Math.hypot(previous.x - point.x, previous.y - point.y) < 0.002) {
-        return current;
-      }
-      return [...current, point];
-    });
-  };
-
   async function updateOfflineCopy(operation: Promise<void>, description: string): Promise<void> {
     try {
       await operation;
@@ -1522,88 +1128,6 @@ export function ScoresPage() {
     }
   }
 
-  const pointerUp = (event: ReactPointerEvent) => {
-    if (
-      (mode === 'pen' || mode === 'system') &&
-      activeSurfacePointerIdRef.current !== event.pointerId
-    ) {
-      return;
-    }
-    const point = pointerPosition(event);
-    if (
-      activeSurfacePointerIdRef.current === event.pointerId &&
-      event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (activeSurfacePointerIdRef.current === event.pointerId) {
-      activeSurfacePointerIdRef.current = null;
-    }
-    if (mode === 'pen') {
-      const points = [...activePenPoints, point];
-      setActivePenPoints([]);
-      void savePenAnnotation(points);
-      return;
-    }
-    if (mode === 'view') {
-      const target = measureMap?.regions.find(
-        (region) =>
-          region.page === page &&
-          point.x >= region.rect.x &&
-          point.x <= region.rect.x + region.rect.w &&
-          point.y >= region.rect.y &&
-          point.y <= region.rect.y + region.rect.h,
-      );
-      if (target) {
-        const canonical = canonicalMeasureNumber(
-          target.measureNumber,
-          measureMap?.measureNumberOffset ?? 0,
-        );
-        if (canonical !== undefined) void selectCanonicalMeasure(canonical, target.page);
-      }
-      return;
-    }
-    if (mode === 'system' && dragStart) {
-      const rect = {
-        x: Math.min(point.x, dragStart.x),
-        y: Math.min(point.y, dragStart.y),
-        w: Math.abs(point.x - dragStart.x),
-        h: Math.abs(point.y - dragStart.y),
-      };
-      if (rect.w > 0.03 && rect.h > 0.02) {
-        setSystemRect(rect);
-        setBoundaries([]);
-        setMode('boundaries');
-      }
-      setDragStart(undefined);
-      return;
-    }
-    if (mode === 'boundaries' && systemRect) {
-      const relative = (point.x - systemRect.x) / systemRect.w;
-      if (relative > 0.02 && relative < 0.98) {
-        setBoundaries((current) => {
-          const nearby = current.findIndex((boundary) => Math.abs(boundary - relative) < 0.015);
-          if (nearby >= 0) return current.filter((_, index) => index !== nearby);
-          return [...current, relative].sort((a, b) => a - b);
-        });
-      }
-      return;
-    }
-    if ((mode === 'text' || mode === 'stamp') && selected) {
-      void saveAnnotation(point);
-    }
-  };
-
-  const pointerCancel = (event: ReactPointerEvent) => {
-    if (activeSurfacePointerIdRef.current !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    activeSurfacePointerIdRef.current = null;
-    setDragStart(undefined);
-    setActivePenPoints([]);
-  };
-
   const requestOmrDraft = async () => {
     if (!selected || !remoteMode || usingOfflineCache || !canManageScores) return;
     const targetScore = selected;
@@ -1707,21 +1231,7 @@ export function ScoresPage() {
     if (!selected || !systemRect || usingOfflineCache || !canManageScores) return;
     const targetScore = selected;
     const normalizedFirstMeasure = Math.max(1, Math.trunc(firstMeasure));
-    const cuts = [0, ...boundaries, 1];
-    const regions = cuts.slice(0, -1).map((start, index) => {
-      const end = cuts[index + 1] ?? 1;
-      return {
-        id: crypto.randomUUID(),
-        page,
-        measureNumber: normalizedFirstMeasure + index,
-        rect: {
-          x: systemRect.x + systemRect.w * start,
-          y: systemRect.y,
-          w: systemRect.w * (end - start),
-          h: systemRect.h,
-        },
-      };
-    });
+    const regions = regionsFromSystem(systemRect, boundaries, page, normalizedFirstMeasure);
     const next: LocalMeasureMap = {
       scoreId: targetScore.id,
       measureNumberOffset: measureMap?.measureNumberOffset ?? 0,
@@ -1775,21 +1285,8 @@ export function ScoresPage() {
   const addKeyboardRegion = async () => {
     if (!selected || usingOfflineCache || !canManageScores) return;
     const targetScore = selected;
-    const rect = {
-      x: keyboardRegion.x / 100,
-      y: keyboardRegion.y / 100,
-      w: keyboardRegion.w / 100,
-      h: keyboardRegion.h / 100,
-    };
-    if (
-      Object.values(rect).some((value) => !Number.isFinite(value)) ||
-      rect.x < 0 ||
-      rect.y < 0 ||
-      rect.w <= 0 ||
-      rect.h <= 0 ||
-      rect.x + rect.w > 1 ||
-      rect.y + rect.h > 1
-    ) {
+    const rect = percentRectToNormalized(keyboardRegion);
+    if (!rect) {
       notify({
         title: '마디 영역 값을 확인해 주세요.',
         description: '위치와 크기는 0~100% 안에서 페이지를 벗어나지 않아야 합니다.',
@@ -2002,94 +1499,54 @@ export function ScoresPage() {
     }
   }
 
-  const visibleRegions =
-    measureMap && selected && measureMap.scoreId === selected.id
-      ? measureMap.regions.filter((region) => region.page === page)
-      : [];
-  const visibleOmrRegions =
-    showOmrPreview && omrDraft?.status === 'succeeded' && omrDraft.scoreId === selected?.id
-      ? omrDraft.regions.filter((region) => region.page === page)
-      : [];
-  const visibleAnnotations = annotations.filter(
-    (annotation) =>
-      annotation.scoreId === selected?.id &&
-      annotation.page === page &&
-      annotation.payload.anchorType !== 'measure',
+  const { scoreSurfaceKeyDown, pointerDown, pointerMove, pointerUp, pointerCancel } =
+    useScoreSurfaceGestures({
+      mode,
+      setMode,
+      measureMap,
+      page,
+      currentMeasure,
+      selected,
+      dragStart,
+      setDragStart,
+      systemRect,
+      setSystemRect,
+      setBoundaries,
+      activePenPoints,
+      setActivePenPoints,
+      activeSurfacePointerIdRef,
+      saveAnnotation,
+      savePenAnnotation,
+      selectCanonicalMeasure,
+    });
+
+  const visibleRegions = visiblePageRegions(measureMap, selected?.id, page);
+  const visibleOmrRegions = visibleOmrPageRegions(omrDraft, selected?.id, page, showOmrPreview);
+  const visibleAnnotations = visiblePageAnnotations(annotations, selected?.id, page);
+  const visibleMeasureAnnotations = projectedMeasureAnnotations(
+    annotations,
+    visibleRegions,
+    measureMap?.measureNumberOffset ?? 0,
   );
-  const visibleMeasureAnnotations = annotations.flatMap((annotation) => {
-    if (
-      annotation.payload.anchorType !== 'measure' ||
-      annotation.measureNumber === undefined ||
-      (annotation.kind !== 'text' && annotation.kind !== 'stamp')
-    ) {
-      return [];
-    }
-    const scoreMeasure = scoreMeasureNumber(
-      annotation.measureNumber,
-      measureMap?.measureNumberOffset ?? 0,
-    );
-    const region = visibleRegions.find((candidate) => candidate.measureNumber === scoreMeasure);
-    return region
-      ? [
-          {
-            annotation,
-            x: region.rect.x + region.rect.w / 2,
-            y: region.rect.y + region.rect.h / 2,
-          },
-        ]
-      : [];
-  });
-  const visibleEditableAnnotations = [
-    ...visibleAnnotations,
-    ...visibleMeasureAnnotations
-      .filter(({ annotation }) => annotation.scoreId === selected?.id)
-      .map(({ annotation }) => annotation),
-  ];
-  const currentPracticeMarkers = practiceMarkers.filter(
-    (marker) => marker.measureNumber === currentMeasure,
+  const visibleEditableAnnotations = editablePageAnnotations(
+    visibleAnnotations,
+    visibleMeasureAnnotations,
+    selected?.id,
   );
-  const visiblePracticeMarkers = practiceMarkers.flatMap((marker) => {
-    if (
-      marker.scoreId === selected?.id &&
-      marker.page === page &&
-      marker.x !== undefined &&
-      marker.y !== undefined
-    ) {
-      return [{ marker, x: marker.x, y: marker.y }];
-    }
-    if (marker.measureNumber === undefined) return [];
-    const scoreMeasure = scoreMeasureNumber(
-      marker.measureNumber,
-      measureMap?.measureNumberOffset ?? 0,
-    );
-    const region = visibleRegions.find((candidate) => candidate.measureNumber === scoreMeasure);
-    return region
-      ? [
-          {
-            marker,
-            x: region.rect.x + region.rect.w - 0.012,
-            y: region.rect.y + 0.014,
-          },
-        ]
-      : [];
-  });
+  const currentPracticeMarkers = currentMeasurePracticeMarkers(practiceMarkers, currentMeasure);
+  const visiblePracticeMarkers = projectedPracticeMarkers(
+    practiceMarkers,
+    visibleRegions,
+    selected?.id,
+    page,
+    measureMap?.measureNumberOffset ?? 0,
+  );
   const parts = scores.data ?? [];
   const selectPartFromKeyboard = (
     event: ReactKeyboardEvent<HTMLButtonElement>,
     currentIndex: number,
   ) => {
-    const lastIndex = parts.length - 1;
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? lastIndex
-          : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-            ? (currentIndex - 1 + parts.length) % parts.length
-            : event.key === 'ArrowRight' || event.key === 'ArrowDown'
-              ? (currentIndex + 1) % parts.length
-              : -1;
-    const next = parts[nextIndex];
+    const next = parts[nextPartIndex(event.key, currentIndex, parts.length - 1)];
     if (!next) return;
     event.preventDefault();
     keyboardPartFocusIdRef.current = next.id;
@@ -2271,634 +1728,105 @@ export function ScoresPage() {
         </Card>
       ) : parts.length > 0 ? (
         <>
-          <div className="score-parts" role="tablist" aria-label="총보와 파트보">
-            {parts.map((score, index) => (
-              <button
-                key={score.id}
-                id={`score-part-tab-${score.id}`}
-                role="tab"
-                aria-selected={selected?.id === score.id}
-                aria-controls="score-part-panel"
-                tabIndex={selected?.id === score.id ? 0 : -1}
-                className={selected?.id === score.id ? 'score-part--active' : ''}
-                onClick={() => {
-                  void navigate(scorePath(score.id));
-                }}
-                onKeyDown={(event) => selectPartFromKeyboard(event, index)}
-              >
-                {score.kind === 'full' ? (
-                  <FileMusic size={16} aria-hidden />
-                ) : (
-                  <FileText size={16} aria-hidden />
-                )}
-                {score.instrument ?? (score.kind === 'full' ? '총보' : score.name)}
-              </button>
-            ))}
-          </div>
+          <ScorePartTabs
+            parts={parts}
+            selectedId={selected?.id}
+            onSelect={(id) => {
+              void navigate(scorePath(id));
+            }}
+            onKeyDown={selectPartFromKeyboard}
+          />
           <div
             id="score-part-panel"
             className="score-layout"
             role="tabpanel"
             aria-labelledby={selected ? `score-part-tab-${selected.id}` : undefined}
           >
-            <Card className="score-toolbar" data-open={toolsOpen || undefined}>
-              <Button
-                className="score-toolbar__toggle"
-                variant="ghost"
-                aria-expanded={toolsOpen}
-                aria-controls="score-tools"
-                onClick={() => setToolsOpen((current) => !current)}
-              >
-                악보 도구
-                <ChevronDown size={18} aria-hidden />
-              </Button>
-              <div id="score-tools" className="score-toolbar__content">
-                <div className="score-toolbar__group">
-                  <span className="fmr-field__label">도구</span>
-                  <Button
-                    variant={mode === 'view' ? 'primary' : 'secondary'}
-                    aria-pressed={mode === 'view'}
-                    onClick={() => setMode('view')}
-                  >
-                    <MousePointer2 size={17} /> 보기
-                  </Button>
-                  <Button
-                    variant={mode === 'system' || mode === 'boundaries' ? 'primary' : 'secondary'}
-                    aria-pressed={mode === 'system' || mode === 'boundaries'}
-                    disabled={usingOfflineCache || !canManageScores}
-                    onClick={() => setMode('system')}
-                  >
-                    <MapIcon size={17} /> 마디 매핑
-                  </Button>
-                  <Button
-                    variant={mode === 'pen' ? 'primary' : 'secondary'}
-                    aria-pressed={mode === 'pen'}
-                    disabled={usingOfflineCache}
-                    onClick={() => setMode('pen')}
-                  >
-                    <PenLine size={17} /> 펜
-                  </Button>
-                  <Button
-                    variant={mode === 'text' ? 'primary' : 'secondary'}
-                    aria-pressed={mode === 'text'}
-                    disabled={usingOfflineCache}
-                    onClick={() => setMode('text')}
-                  >
-                    <Type size={17} /> 텍스트
-                  </Button>
-                  <Button
-                    variant={mode === 'stamp' ? 'primary' : 'secondary'}
-                    aria-pressed={mode === 'stamp'}
-                    disabled={usingOfflineCache}
-                    onClick={() => setMode('stamp')}
-                  >
-                    <Stamp size={17} /> 기호
-                  </Button>
-                </div>
-                <Field
-                  label="현재 마디"
-                  type="number"
-                  min={1}
-                  value={currentMeasure}
-                  onChange={(event) => {
-                    const next = Math.max(1, Number(event.target.value));
-                    currentMeasureRef.current = next;
-                    setCurrentMeasure(next);
-                    const scoreMeasure = scoreMeasureNumber(
-                      next,
-                      measureMap?.measureNumberOffset ?? 0,
-                    );
-                    const target = measureMap?.regions.find(
-                      (region) => region.measureNumber === scoreMeasure,
-                    );
-                    if (target) setPage(target.page);
-                  }}
-                />
-                <Button
-                  disabled={!selected || !playbackReady}
-                  variant={metronome.playing ? 'primary' : 'secondary'}
-                  onClick={() => void togglePlayback()}
-                >
-                  {metronome.playing ? <Square size={17} /> : <Play size={17} />}
-                  {metronome.playing ? '악보 재생 정지' : '이 마디부터 재생'}
-                </Button>
-                {mode === 'pen' || mode === 'text' || mode === 'stamp' ? (
-                  <div className="score-annotation-settings">
-                    {mode === 'text' || mode === 'stamp' ? (
-                      <>
-                        <Field
-                          label={mode === 'text' ? '필기 내용' : '기호'}
-                          value={annotationText}
-                          onChange={(event) => setAnnotationText(event.target.value)}
-                        />
-                        <Button
-                          disabled={!annotationText.trim() || usingOfflineCache}
-                          onClick={() => void saveAnnotation({ x: 0.5, y: 0.5 }, 'measure')}
-                        >
-                          현재 마디 중앙에 추가
-                        </Button>
-                      </>
-                    ) : null}
-                    <fieldset>
-                      <legend className="fmr-field__label">공유 범위</legend>
-                      <label>
-                        <input
-                          type="radio"
-                          name="annotation-scope"
-                          checked={annotationScope === 'private'}
-                          onChange={() => setAnnotationScope('private')}
-                        />{' '}
-                        나만 보기
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="annotation-scope"
-                          checked={annotationScope === 'project'}
-                          onChange={() => setAnnotationScope('project')}
-                        />{' '}
-                        프로젝트 공유
-                      </label>
-                    </fieldset>
-                    {visibleEditableAnnotations.length ? (
-                      <div className="score-annotation-list" aria-label="이 페이지 필기 목록">
-                        <strong>이 페이지 필기</strong>
-                        {visibleEditableAnnotations.map((annotation) => {
-                          const text = annotation.payload.text;
-                          const label =
-                            typeof text === 'string' && text.trim()
-                              ? text
-                              : annotation.kind === 'pen'
-                                ? '펜 스트로크'
-                                : '필기';
-                          return (
-                            <div key={annotation.id}>
-                              <span>{label}</span>
-                              {!remoteMode ||
-                              annotation.authorId === user?.id ||
-                              canManageScores ? (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  aria-label={`필기 삭제: ${label}`}
-                                  disabled={usingOfflineCache}
-                                  onClick={() => void removeAnnotation(annotation)}
-                                >
-                                  <Trash2 size={16} aria-hidden />
-                                </Button>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                {mode === 'system' ? (
-                  <div className="stack">
-                    <div className="mapping-help">
-                      <PenLine size={18} aria-hidden />
-                      <p>한 시스템(단) 전체를 드래그하세요.</p>
-                    </div>
-                    <details className="keyboard-region-editor">
-                      <summary>키보드로 마디 영역 추가</summary>
-                      <Field
-                        label="마디 번호"
-                        type="number"
-                        min={1}
-                        value={firstMeasure}
-                        onChange={(event) => setFirstMeasure(Number(event.target.value))}
-                      />
-                      {(['x', 'y', 'w', 'h'] as const).map((field) => (
-                        <Field
-                          key={field}
-                          label={
-                            field === 'x'
-                              ? '왼쪽 위치 (%)'
-                              : field === 'y'
-                                ? '위쪽 위치 (%)'
-                                : field === 'w'
-                                  ? '너비 (%)'
-                                  : '높이 (%)'
-                          }
-                          type="number"
-                          min={field === 'w' || field === 'h' ? 1 : 0}
-                          max={100}
-                          value={keyboardRegion[field]}
-                          onChange={(event) =>
-                            setKeyboardRegion((current) => ({
-                              ...current,
-                              [field]: Number(event.target.value),
-                            }))
-                          }
-                        />
-                      ))}
-                      <Button variant="primary" onClick={() => void addKeyboardRegion()}>
-                        영역 추가
-                      </Button>
-                    </details>
-                  </div>
-                ) : null}
-                {mode === 'boundaries' ? (
-                  <div className="stack">
-                    <Field
-                      label="첫 마디 번호"
-                      type="number"
-                      min={1}
-                      value={firstMeasure}
-                      onChange={(event) => setFirstMeasure(Number(event.target.value))}
-                    />
-                    <p className="subtle">각 마디 경계를 차례로 클릭한 뒤 완료하세요.</p>
-                    <Button variant="primary" onClick={() => void finishSystem()}>
-                      <Save size={17} /> 시스템 완료
-                    </Button>
-                  </div>
-                ) : null}
-                <StatusBadge tone="info">
-                  <Highlighter size={13} /> {measureMap?.regions.length ?? 0}마디 매핑됨
-                  {remoteMode ? ` · r${measureMapRevision}` : ''}
-                </StatusBadge>
-                {remoteMode && selected && !usingOfflineCache ? (
-                  <StatusBadge
-                    tone={
-                      annotationConnectionState === 'live'
-                        ? 'success'
-                        : annotationConnectionState === 'offline' ||
-                            annotationConnectionState === 'closed'
-                          ? 'warning'
-                          : 'info'
-                    }
-                  >
-                    {annotationConnectionState === 'live'
-                      ? '공동 필기 실시간 연결됨'
-                      : annotationConnectionState === 'reconnecting'
-                        ? '공동 필기 다시 동기화 중…'
-                        : annotationConnectionState === 'offline'
-                          ? '공동 필기 오프라인'
-                          : annotationConnectionState === 'closed'
-                            ? '공동 필기 권한 확인 필요'
-                            : '공동 필기 연결 중…'}
-                  </StatusBadge>
-                ) : null}
-                {remoteMode &&
-                selected &&
-                (selected.mimeType === 'application/pdf' ||
-                  selected.mimeType.startsWith('image/')) ? (
-                  <section className="omr-draft-panel" aria-labelledby="omr-draft-heading">
-                    <strong id="omr-draft-heading">Audiveris OMR 초안</strong>
-                    <p className="subtle">
-                      자동 인식은 시작점만 제공합니다. 저장하기 전에 모든 페이지와 마디 영역을
-                      확인하세요.
-                    </p>
-                    {!omrDraft ? (
-                      <Button
-                        disabled={omrRequesting || usingOfflineCache || !canManageScores}
-                        onClick={() => void requestOmrDraft()}
-                      >
-                        <MapIcon size={17} aria-hidden />
-                        {omrRequesting ? '요청 중…' : 'OMR 초안 생성'}
-                      </Button>
-                    ) : null}
-                    {omrDraft?.status === 'pending' || omrDraft?.status === 'running' ? (
-                      <div role="status" aria-live="polite" className="omr-draft-status">
-                        <span>
-                          {omrDraft.status === 'pending' ? '분석 대기 중…' : '악보 분석 중…'}
-                        </span>
-                        {omrPollingError ? (
-                          <>
-                            <span className="danger-text">{omrPollingError}</span>
-                            <Button onClick={() => void refreshOmrDraft()}>상태 다시 확인</Button>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {omrDraft?.status === 'failed' ? (
-                      <div role="alert" className="omr-draft-status">
-                        <span>{omrDraft.error ?? 'OMR 분석에 실패했습니다.'}</span>
-                        <Button onClick={() => void requestOmrDraft()}>다시 생성</Button>
-                      </div>
-                    ) : null}
-                    {omrDraft?.status === 'succeeded' ? (
-                      <div className="omr-draft-result">
-                        <span>{omrDraft.regions.length}개 마디 영역을 인식했습니다.</span>
-                        {omrDraft.warnings.map((warning) => (
-                          <span key={warning} className="subtle">
-                            {warning}
-                          </span>
-                        ))}
-                        <div className="omr-draft-actions">
-                          <Button
-                            aria-pressed={showOmrPreview}
-                            onClick={() => setShowOmrPreview((current) => !current)}
-                          >
-                            {showOmrPreview ? '초안 미리보기 닫기' : '초안 영역 미리보기'}
-                          </Button>
-                          <Button
-                            variant="primary"
-                            disabled={usingOfflineCache || !canManageScores}
-                            onClick={() => void applyOmrDraft()}
-                          >
-                            초안을 마디 맵으로 저장
-                          </Button>
-                          <Button variant="ghost" onClick={() => void requestOmrDraft()}>
-                            다시 분석
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
-                ) : null}
-                {usingOfflineCache ? (
-                  <StatusBadge tone="warning">오프라인 읽기 전용</StatusBadge>
-                ) : null}
-                <details className="score-metadata">
-                  <summary>악보 정보 · 번호 보정</summary>
-                  <label className="fmr-field">
-                    <span className="fmr-field__label">악보 종류</span>
-                    <select
-                      className="fmr-input"
-                      disabled={!canManageScores || usingOfflineCache}
-                      value={scoreKind}
-                      onChange={(event) => setScoreKind(event.target.value as 'full' | 'part')}
-                    >
-                      <option value="full">총보</option>
-                      <option value="part">파트보</option>
-                    </select>
-                  </label>
-                  <Field
-                    label="악기"
-                    disabled={!canManageScores || usingOfflineCache}
-                    value={instrument}
-                    placeholder={scoreKind === 'full' ? '총보' : '예: Violin 1'}
-                    onChange={(event) => setInstrument(event.target.value)}
-                  />
-                  <Field
-                    label="공통 마디 번호 오프셋"
-                    hint="악보의 1마디가 곡의 11마디라면 10을 입력합니다."
-                    type="number"
-                    disabled={!canManageScores || usingOfflineCache}
-                    value={measureNumberOffset}
-                    onChange={(event) => setMeasureNumberOffset(Number(event.target.value))}
-                  />
-                  <Button
-                    disabled={savingMetadata || usingOfflineCache || !canManageScores}
-                    onClick={() => void saveMetadata()}
-                  >
-                    <Save size={17} aria-hidden /> {savingMetadata ? '저장 중…' : '정보 저장'}
-                  </Button>
-                </details>
-              </div>
-            </Card>
-
-            <div className="score-stage-wrap">
-              <div className="score-view-controls" aria-label="악보 보기 설정">
-                <Button
-                  size="icon"
-                  aria-label="악보 축소"
-                  disabled={scoreZoom <= 1}
-                  onClick={() => setScoreZoom((current) => Math.max(1, current - 0.25))}
-                >
-                  <ZoomOut size={18} aria-hidden />
-                </Button>
-                <span className="fmr-tabular" aria-live="polite">
-                  {Math.round(scoreZoom * 100)}%
-                </span>
-                <Button
-                  size="icon"
-                  aria-label="악보 확대"
-                  disabled={scoreZoom >= 2}
-                  onClick={() => setScoreZoom((current) => Math.min(2, current + 0.25))}
-                >
-                  <ZoomIn size={18} aria-hidden />
-                </Button>
-                {metronome.playing && !autoPageFollowing ? (
-                  <Button
-                    onClick={() => {
-                      setAutoPageFollowing(true);
-                      const scoreMeasure = scoreMeasureNumber(
-                        metronome.position.measureNumber,
-                        measureMap?.measureNumberOffset ?? 0,
-                      );
-                      const target = measureMap?.regions.find(
-                        (region) => region.measureNumber === scoreMeasure,
-                      );
-                      if (target) setPage(target.page);
-                    }}
-                  >
-                    재생 위치로 돌아가기
-                  </Button>
-                ) : null}
-              </div>
-              <div ref={viewerRef} className={`score-stage score-stage--${mode}`}>
-                <div
-                  className="score-page-surface"
-                  style={{ width: `${scoreZoom * 100}%` }}
-                  role="group"
-                  tabIndex={0}
-                  aria-label={`${page}페이지 악보. 화살표 키로 매핑된 마디를 이동합니다.`}
-                  onKeyDown={scoreSurfaceKeyDown}
-                  onPointerDown={pointerDown}
-                  onPointerMove={pointerMove}
-                  onPointerUp={pointerUp}
-                  onPointerCancel={pointerCancel}
-                >
-                  {selected ? (
-                    <ScoreSurface
-                      key={`${selected.id}:${scoreZoom}`}
-                      score={selected}
-                      page={page}
-                      onPageCount={setPageCount}
-                    />
-                  ) : null}
-                  <svg
-                    className="score-overlay"
-                    viewBox="0 0 1 1"
-                    preserveAspectRatio="none"
-                    aria-label="마디 매핑과 필기"
-                  >
-                    {visibleRegions.map((region) => (
-                      <rect
-                        key={region.id}
-                        className={
-                          canonicalMeasureNumber(
-                            region.measureNumber,
-                            measureMap?.measureNumberOffset ?? 0,
-                          ) === currentMeasure
-                            ? 'measure-region measure-region--current'
-                            : 'measure-region'
-                        }
-                        x={region.rect.x}
-                        y={region.rect.y}
-                        width={region.rect.w}
-                        height={region.rect.h}
-                      />
-                    ))}
-                    {visibleOmrRegions.map((region, index) => (
-                      <rect
-                        key={`omr:${omrDraft?.id}:${index}`}
-                        className="measure-region measure-region--omr-draft"
-                        x={region.rect.x}
-                        y={region.rect.y}
-                        width={region.rect.w}
-                        height={region.rect.h}
-                      >
-                        <title>OMR 초안 {region.measureNumber}마디</title>
-                      </rect>
-                    ))}
-                    {systemRect ? (
-                      <>
-                        <rect
-                          className="system-selection"
-                          x={systemRect.x}
-                          y={systemRect.y}
-                          width={systemRect.w}
-                          height={systemRect.h}
-                        />
-                        {boundaries.map((boundary) => (
-                          <line
-                            key={boundary}
-                            className="boundary-line"
-                            x1={systemRect.x + systemRect.w * boundary}
-                            y1={systemRect.y}
-                            x2={systemRect.x + systemRect.w * boundary}
-                            y2={systemRect.y + systemRect.h}
-                          />
-                        ))}
-                      </>
-                    ) : null}
-                    {visibleAnnotations.map((annotation) => {
-                      const x = Number(annotation.payload.x ?? 0);
-                      const y = Number(annotation.payload.y ?? 0);
-                      const annotationText = annotation.payload.text;
-                      const content =
-                        typeof annotationText === 'string' || typeof annotationText === 'number'
-                          ? String(annotationText)
-                          : '';
-                      if (annotation.kind === 'pen') {
-                        const points = penPoints(annotation.payload);
-                        return points.length > 1 ? (
-                          <polyline
-                            key={annotation.id}
-                            className={`annotation-pen annotation-pen--${annotation.scope}`}
-                            points={points.map((point) => `${point.x},${point.y}`).join(' ')}
-                          />
-                        ) : null;
-                      }
-                      return annotation.kind === 'stamp' ? (
-                        <text key={annotation.id} className="annotation-stamp" x={x} y={y}>
-                          {content}
-                        </text>
-                      ) : (
-                        <text key={annotation.id} className="annotation-text" x={x} y={y}>
-                          {content}
-                        </text>
-                      );
-                    })}
-                    {visibleMeasureAnnotations.map(({ annotation, x, y }) => {
-                      const text = annotation.payload.text;
-                      const content =
-                        typeof text === 'string' || typeof text === 'number' ? String(text) : '';
-                      return (
-                        <text
-                          key={`transferred:${annotation.id}`}
-                          className={
-                            annotation.kind === 'stamp'
-                              ? 'annotation-stamp annotation-transferred'
-                              : 'annotation-text annotation-transferred'
-                          }
-                          x={x}
-                          y={y}
-                        >
-                          {content}
-                        </text>
-                      );
-                    })}
-                    {activePenPoints.length > 1 ? (
-                      <polyline
-                        className="annotation-pen annotation-pen--draft"
-                        points={activePenPoints.map((point) => `${point.x},${point.y}`).join(' ')}
-                      />
-                    ) : null}
-                    {visiblePracticeMarkers.map(({ marker, x, y }) => (
-                      <g
-                        key={`${marker.logId}:${marker.measureNumber ?? marker.page}:${marker.x ?? x}:${marker.y ?? y}`}
-                        className="practice-marker"
-                      >
-                        <circle cx={x} cy={y} r="0.009" />
-                        <title>
-                          {marker.authorName}: {marker.content}
-                        </title>
-                      </g>
-                    ))}
-                  </svg>
-                </div>
-              </div>
-              {visibleRegions.length ? (
-                <nav className="score-measure-index" aria-label={`${page}페이지 마디 선택`}>
-                  {visibleRegions.flatMap((region) => {
-                    const canonical = canonicalMeasureNumber(
-                      region.measureNumber,
-                      measureMap?.measureNumberOffset ?? 0,
-                    );
-                    return canonical === undefined
-                      ? []
-                      : [
-                          <button
-                            key={region.id}
-                            type="button"
-                            aria-current={canonical === currentMeasure ? 'true' : undefined}
-                            onClick={() => void selectCanonicalMeasure(canonical, region.page)}
-                          >
-                            {canonical}마디
-                          </button>,
-                        ];
-                  })}
-                </nav>
-              ) : null}
-              {currentPracticeMarkers.length ? (
-                <Card
-                  className="score-practice-notes"
-                  aria-label={`${currentMeasure}마디 연습 메모`}
-                >
-                  <strong>{currentMeasure}마디 연습 메모</strong>
-                  {currentPracticeMarkers.map((marker) => (
-                    <article key={`${marker.logId}:${marker.measureNumber}`}>
-                      <span className="subtle">{marker.authorName}</span>
-                      <MarkdownContent>{marker.content}</MarkdownContent>
-                    </article>
-                  ))}
-                </Card>
-              ) : null}
-              {pageCount > 1 ? (
-                <div className="score-pagination">
-                  <Button
-                    size="icon"
-                    aria-label="이전 페이지"
-                    disabled={page <= 1}
-                    onClick={() => {
-                      setAutoPageFollowing(false);
-                      setPage((current) => Math.max(1, current - 1));
-                    }}
-                  >
-                    <ChevronLeft size={18} />
-                  </Button>
-                  <span className="fmr-tabular">
-                    {page} / {pageCount}
-                  </span>
-                  <Button
-                    size="icon"
-                    aria-label="다음 페이지"
-                    disabled={page >= pageCount}
-                    onClick={() => {
-                      setAutoPageFollowing(false);
-                      setPage((current) => Math.min(pageCount, current + 1));
-                    }}
-                  >
-                    <ChevronRight size={18} />
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+            <ScoreTools
+              toolsOpen={toolsOpen}
+              setToolsOpen={setToolsOpen}
+              mode={mode}
+              setMode={setMode}
+              usingOfflineCache={usingOfflineCache}
+              canManageScores={canManageScores}
+              currentMeasure={currentMeasure}
+              setCurrentMeasure={setCurrentMeasure}
+              currentMeasureRef={currentMeasureRef}
+              measureMap={measureMap}
+              setPage={setPage}
+              selected={selected}
+              playbackReady={playbackReady}
+              metronomePlaying={metronome.playing}
+              togglePlayback={() => void togglePlayback()}
+              annotationText={annotationText}
+              setAnnotationText={setAnnotationText}
+              saveAnnotation={saveAnnotation}
+              annotationScope={annotationScope}
+              setAnnotationScope={setAnnotationScope}
+              visibleEditableAnnotations={visibleEditableAnnotations}
+              remoteMode={remoteMode}
+              userId={user?.id}
+              removeAnnotation={removeAnnotation}
+              firstMeasure={firstMeasure}
+              setFirstMeasure={setFirstMeasure}
+              keyboardRegion={keyboardRegion}
+              setKeyboardRegion={setKeyboardRegion}
+              addKeyboardRegion={() => void addKeyboardRegion()}
+              finishSystem={() => void finishSystem()}
+              measureMapRevision={measureMapRevision}
+              annotationConnectionState={annotationConnectionState}
+              omrDraft={omrDraft}
+              omrRequesting={omrRequesting}
+              omrPollingError={omrPollingError}
+              requestOmrDraft={() => void requestOmrDraft()}
+              refreshOmrDraft={() => void refreshOmrDraft()}
+              showOmrPreview={showOmrPreview}
+              setShowOmrPreview={setShowOmrPreview}
+              applyOmrDraft={() => void applyOmrDraft()}
+              scoreKind={scoreKind}
+              setScoreKind={setScoreKind}
+              instrument={instrument}
+              setInstrument={setInstrument}
+              measureNumberOffset={measureNumberOffset}
+              setMeasureNumberOffset={setMeasureNumberOffset}
+              savingMetadata={savingMetadata}
+              saveMetadata={() => void saveMetadata()}
+            />
+            <ScoreStage
+              scoreZoom={scoreZoom}
+              setScoreZoom={setScoreZoom}
+              metronomePlaying={metronome.playing}
+              autoPageFollowing={autoPageFollowing}
+              setAutoPageFollowing={setAutoPageFollowing}
+              measureMap={measureMap}
+              setPage={setPage}
+              viewerRef={viewerRef}
+              mode={mode}
+              scoreSurfaceKeyDown={scoreSurfaceKeyDown}
+              pointerDown={pointerDown}
+              pointerMove={pointerMove}
+              pointerUp={pointerUp}
+              pointerCancel={pointerCancel}
+              selected={selected}
+              page={page}
+              setPageCount={setPageCount}
+              currentMeasure={currentMeasure}
+              selectCanonicalMeasure={(canonical, targetPage) =>
+                void selectCanonicalMeasure(canonical, targetPage)
+              }
+              visibleRegions={visibleRegions}
+              visibleOmrRegions={visibleOmrRegions}
+              omrDraftId={omrDraft?.id}
+              systemRect={systemRect}
+              boundaries={boundaries}
+              visibleAnnotations={visibleAnnotations}
+              visibleMeasureAnnotations={visibleMeasureAnnotations}
+              activePenPoints={activePenPoints}
+              visiblePracticeMarkers={visiblePracticeMarkers}
+              currentPracticeMarkers={currentPracticeMarkers}
+              pageCount={pageCount}
+              metronomeMeasureNumber={metronome.position.measureNumber}
+            />
           </div>
         </>
       ) : null}

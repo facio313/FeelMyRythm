@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoreRecord } from '../lib/scoreApi';
-import { mergeRemoteScoreMetadata } from './ScoresPage';
+import { mergeRemoteScoreMetadata } from './scores/scoreFiles';
 
 describe('remote score normalization', () => {
   it('does not try to unzip an already-normalized MXL snapshot after metadata changes', async () => {

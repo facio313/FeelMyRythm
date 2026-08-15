@@ -1806,6 +1806,8 @@ export interface components {
              * Format: date-time
              */
             expiresAt: string;
+            /** Joincode */
+            joinCode: string;
             /** Leaderid */
             leaderId: string;
             /** Repertoireid */

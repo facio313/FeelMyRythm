@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from .config import Settings
 from .db import Database
+from .join_codes import generate_join_code, parse_room_ref
 from .models import GroupMember, PracticeSession, Project, RepertoireItem, TempoMapRevision, utcnow
 from .redis_rooms import RedisRoomBackend, RoomLockTimeoutError
 from .schemas import (
@@ -68,6 +69,7 @@ class Participant:
 @dataclass
 class Room:
     room_id: str
+    join_code: str
     session_id: str
     repertoire_id: str
     leader_id: str
@@ -93,6 +95,7 @@ class RoomManager:
         self.database = database
         self.settings = settings
         self.rooms: dict[str, Room] = {}
+        self.join_codes: dict[str, str] = {}
         self._cleanup_task: asyncio.Task[None] | None = None
         self.redis = RedisRoomBackend(settings, self._handle_redis_event) if settings.redis_url else None
         self.instance_id = self.redis.instance_id if self.redis is not None else str(uuid.uuid4())
@@ -139,7 +142,9 @@ class RoomManager:
                             await asyncio.to_thread(self.redis.save_room, room_id, state)
                             continue
                         session_id = await asyncio.to_thread(self.redis.remove_room, room_id)
-                        self.rooms.pop(room_id, None)
+                        dropped = self.rooms.pop(room_id, None)
+                        if dropped is not None:
+                            self.join_codes.pop(dropped.join_code, None)
                         if session_id is not None:
                             self._persist_ended_session(session_id)
                         await self.redis.publish(room_id, "expired", {})
@@ -153,6 +158,7 @@ class RoomManager:
         ]
         for room_id in expired:
             room = self.rooms.pop(room_id)
+            self.join_codes.pop(room.join_code, None)
             self._persist(room, ended=True)
 
     def create_room(
@@ -176,6 +182,7 @@ class RoomManager:
         if tempo_map.total_measures != total_measures:
             raise ValueError("the pinned tempo map totalMeasures is inconsistent")
         room_id = str(uuid.uuid4())
+        join_code = self._allocate_join_code()
         session = PracticeSession(
             room_id=room_id,
             repertoire_id=repertoire_id,
@@ -188,6 +195,7 @@ class RoomManager:
             db.refresh(session)
         room = Room(
             room_id=room_id,
+            join_code=join_code,
             session_id=session.id,
             repertoire_id=repertoire_id,
             leader_id=leader_id,
@@ -198,20 +206,50 @@ class RoomManager:
         )
         room.touch()
         self.rooms[room_id] = room
+        self.join_codes[join_code] = room_id
         self._save_shared(room)
         return room
 
-    def get(self, room_id: str) -> Room:
+    def _allocate_join_code(self) -> str:
+        for _ in range(64):
+            code = generate_join_code()
+            if self._find_room_id_by_join_code(code) is None:
+                return code
+        raise RuntimeError("could not allocate a unique room join code")
+
+    def _find_room_id_by_join_code(self, join_code: str) -> str | None:
+        if self.redis is not None:
+            return self.redis.lookup_join_code(join_code)
+        return self.join_codes.get(join_code)
+
+    def resolve_room_ref(self, room_ref: str) -> str:
+        parsed = parse_room_ref(room_ref)
+        if parsed is None:
+            raise RoomMissingError(room_ref)
+        kind, value = parsed
+        if kind == "uuid":
+            return value
+        room_id = self._find_room_id_by_join_code(value)
+        if room_id is None:
+            raise RoomMissingError(room_ref)
+        return room_id
+
+    def get(self, room_ref: str) -> Room:
+        room_id = self.resolve_room_ref(room_ref)
         if self.redis is not None:
             state = self.redis.load_room(room_id)
             if state is None:
-                self.rooms.pop(room_id, None)
+                dropped = self.rooms.pop(room_id, None)
+                if dropped is not None:
+                    self.join_codes.pop(dropped.join_code, None)
                 raise RoomMissingError(room_id)
             if int(state["expiresAtNs"]) <= time.time_ns():
                 roster = self.redis.roster(room_id)
                 if not roster:
                     session_id = self.redis.remove_room(room_id)
-                    self.rooms.pop(room_id, None)
+                    dropped = self.rooms.pop(room_id, None)
+                    if dropped is not None:
+                        self.join_codes.pop(dropped.join_code, None)
                     if session_id is not None:
                         self._persist_ended_session(session_id)
                     raise RoomMissingError(room_id)
@@ -223,6 +261,9 @@ class RoomManager:
             if room is None:
                 room = self._room_from_state(state)
                 self.rooms[room_id] = room
+                self.join_codes[room.join_code] = room_id
+                if str(state.get("joinCode") or "") != room.join_code:
+                    self._save_shared(room)
             else:
                 self._apply_state(room, state)
             self._load_persisted_transport(room)
@@ -231,6 +272,7 @@ class RoomManager:
         if room is None or (not room.participants and room.expires_at_ns <= time.time_ns()):
             if room is not None:
                 self.rooms.pop(room_id, None)
+                self.join_codes.pop(room.join_code, None)
                 self._persist(room, ended=True)
             raise RoomMissingError(room_id)
         return room
@@ -613,6 +655,7 @@ class RoomManager:
     def _room_state(self, room: Room) -> dict[str, Any]:
         return {
             "roomId": room.room_id,
+            "joinCode": room.join_code,
             "sessionId": room.session_id,
             "repertoireId": room.repertoire_id,
             "leaderId": room.leader_id,
@@ -629,8 +672,15 @@ class RoomManager:
         }
 
     def _room_from_state(self, state: dict[str, Any]) -> Room:
+        parsed_join = parse_room_ref(str(state.get("joinCode") or ""))
+        join_code = (
+            parsed_join[1]
+            if parsed_join is not None and parsed_join[0] == "join_code"
+            else self._allocate_join_code()
+        )
         room = Room(
             room_id=str(state["roomId"]),
+            join_code=join_code,
             session_id=str(state["sessionId"]),
             repertoire_id=str(state["repertoireId"]),
             leader_id=str(state["leaderId"]),

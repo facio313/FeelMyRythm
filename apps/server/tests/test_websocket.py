@@ -259,3 +259,31 @@ def test_websocket_rechecks_transport_role_after_demotion(
         unauthorized = _recv_until(socket, "ERROR")
         assert unauthorized["requestId"] == "removed-member"
         assert unauthorized["payload"]["code"] == "UNAUTHORIZED"
+
+
+def test_room_join_code_resolves_the_same_room_as_uuid(client: TestClient, ensemble: dict[str, Any]) -> None:
+    repertoire_id = ensemble["repertoire"]["id"]
+    leader_headers = auth(ensemble["leader"]["accessToken"])
+    created_map = client.put(
+        f"/api/repertoire/{repertoire_id}/tempomap",
+        headers=leader_headers,
+        json={"expectedRevision": 0, "data": tempo_map(repertoire_id)},
+    )
+    assert created_map.status_code == 200
+    created = client.post("/api/rooms", headers=leader_headers, json={"repertoireId": repertoire_id})
+    assert created.status_code == 201, created.text
+    body = created.json()
+    room_id = body["roomId"]
+    join_code = body["joinCode"]
+    assert len(join_code) == 6
+    assert join_code.isupper()
+    assert join_code.isalnum()
+
+    by_code = client.get(f"/api/rooms/{join_code.lower()}", headers=leader_headers)
+    assert by_code.status_code == 200, by_code.text
+    assert by_code.json()["roomId"] == room_id
+    assert by_code.json()["joinCode"] == join_code
+
+    by_uuid = client.get(f"/api/rooms/{room_id.upper()}", headers=leader_headers)
+    assert by_uuid.status_code == 200
+    assert by_uuid.json()["joinCode"] == join_code

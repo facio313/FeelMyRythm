@@ -1,3 +1,7 @@
+/*
+ * NTP 유사 시계 합의. 박 시각이 아니라 서버 epoch ↔ 클라이언트 monotonic 오프셋만 맞춘다.
+ * 비대칭 지연은 min-RTT 표본을 골라 줄이고, 이후 표본은 EMA로 드리프트만 따라간다.
+ */
 import {
   calibratedAudioScheduleTime,
   calibratedVisualTimeMs,
@@ -72,7 +76,7 @@ export function estimateClockSample(sample: ClockSyncSample): ClockOffsetEstimat
   };
 }
 
-/** Selects the offset from the minimum-RTT sample (first sample wins a tie). */
+/** RTT가 가장 작은 표본의 offset을 채택한다. 동률이면 먼저 온 표본을 쓴다. */
 export function estimateClockOffset(samples: readonly ClockSyncSample[]): ClockOffsetEstimate {
   if (samples.length === 0) throw new RangeError('samples must not be empty');
   let best: ClockOffsetEstimate | undefined;

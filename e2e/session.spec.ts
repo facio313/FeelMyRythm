@@ -36,6 +36,7 @@ const authState = {
 
 const room = {
   roomId,
+  joinCode: '7K2M9A',
   repertoireId,
   leaderId: authState.user.id,
   tempoMapRevision,
@@ -301,6 +302,7 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
   });
 
   await expect(page.getByText('동기화됨', { exact: true })).toBeVisible();
+  await expect(page.getByText(`구두 공유 코드 ${room.joinCode}`)).toBeVisible();
   await expect(page.getByText(authState.user.displayName, { exact: true }).last()).toBeVisible();
   await expect(page.getByText('1명', { exact: true })).toBeVisible();
 
@@ -406,4 +408,161 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
   await expect(page.getByText('재연결 중', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '정지' })).toBeDisabled();
   await expect(page.getByRole('button', { name: '준비 취소' })).toBeDisabled();
+});
+
+test('joins a room by verbal code and keeps WebSocket traffic on the UUID', async ({ page }) => {
+  const clientMessages: ClientEnvelope[] = [];
+  const roomGets: string[] = [];
+  const websocketPaths: string[] = [];
+
+  await page.addInitScript((state) => {
+    localStorage.setItem('fmr.auth.session.v1', JSON.stringify(state));
+  }, authState);
+
+  await page.route('**/feelmyrythm/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/feelmyrythm/api', '');
+
+    if (request.method() === 'GET' && path === '/groups') {
+      await route.fulfill({
+        json: [
+          {
+            id: groupId,
+            name: 'E2E Ensemble',
+            description: 'Playwright fixture',
+            myRole: 'leader',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/groups/${groupId}/members`) {
+      await route.fulfill({
+        json: [
+          {
+            userId: authState.user.id,
+            email: authState.user.email,
+            displayName: authState.user.displayName,
+            role: 'leader',
+            joinedAt: timestamp,
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/groups/${groupId}/projects`) {
+      await route.fulfill({
+        json: [
+          {
+            id: projectId,
+            groupId,
+            name: 'Orchestra Project',
+            description: 'E2E project',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === `/projects/${projectId}/repertoire`) {
+      await route.fulfill({
+        json: [
+          {
+            id: repertoireId,
+            projectId,
+            title: 'Symphony No. 5',
+            composer: 'L. van Beethoven',
+            notes: '',
+            currentTempoMapRevision: tempoMapRevision,
+            scoreCount: 1,
+            openTodoCount: 0,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path.startsWith('/rooms/')) {
+      roomGets.push(path);
+      await route.fulfill({ json: room });
+      return;
+    }
+    if (
+      request.method() === 'GET' &&
+      path === `/repertoire/${repertoireId}/tempomap/revisions/${tempoMapRevision}`
+    ) {
+      await route.fulfill({
+        json: {
+          id: tempoMap.id,
+          repertoireId,
+          revision: tempoMapRevision,
+          data: tempoMap,
+          createdById: authState.user.id,
+          createdAt: timestamp,
+        },
+      });
+      return;
+    }
+
+    await route.fulfill({ status: 404, json: { detail: 'unexpected E2E request' } });
+  });
+
+  await page.routeWebSocket(
+    (url) => url.pathname.startsWith('/feelmyrythm/ws/rooms/'),
+    (socket) => {
+      websocketPaths.push(new URL(socket.url()).pathname);
+      socket.onMessage((rawMessage) => {
+        const message = JSON.parse(String(rawMessage)) as ClientEnvelope;
+        clientMessages.push(message);
+        if (message.type !== 'JOIN_ROOM') return;
+        sendServerEnvelope(socket, 'JOINED', {
+          userId: authState.user.id,
+          role: 'leader',
+        });
+        sendServerEnvelope(socket, 'ROOM_ROSTER', {
+          members: [
+            {
+              userId: authState.user.id,
+              displayName: authState.user.displayName,
+              role: 'leader',
+              ready: false,
+              rttMs: 4.2,
+              calibrated: true,
+              bluetooth: false,
+            },
+          ],
+        });
+        sendServerEnvelope(socket, 'TRANSPORT', {
+          roomId,
+          repertoireId,
+          tempoMapRevision,
+          status: 'idle',
+          anchor: { measure: 1, pass: 1 },
+          countIn: true,
+        });
+      });
+    },
+  );
+
+  await page.goto('/feelmyrythm/session');
+  await page.getByLabel('방 코드').fill(' 7k2-m9a ');
+  await expect(page.getByRole('button', { name: '참가' })).toBeEnabled();
+  await page.getByRole('button', { name: '참가' }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/feelmyrythm/session/${room.joinCode}$`));
+  expect(roomGets).toEqual([`/rooms/${room.joinCode}`]);
+  await expect(page.getByText(`구두 공유 코드 ${room.joinCode}`)).toBeVisible();
+  await expect(page.getByRole('button', { name: '방 코드' })).toBeVisible();
+  await expect
+    .poll(() => clientMessages.some((message) => message.type === 'JOIN_ROOM'))
+    .toBe(true);
+  expect(clientMessages.findLast((message) => message.type === 'JOIN_ROOM')).toMatchObject({
+    type: 'JOIN_ROOM',
+    payload: { roomId, accessToken: 'e2e-access' },
+  });
+  expect(websocketPaths).toEqual([`/feelmyrythm/ws/rooms/${roomId}`]);
 });

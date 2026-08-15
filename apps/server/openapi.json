@@ -2441,6 +2441,10 @@
             "title": "Expiresat",
             "type": "string"
           },
+          "joinCode": {
+            "title": "Joincode",
+            "type": "string"
+          },
           "leaderId": {
             "title": "Leaderid",
             "type": "string"
@@ -2460,6 +2464,7 @@
         },
         "required": [
           "roomId",
+          "joinCode",
           "repertoireId",
           "leaderId",
           "tempoMapRevision",

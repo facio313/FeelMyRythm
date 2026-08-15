@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional cumulative drift acceptance limit; a failure exits with status 2",
     )
     parser.add_argument(
+        "--phase4",
+        action="store_true",
+        help="apply the 1 ms RMS jitter gate when --max-rms-jitter-ms is omitted",
+    )
+    parser.add_argument(
         "--block-frames",
         type=_positive_int,
         default=65_536,
@@ -74,6 +79,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     expected_interval_ms = args.expected_interval_ms
     if args.bpm is not None:
         expected_interval_ms = 60_000 / args.bpm
+    max_rms_jitter_ms = args.max_rms_jitter_ms
+    if max_rms_jitter_ms is None and args.phase4:
+        max_rms_jitter_ms = 1.0
     try:
         result = analyze_click_intervals(
             args.wav,
@@ -81,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             threshold=args.threshold,
             min_separation_ms=args.min_separation_ms,
             expected_interval_ms=expected_interval_ms,
-            max_rms_jitter_ms=args.max_rms_jitter_ms,
+            max_rms_jitter_ms=max_rms_jitter_ms,
             max_abs_drift_ms=args.max_abs_drift_ms,
             block_frames=args.block_frames,
         )

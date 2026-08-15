@@ -88,6 +88,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 | 웹     | React 19 + Vite + Tailwind 4                                          |
 | 서버   | Python 3.13 + FastAPI + SQLAlchemy 2                                  |
 | DB     | PostgreSQL (운영은 공용 `cksDB`, 로컬 개발은 SQLite 가능)             |
+| Redis  | 운영은 공용 Redis (`FMR_REDIS_URL`). Compose가 Redis를 만들지 않음    |
 | 코어   | `packages/core` 순수 TS (템포맵·시계동기)                             |
 | 오디오 | 웹 Web Audio 룩어헤드 + 모바일 AVAudioEngine/Oboe 네이티브 큐         |
 | 모바일 | Capacitor (웹 빌드 래핑)                                              |
@@ -99,6 +100,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 - 브라우저의 REST/WS 경로는 각각 `/feelmyrythm/api/*`, `/feelmyrythm/ws/*`이다. 이미지 내부 nginx가 prefix를 제거해 FastAPI의 기존 `/api/*`, `/ws/*`로 전달한다.
 - 운영 이미지는 `ghcr.io/facio313/feelmyrythm-server:<commit-sha>`와 `ghcr.io/facio313/feelmyrythm-web:<commit-sha>`이다. RPi에서 소스를 빌드하지 않는다.
 - 운영 Compose는 별도 DB를 생성하지 않는다. `fmrServer`를 외부 `cksDB` Docker 네트워크에 연결하고, `.env`의 `FMR_DATABASE_URL`로 공용 `cksDB` 안의 전용 DB/계정에 접속한다.
+- 운영 Compose는 Redis도 생성하지 않는다. production `fmrServer`는 `.env`의 `FMR_REDIS_URL`로 공용 Redis에 접속한다. 로컬 단일 프로세스 개발은 Redis 없이 메모리 방을 쓸 수 있으나, production room metadata·presence·분산 lock은 Redis가 필수다.
 - 배포 요청은 forced-command SSH 키를 통해 `deploy feelmyrythm <40-character-sha>`만 허용한다. 배포 과정에서 전역 image prune, stack-wide `down`, DB/volume 삭제를 실행하지 않는다.
 
 ---
@@ -141,6 +143,7 @@ anthropic-feat-name ─┘
 - Tool branches: `codex`, `cursor`, `anthropic`
 - Feature branches: `{tool}-feature-{kebab-case-feature}` — e.g. `cursor-feature-sync-session`
 - English kebab-case only.
+- Use hyphens, not slashes, after the tool name. Git cannot create `cursor/feature-*` while `refs/heads/cursor` exists, so `{tool}/feature` naming is rejected.
 
 ---
 
@@ -190,7 +193,7 @@ anthropic-feat-name ─┘
 
 - AppShell의 본문 scroller는 history entry별 위치를 보존해 POP 탐색에서 복원하고, 새 탐색은 맨 위에서 시작한다. 페이지 전환 후 `h1`으로 focus를 이동하며 browser POP은 모바일 더보기 overlay를 닫는다.
 - 대규모 workspace는 root `/groups`를 권위 요청으로 두고 members·projects·repertoire leaf 요청을 최대 6개로 제한한다. leaf 일부가 실패해도 성공한 그룹·곡은 계속 노출하고 누락 영역과 재시도를 별도로 표시한다.
-- 세션의 ready/start/stop은 서버 roster/transport acknowledgment 또는 5초 timeout 전까지 pending으로 잠가 중복 전송을 막는다. Clipboard API가 없거나 거부되면 선택 가능한 read-only 초대 URL과 재시도를 제공한다.
+- 세션의 ready/start/stop은 서버 roster/transport acknowledgment 또는 5초 timeout 전까지 pending으로 잠가 중복 전송을 막는다. Clipboard API가 없거나 거부되면 선택 가능한 read-only 초대 URL과 재시도를 제공한다. 방은 UUID `roomId`와 6자리 구두 `joinCode`를 함께 발급하며, 조회는 둘 다 허용하고 내부/WS 상태는 UUID를 쓴다.
 - 악보 파트 선택은 `tablist`/`tab`/`tabpanel`과 roving tab index·화살표/Home/End를 사용하고, Editor의 표 모드는 native `table`/column header/row header를 사용한다. 악보 표면의 필기·매핑은 pointer capture와 현재 `pointerId`만 처리해 stylus 입력에 다른 pointer가 섞이지 않게 한다.
 - PWA manifest는 고정 `id`·scope·start URL, `ko-KR`, category, 별도의 `any`/`maskable` PNG와 180px Apple touch icon을 제공한다. 다크/라이트 변경은 `data-theme`, `theme-color`, Capacitor SystemBars를 함께 동기화하되 native 실패는 웹 UI를 차단하지 않는다.
 

@@ -112,6 +112,9 @@ return 1
         pipeline.set(self._room_key(room_id), json.dumps(state), ex=ttl_seconds)
         pipeline.hset(self._room_index_key(), room_id, str(state["sessionId"]))
         pipeline.zadd(self._room_expiry_key(), {room_id: expires_at_ns})
+        join_code = str(state.get("joinCode") or "")
+        if join_code:
+            pipeline.set(self._join_code_key(join_code), room_id, ex=ttl_seconds)
         pipeline.execute()
 
     def load_room(self, room_id: str) -> dict[str, Any] | None:
@@ -121,12 +124,20 @@ return 1
         value = json.loads(raw)
         return value if isinstance(value, dict) else None
 
+    def lookup_join_code(self, join_code: str) -> str | None:
+        raw = self.sync.get(self._join_code_key(join_code))
+        return raw if isinstance(raw, str) else None
+
     def remove_room(self, room_id: str) -> str | None:
+        state = self.load_room(room_id)
+        join_code = str(state.get("joinCode") or "") if state is not None else ""
         session_id = self.sync.hget(self._room_index_key(), room_id)
         pipeline = self.sync.pipeline(transaction=True)
         pipeline.delete(self._room_key(room_id), self._members_key(room_id))
         pipeline.hdel(self._room_index_key(), room_id)
         pipeline.zrem(self._room_expiry_key(), room_id)
+        if join_code:
+            pipeline.delete(self._join_code_key(join_code))
         pipeline.execute()
         return session_id if isinstance(session_id, str) else None
 
@@ -281,6 +292,9 @@ return 1
 
     def _room_expiry_key(self) -> str:
         return f"{self.prefix}:rooms:expiry"
+
+    def _join_code_key(self, join_code: str) -> str:
+        return f"{self.prefix}:rooms:join:{join_code}"
 
     def _events_channel(self) -> str:
         return f"{self.prefix}:rooms:events"

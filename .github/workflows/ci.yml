@@ -5,6 +5,10 @@ on:
   pull_request:
   push:
     branches:
+      - anthropic
+      - 'anthropic-feature-*'
+      - cursor
+      - 'cursor-feature-*'
       - codex
       - 'codex-feature-*'
       - dev

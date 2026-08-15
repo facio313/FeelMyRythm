@@ -157,6 +157,27 @@ class AudioQualityTests(unittest.TestCase):
         self.assertEqual(payload["inputMode"], "two-mono-files")
         self.assertEqual(payload["crossCorrelation"]["offsetMs"], 12.5)
 
+        gated = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                str(reference_path),
+                str(target_path),
+                "--reference-threshold",
+                "0.2",
+                "--target-threshold",
+                "0.2",
+                "--max-lag-ms",
+                "100",
+                "--phase4",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(gated.returncode, 2, gated.stderr)
+        self.assertEqual(json.loads(gated.stdout)["qualityGate"]["passed"], False)
+
     def test_stereo_cross_correlation_uses_selected_channels(self) -> None:
         sample_rate = 8_000
         path = self.directory / "stereo.wav"

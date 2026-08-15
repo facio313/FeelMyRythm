@@ -346,7 +346,7 @@ interface TransportState {
 - **늦게 합류/재접속**: 타임라인이 결정론적이므로 `elapsed = serverNow - serverStartTime` 으로 현재 위치를 계산해 **다음 마디 경계부터** 합류(중간부터 소리 냄). 시퀀스 재전송 불필요.
 - 로컬 타임라인 자연 종료 시 리더가 `CMD_STOP`을 보내 서버를 `stopped`로 정리한다. `4000/4400/4404` close는 terminal, `4401`은 현재 auth session에서 token을 한 번만 갱신한 뒤 재거부 시 terminal이다.
 - ready/start/stop 조작은 전송 즉시 pending으로 전환해 같은 명령을 다시 보내지 않는다. 서버의 roster/transport 변경으로 acknowledgment하거나 5초 후 timeout·재시도 안내로 해제한다.
-- 초대 링크 복사가 Clipboard API 미지원·권한 거부로 실패하면 같은 URL을 선택 가능한 read-only input과 재시도 조작으로 제공한다.
+- 초대 링크 복사가 Clipboard API 미지원·권한 거부로 실패하면 같은 URL을 선택 가능한 read-only input과 재시도 조작으로 제공한다. 리허설 현장의 구두 공유를 위해 방은 UUID `roomId`와 별도로 6자리 `joinCode`(A–Z·0–9)를 함께 발급한다. REST/WS 조회는 둘 다 받되, WebSocket URL과 내부 상태는 canonical UUID를 쓴다.
 - production 서버 상태는 PostgreSQL `PracticeSession` + Redis room state를 권위 경계로 삼고, 프로세스 메모리에는 해당 인스턴스의 socket만 둔다. presence는 heartbeat TTL, room은 logical expiry sorted set으로 회수하며 PING 응답 뒤 최신 transport를 다시 보내 pub/sub 유실을 복구한다.
 
 ### 6.4 동기 시작 시퀀스

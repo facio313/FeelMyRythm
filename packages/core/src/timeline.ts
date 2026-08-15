@@ -1,3 +1,8 @@
+/*
+ * 템포맵을 절대 시각 타임라인으로 전개한다.
+ * 박을 네트워크로 보내지 않는다. 같은 맵과 revision이면 모든 기기에서 같은 시각이 나온다.
+ * DOM·오디오 시계 의존성은 두지 않는다.
+ */
 import { TimelineExpansionError } from './errors.js';
 import type {
   Accent,
@@ -329,6 +334,7 @@ function createTimelineMeasure(
   };
 }
 
+/** 반복·볼타·D.C./D.S./Coda를 펼친 뒤 각 마디의 시작 시각을 로컬에서 계산한다. */
 export function expandTimeline(
   map: TempoMap,
   options: ExpandTimelineOptions = {},

@@ -23,6 +23,7 @@ import { useMetronome } from '../lib/useMetronome';
 import { loadWorkspace } from '../lib/workspace';
 import { createDefaultTempoMap } from '../lib/defaultTempoMap';
 import { RoomClient, type RoomConnectionState, type RoomSnapshot } from '../lib/roomClient';
+import { roomRefMatches, sessionPathForJoinInput } from '../lib/roomJoin';
 
 type CreatedRoom = components['schemas']['RoomOut'];
 type ServerTempoMap = components['schemas']['TempoMapOut'];
@@ -367,13 +368,14 @@ export function SessionPage() {
     if (
       !roomId ||
       !tokens ||
-      roomMetadata?.roomId !== roomId ||
+      roomMetadata == null ||
+      !roomRefMatches(roomMetadata, roomId) ||
       tempoMap.revision !== roomMetadata.tempoMapRevision
     ) {
       return;
     }
     const roomClient = new RoomClient(
-      roomId,
+      roomMetadata.roomId,
       tokens.accessToken,
       {
         ...(localStorage.getItem('fmr.serverCalibrationId')
@@ -564,6 +566,21 @@ export function SessionPage() {
     }
   }
 
+  const copyJoinCode = async () => {
+    if (!roomMetadata?.joinCode) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('클립보드 API를 사용할 수 없습니다.');
+      await navigator.clipboard.writeText(roomMetadata.joinCode);
+      notify({ title: '방 코드를 복사했습니다.', tone: 'success' });
+    } catch (error) {
+      notify({
+        title: '방 코드를 자동으로 복사하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    }
+  };
+
   const copyInvite = async () => {
     const inviteUrl = window.location.href;
     try {
@@ -677,13 +694,14 @@ export function SessionPage() {
               label="방 코드"
               value={joinCode}
               onChange={(event) => setJoinCode(event.target.value.trim())}
-              placeholder="방 UUID"
+              placeholder="6자리 코드 또는 UUID"
             />
             <Button
               onClick={() => {
-                void navigate(`/session/${joinCode}`);
+                const path = sessionPathForJoinInput(joinCode);
+                if (path) void navigate(path);
               }}
-              disabled={!joinCode}
+              disabled={!sessionPathForJoinInput(joinCode)}
             >
               참가
             </Button>
@@ -696,15 +714,27 @@ export function SessionPage() {
   return (
     <div className="page session-page">
       <PageHeader
-        eyebrow={`Room · ${roomId}`}
+        eyebrow={roomMetadata?.joinCode ? `Room · ${roomMetadata.joinCode}` : `Room · ${roomId}`}
         title="앙상블 세션"
-        description="박을 스트리밍하지 않고, 합의한 시작 시각부터 각 기기가 같은 타임라인을 재생합니다."
+        description="박을 스트리밍하지 않고, 합의한 시작 시각부터 각 기기가 같은 타임라인을 재생합니다. 구두 공유는 6자리 방 코드, 링크 공유는 UUID 초대 URL을 사용합니다."
         actions={
-          <Button onClick={() => void copyInvite()}>
-            <Copy size={17} aria-hidden /> 초대 링크
-          </Button>
+          <>
+            {roomMetadata?.joinCode ? (
+              <Button onClick={() => void copyJoinCode()}>
+                <Copy size={17} aria-hidden /> 방 코드
+              </Button>
+            ) : null}
+            <Button onClick={() => void copyInvite()}>
+              <Copy size={17} aria-hidden /> 초대 링크
+            </Button>
+          </>
         }
       />
+      {roomMetadata?.joinCode ? (
+        <p className="subtle">
+          구두 공유 코드 <strong>{roomMetadata.joinCode}</strong>
+        </p>
+      ) : null}
       {inviteFallbackUrl ? (
         <Card className="session-entry__error" role="alert">
           <strong>초대 링크를 직접 복사해 주세요.</strong>

@@ -31,6 +31,7 @@ def create_room(body: RoomCreate, request: Request, db: DbSession, user: Current
     )
     return RoomOut(
         room_id=room.room_id,
+        join_code=room.join_code,
         repertoire_id=room.repertoire_id,
         leader_id=room.leader_id,
         tempo_map_revision=room.tempo_map_revision,
@@ -47,6 +48,7 @@ def get_room(room_id: str, request: Request, db: DbSession, user: CurrentUser) -
     require_repertoire(db, user, room.repertoire_id)
     return RoomOut(
         room_id=room.room_id,
+        join_code=room.join_code,
         repertoire_id=room.repertoire_id,
         leader_id=room.leader_id,
         tempo_map_revision=room.tempo_map_revision,

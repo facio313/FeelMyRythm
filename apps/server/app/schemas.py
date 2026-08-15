@@ -821,6 +821,7 @@ class RoomCreate(ApiModel):
 
 class RoomOut(ApiModel):
     room_id: str
+    join_code: str
     repertoire_id: str
     leader_id: str
     tempo_map_revision: int

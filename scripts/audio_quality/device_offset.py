@@ -80,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional acceptance limit; a failure exits with status 2",
     )
     parser.add_argument(
+        "--phase4",
+        action="store_true",
+        help="apply the Phase 4 inter-device offset gate of 10 ms when --max-offset-ms is omitted",
+    )
+    parser.add_argument(
         "--block-frames",
         type=_positive_int,
         default=65_536,
@@ -97,6 +102,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     reference_path = args.wav[0]
     target_path = args.wav[0] if len(args.wav) == 1 else args.wav[1]
     target_channel = args.target_channel or ("2" if len(args.wav) == 1 else "1")
+    max_offset_ms = args.max_offset_ms
+    if max_offset_ms is None and args.phase4:
+        max_offset_ms = 10.0
     try:
         result = analyze_device_offset(
             reference_path,
@@ -109,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_lag_ms=args.max_lag_ms,
             bin_width_ms=args.bin_width_ms,
             peak_window_ms=args.peak_window_ms,
-            max_offset_ms=args.max_offset_ms,
+            max_offset_ms=max_offset_ms,
             block_frames=args.block_frames,
         )
     except (AudioQualityError, WavFormatError, OSError, ValueError) as exc:

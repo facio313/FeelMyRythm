@@ -1,3 +1,7 @@
+/*
+ * 오디오 클럭 기준 룩어헤드 스케줄러.
+ * 클릭을 setTimeout으로 치지 않으며, 시각화는 예약된 audioTime을 rAF에서 읽는다.
+ */
 import {
   canCancelScheduledAudio,
   canScheduleAudioBatch,
@@ -181,6 +185,7 @@ interface PendingBeat {
   readonly scheduled: ScheduledBeat;
 }
 
+/** 워커 틱마다 audio now + lookahead 안의 박만 AudioEngine에 예약한다. */
 export class LookaheadScheduler {
   readonly beatQueue: BeatQueue;
   onScheduledBeat: ((beat: ScheduledBeat) => void) | null = null;

@@ -38,7 +38,7 @@ Bluetooth는 설계상 Phase 4 ±10 ms DoD 대상에서 제외한다. 캘리브�
 ```bash
 python3 scripts/audio_quality/click_intervals.py recording-30m.wav \
   --bpm 100 \
-  --max-rms-jitter-ms 1 \
+  --phase4 \
   --pretty
 ```
 
@@ -65,7 +65,7 @@ click 개수와 반드시 대조한다.
 python3 scripts/audio_quality/device_offset.py synchronized-stereo.wav \
   --reference-channel 1 \
   --target-channel 2 \
-  --max-offset-ms 10 \
+  --phase4 \
   --pretty
 ```
 
@@ -76,6 +76,10 @@ python3 scripts/audio_quality/device_offset.py reference.wav target.wav \
   --max-offset-ms 10 \
   --pretty
 ```
+
+`--phase4`는 `--max-offset-ms 10`과 같다. 이 저장소에는 실기기 녹음이나 측정된 offset 숫자를
+넣지 않는다. Phase 4 ±10 ms 판정은 운영자가 공통 시간축으로 녹음한 WAV에 CLI를 실행한
+결과로만 기록한다.
 
 `offsetMs`가 양수이면 target click이 reference보다 늦게 도착한다. 음수이면 target이 먼저
 도착한다. `peakCorrelation`, `secondPeakCorrelation`, `peakMargin`도 함께 확인한다. 주기적인
