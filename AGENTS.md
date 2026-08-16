@@ -9,20 +9,21 @@
 
 ### 1. Branch Scope per Agent
 
-Each AI agent may only work within its own tool branch and below.
+Each AI agent may only work within its own persistent tool branch by default.
 **`main` and `dev` branches are managed exclusively by the user.**
 
-| Branch             | Who controls it       |
-| ------------------ | --------------------- |
-| `main`             | User only             |
-| `dev`              | User only             |
-| `anthropic`        | Claude Code           |
-| `cursor`           | Cursor                |
-| `codex`            | OpenAI Codex          |
-| `{tool}-feature-*` | Each respective agent |
+| Branch      | Who controls it |
+| ----------- | --------------- |
+| `main`      | User only       |
+| `dev`       | User only       |
+| `anthropic` | Claude Code     |
+| `cursor`    | Cursor          |
+| `codex`     | OpenAI Codex    |
 
 - Agents **must not** commit, merge, or push to `main` or `dev` without an explicit user request.
 - When the user explicitly asks, agents may assist with `main`/`dev` operations.
+- Agents work directly on their persistent tool branch and must not create or switch to a feature branch unless the user explicitly requests one.
+- If the user explicitly requests a feature branch, it remains controlled by the corresponding agent and must be merged back into the persistent tool branch before completion unless the user asks to leave it separate.
 
 ### 2. Shared Project Information → Always Update `AGENTS.md`
 
@@ -117,20 +118,20 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 ### Flow
 
 ```
-codex-feature-name ──┐
-cursor-feature-name ─┤→ {tool} → dev → main
-anthropic-feat-name ─┘
+codex ──────┐
+cursor ─────┤→ dev → main
+anthropic ──┘
 ```
 
-1. Branch off the tool branch for any new feature:
+1. Work and commit directly on the assigned persistent tool branch:
    ```bash
-   git checkout -b cursor-feature-tempo-editor cursor
+   git switch cursor
    ```
-2. Merge completed feature back into the tool branch:
+2. Push the validated tool branch:
    ```bash
-   git checkout cursor && git merge cursor-feature-tempo-editor
+   git push origin cursor
    ```
-3. Merge tool branch into `dev` after validation (user):
+3. Merge the tool branch into `dev` after validation (user):
    ```bash
    git checkout dev && git merge cursor
    ```
@@ -139,7 +140,7 @@ anthropic-feat-name ─┘
 ### Naming Rules
 
 - Tool branches: `codex`, `cursor`, `anthropic`
-- Feature branches: `{tool}-feature-{kebab-case-feature}` — e.g. `cursor-feature-sync-session`
+- Feature branches are exceptional and require an explicit user request. When requested, use `{tool}-feature-{kebab-case-feature}` — e.g. `cursor-feature-sync-session`.
 - English kebab-case only.
 
 ---
