@@ -1,293 +1,464 @@
-/**
- * 템포맵 → PerformanceTimeline 컴파일 (설계문서 §4.3).
- * 반복 구조(도돌이·볼타·D.C./D.S./Coda)를 연주 순서대로 펼친다.
- * 모두 순수 함수 — 같은 입력이면 어느 기기에서든 같은 결과 (동기화의 전제).
+/*
+ * 템포맵을 절대 시각 타임라인으로 전개한다.
+ * 박을 네트워크로 보내지 않는다. 같은 맵과 revision이면 모든 기기에서 같은 시각이 나온다.
+ * DOM·오디오 시계 의존성은 두지 않는다.
  */
-import {
-  NOTE_VALUE_FRACTION,
-  type CountInBeat,
-  type JumpDirective,
-  type PerformanceTimeline,
-  type TempoMap,
-  type TempoSection,
-  type TimelineBeat,
-} from './types';
+import { TimelineExpansionError } from './errors.js';
+import type {
+  Accent,
+  Beat,
+  CodaDirective,
+  DaCapoDirective,
+  DalSegnoDirective,
+  ExpandTimelineOptions,
+  LocateResult,
+  PerformanceTimeline,
+  RepeatDirective,
+  TempoMap,
+  TempoSection,
+  TimelineMeasure,
+} from './types.js';
+import { assertValidTempoMap, beatsPerMeasure } from './validation.js';
 
-type RepeatJump = Extract<JumpDirective, { type: 'repeat' }>;
-type DcDsJump = Extract<JumpDirective, { type: 'dc' | 'ds' }>;
-type CodaJump = Extract<JumpDirective, { type: 'coda' }>;
+const DEFAULT_MAX_ENTRIES = 100_000;
+const TIME_EPSILON_SEC = 1e-9;
 
-// ---------- 검증 ----------
-
-/** 편집기 표시용: 치명적/경고 이슈 목록. 비어 있으면 유효. */
-export function validateTempoMap(map: TempoMap): string[] {
-  const issues: string[] = [];
-  if (map.totalMeasures < 1) issues.push('총 마디 수는 1 이상이어야 합니다');
-  if (map.sections.length === 0) {
-    issues.push('구간이 최소 1개 필요합니다');
-    return issues;
-  }
-  const sorted = [...map.sections].sort((a, b) => a.startMeasure - b.startMeasure);
-  if (sorted[0]!.startMeasure !== 1) issues.push('첫 구간은 1마디부터 시작해야 합니다');
-  for (let i = 0; i < sorted.length; i++) {
-    const s = sorted[i]!;
-    if (s.endMeasure < s.startMeasure) issues.push(`구간 ${s.label ?? s.id}: 끝마디가 시작마디보다 앞입니다`);
-    if (s.bpm <= 0 || s.bpm > 500) issues.push(`구간 ${s.label ?? s.id}: BPM(${s.bpm})이 유효 범위(1~500)를 벗어났습니다`);
-    if (s.timeSignature.num < 1 || s.timeSignature.denom < 1)
-      issues.push(`구간 ${s.label ?? s.id}: 박자표가 잘못되었습니다`);
-    const next = sorted[i + 1];
-    if (next && next.startMeasure !== s.endMeasure + 1)
-      issues.push(`구간 사이에 빈틈/겹침: ${s.endMeasure}마디 다음이 ${next.startMeasure}마디`);
-  }
-  if (sorted[sorted.length - 1]!.endMeasure !== map.totalMeasures)
-    issues.push(`마지막 구간이 총 마디 수(${map.totalMeasures})까지 덮지 않습니다`);
-  for (const j of map.jumps) {
-    if (j.type === 'repeat') {
-      if (j.times < 2) issues.push('반복 횟수는 2 이상이어야 합니다');
-      if (j.endMeasure < j.startMeasure) issues.push('반복 구간이 뒤집혀 있습니다');
-    }
-  }
-  return issues;
-}
-
-function assertValid(map: TempoMap): void {
-  const issues = validateTempoMap(map);
-  if (issues.length > 0) throw new Error(`템포맵 검증 실패: ${issues.join(' / ')}`);
-}
-
-// ---------- 연주 순서 전개 ----------
-
-interface OrderItem {
-  measure: number;
+interface RepeatPassContext {
+  repeat: RepeatDirective;
   pass: number;
 }
 
-function passEnd(r: RepeatJump, pass: number): number {
-  if (!r.endings || r.endings.length === 0) return r.endMeasure;
-  const e = r.endings.find((e) => e.forPass.includes(pass));
-  return e ? e.measures[1] : r.endMeasure;
+interface MeasureTiming {
+  beatOffset: number;
+  beatCount: number;
+  nominalBeatStart: number;
 }
 
-/** 현재 패스에 해당하지 않는 엔딩(볼타) 구간이면 건너뛸 목적지 반환 */
-function voltaSkipTarget(
-  m: number,
-  repeats: RepeatJump[],
-  passDone: Map<RepeatJump, number>,
-  dcTaken: boolean,
-): number | null {
-  for (const r of repeats) {
-    if (!r.endings) continue;
-    // D.C./D.S. 이후에는 반복을 생략하고 마지막 엔딩을 연주하는 것이 관례
-    const currentPass = dcTaken ? r.times : (passDone.get(r) ?? 0) + 1;
-    for (const e of r.endings) {
-      if (m >= e.measures[0] && m <= e.measures[1] && !e.forPass.includes(currentPass)) {
-        return e.measures[1] + 1;
-      }
-    }
-  }
-  return null;
+interface SectionTiming {
+  section: TempoSection;
+  totalBeats: number;
+  measures: Map<number, MeasureTiming>;
 }
 
-export function buildPerformanceOrder(map: TempoMap): OrderItem[] {
-  const repeats = map.jumps.filter((j): j is RepeatJump => j.type === 'repeat');
-  const dcds = map.jumps.find((j): j is DcDsJump => j.type === 'dc' || j.type === 'ds');
-  const coda = map.jumps.find((j): j is CodaJump => j.type === 'coda');
+type NavigationDirective = DaCapoDirective | DalSegnoDirective;
 
-  const passDone = new Map<RepeatJump, number>();
-  const timesPlayed = new Map<number, number>();
-  const order: OrderItem[] = [];
-  let dcTaken = false;
-  let m = 1;
-  let iter = 0;
-  const maxIter = Math.max(256, map.totalMeasures * 64);
+interface NavigationPoint {
+  directive: NavigationDirective;
+  triggerIndex: number;
+  order: number;
+}
 
-  while (m >= 1 && m <= map.totalMeasures) {
-    if (++iter > maxIter)
-      throw new Error('반복 구조가 무한 루프를 만듭니다. jumps 설정을 확인하세요.');
+function isStrictlyInside(inner: RepeatDirective, outer: RepeatDirective): boolean {
+  return (
+    inner.startMeasure >= outer.startMeasure &&
+    inner.endMeasure <= outer.endMeasure &&
+    (inner.startMeasure !== outer.startMeasure || inner.endMeasure !== outer.endMeasure)
+  );
+}
 
-    const skip = voltaSkipTarget(m, repeats, passDone, dcTaken);
-    if (skip !== null) {
-      m = skip;
-      continue;
+function directRepeatsInRange(
+  repeats: readonly RepeatDirective[],
+  startMeasure: number,
+  endMeasure: number,
+  container?: RepeatDirective,
+): RepeatDirective[] {
+  const candidates = repeats.filter(
+    (repeat) =>
+      repeat !== container &&
+      repeat.startMeasure >= startMeasure &&
+      repeat.endMeasure <= endMeasure,
+  );
+
+  return candidates
+    .filter(
+      (candidate) =>
+        !candidates.some((other) => other !== candidate && isStrictlyInside(candidate, other)),
+    )
+    .sort((left, right) => left.startMeasure - right.startMeasure);
+}
+
+function isIncludedByVoltas(measure: number, contexts: readonly RepeatPassContext[]): boolean {
+  return contexts.every(({ repeat, pass }) => {
+    const coveringEndings = (repeat.endings ?? []).filter(
+      (ending) => ending.measures[0] <= measure && measure <= ending.measures[1],
+    );
+    return (
+      coveringEndings.length === 0 ||
+      coveringEndings.some((ending) => ending.forPass.includes(pass))
+    );
+  });
+}
+
+function buildRepeatRoute(map: TempoMap, maxEntries: number): number[] {
+  const repeats = map.jumps.filter((jump): jump is RepeatDirective => jump.type === 'repeat');
+  const route: number[] = [];
+
+  const append = (measure: number): void => {
+    if (route.length >= maxEntries) {
+      throw new TimelineExpansionError(
+        `Timeline expansion exceeded maxEntries (${String(maxEntries)}) while applying repeats`,
+      );
     }
+    route.push(measure);
+  };
 
-    const pass = (timesPlayed.get(m) ?? 0) + 1;
-    timesPlayed.set(m, pass);
-    order.push({ measure: m, pass });
+  const expandSpan = (
+    startMeasure: number,
+    endMeasure: number,
+    contexts: readonly RepeatPassContext[],
+    container?: RepeatDirective,
+  ): void => {
+    const directRepeats = directRepeatsInRange(repeats, startMeasure, endMeasure, container);
+    let childIndex = 0;
+    let measure = startMeasure;
 
-    // 1) D.C./D.S. 이후 Fine 도달 → 종료
-    if (dcTaken && dcds?.alFine === m) break;
-
-    // 2) D.C./D.S. 이후 To Coda 도달 → Coda로 점프
-    if (dcTaken && dcds?.alCoda && coda && coda.toCodaMeasure === m) {
-      m = coda.codaMeasure;
-      continue;
-    }
-
-    // 3) 도돌이 점프백 (D.C./D.S. 이후에는 반복 생략이 관례)
-    if (!dcTaken) {
-      let jumped = false;
-      for (const r of repeats) {
-        const done = passDone.get(r) ?? 0;
-        const current = done + 1;
-        if (current >= r.times) continue;
-        if (passEnd(r, current) === m) {
-          passDone.set(r, current);
-          m = r.startMeasure;
-          jumped = true;
-          break;
+    while (measure <= endMeasure) {
+      const child = directRepeats[childIndex];
+      if (child !== undefined && child.startMeasure === measure) {
+        for (let pass = 1; pass <= child.times; pass += 1) {
+          expandSpan(
+            child.startMeasure,
+            child.endMeasure,
+            [...contexts, { repeat: child, pass }],
+            child,
+          );
         }
+        measure = child.endMeasure + 1;
+        childIndex += 1;
+        continue;
       }
-      if (jumped) continue;
+
+      if (isIncludedByVoltas(measure, contexts)) append(measure);
+      measure += 1;
+    }
+  };
+
+  expandSpan(1, map.totalMeasures, []);
+  return route;
+}
+
+function firstIndexOfMeasure(route: readonly number[], measure: number): number {
+  return route.findIndex((candidate) => candidate === measure);
+}
+
+function lastIndexOfMeasure(route: readonly number[], measure: number): number {
+  for (let index = route.length - 1; index >= 0; index -= 1) {
+    if (route[index] === measure) return index;
+  }
+  return -1;
+}
+
+function applyNavigation(
+  map: TempoMap,
+  repeatRoute: readonly number[],
+  maxEntries: number,
+): number[] {
+  const navigationPoints: NavigationPoint[] = map.jumps
+    .map((directive, order): NavigationPoint | undefined => {
+      if (directive.type !== 'dc' && directive.type !== 'ds') return undefined;
+      const triggerIndex = lastIndexOfMeasure(repeatRoute, directive.atMeasure);
+      if (triggerIndex < 0) {
+        throw new TimelineExpansionError(
+          `${directive.type.toUpperCase()} measure ${String(directive.atMeasure)} is absent after volta expansion`,
+        );
+      }
+      return { directive, triggerIndex, order };
+    })
+    .filter((point): point is NavigationPoint => point !== undefined)
+    .sort((left, right) => left.order - right.order);
+
+  const coda = map.jumps.find((directive): directive is CodaDirective => directive.type === 'coda');
+  const executedNavigation = new Set<number>();
+  let activeFine: number | undefined;
+  let codaArmed = false;
+  let codaUsed = false;
+  let routeIndex = 0;
+  const result: number[] = [];
+
+  while (routeIndex < repeatRoute.length) {
+    if (result.length >= maxEntries) {
+      throw new TimelineExpansionError(
+        `Timeline expansion exceeded maxEntries (${String(maxEntries)}) while applying navigation jumps`,
+      );
     }
 
-    // 4) D.C. / D.S. (한 번만 실행)
-    if (!dcTaken && dcds && dcds.atMeasure === m) {
-      dcTaken = true;
-      m = dcds.type === 'dc' ? 1 : dcds.segnoMeasure;
+    const measure = repeatRoute[routeIndex];
+    if (measure === undefined) break;
+    result.push(measure);
+
+    if (activeFine === measure) break;
+
+    if (codaArmed && !codaUsed && coda !== undefined && measure === coda.toCodaMeasure) {
+      let codaIndex = repeatRoute.findIndex(
+        (candidate, index) => index > routeIndex && candidate === coda.codaMeasure,
+      );
+      if (codaIndex < 0) codaIndex = firstIndexOfMeasure(repeatRoute, coda.codaMeasure);
+      if (codaIndex < 0) {
+        throw new TimelineExpansionError(
+          `Coda measure ${String(coda.codaMeasure)} is absent after volta expansion`,
+        );
+      }
+      codaUsed = true;
+      routeIndex = codaIndex;
       continue;
     }
 
-    m += 1;
-  }
-  return order;
-}
+    const navigation = navigationPoints.find(
+      (point) => point.triggerIndex === routeIndex && !executedNavigation.has(point.order),
+    );
+    if (navigation !== undefined) {
+      executedNavigation.add(navigation.order);
+      activeFine = navigation.directive.alFine;
+      codaArmed = navigation.directive.alCoda === true;
 
-// ---------- 시간 계산 ----------
-
-export function sectionForMeasure(map: TempoMap, measure: number): TempoSection | undefined {
-  return map.sections.find((s) => measure >= s.startMeasure && measure <= s.endMeasure);
-}
-
-/** 구간의 박 구성: 마디당 몇 박, 1박이 온음표의 몇 분의 몇인지 */
-function beatScheme(sec: TempoSection): { count: number; unitFrac: number } {
-  const unit = NOTE_VALUE_FRACTION[sec.beatUnit];
-  const measureFrac = sec.timeSignature.num / sec.timeSignature.denom;
-  const raw = measureFrac / unit;
-  if (Math.abs(raw - Math.round(raw)) < 1e-9 && Math.round(raw) >= 1) {
-    return { count: Math.round(raw), unitFrac: unit };
-  }
-  // beatUnit으로 나누어떨어지지 않으면(예: 7/8을 quarter로) 분모 음가 단위로 폴백
-  return { count: sec.timeSignature.num, unitFrac: 1 / sec.timeSignature.denom };
-}
-
-function bpmForMeasure(sec: TempoSection, measure: number): number {
-  if (!sec.tempoChange) return sec.bpm;
-  const span = sec.endMeasure - sec.startMeasure;
-  if (span === 0) return sec.tempoChange.targetBpm;
-  const t = (measure - sec.startMeasure) / span;
-  return sec.bpm + (sec.tempoChange.targetBpm - sec.bpm) * t;
-}
-
-function accentFor(sec: TempoSection, beatIndex: number): 0 | 1 | 2 {
-  if (sec.accentPattern && sec.accentPattern.length > 0) {
-    const v = sec.accentPattern[beatIndex % sec.accentPattern.length] ?? 1;
-    return Math.max(0, Math.min(2, Math.round(v))) as 0 | 1 | 2;
-  }
-  return beatIndex === 0 ? 2 : 1;
-}
-
-/** 특정 마디의 박 시간 정보 (예비박 생성에도 재사용) */
-function measureBeatTiming(sec: TempoSection, measure: number): { count: number; beatSec: number } {
-  const scheme = beatScheme(sec);
-  const bpm = bpmForMeasure(sec, measure);
-  const wholeNoteSec = (60 / bpm) / NOTE_VALUE_FRACTION[sec.beatUnit];
-  return { count: scheme.count, beatSec: wholeNoteSec * scheme.unitFrac };
-}
-
-export function expandTimeline(map: TempoMap): PerformanceTimeline {
-  assertValid(map);
-  const order = buildPerformanceOrder(map);
-  const entries: PerformanceTimeline['entries'] = [];
-  let t = 0;
-
-  for (const item of order) {
-    const sec = sectionForMeasure(map, item.measure)!;
-    const { count: fullCount, beatSec } = measureBeatTiming(sec, item.measure);
-    let count = fullCount;
-    if (item.measure === 1 && item.pass === 1 && map.anacrusis) {
-      count = Math.max(1, Math.min(fullCount, Math.round(map.anacrusis.beats)));
-    }
-    const subdiv = sec.subdivision ?? 1;
-    const beats: TimelineBeat[] = [];
-    for (let b = 0; b < count; b++) {
-      beats.push({ timeSec: t + b * beatSec, accent: accentFor(sec, b), isSubdivision: false });
-      for (let s = 1; s < subdiv; s++) {
-        beats.push({ timeSec: t + b * beatSec + (s * beatSec) / subdiv, accent: 0, isSubdivision: true });
+      if (navigation.directive.type === 'dc') {
+        routeIndex = 0;
+      } else {
+        const segnoIndex = firstIndexOfMeasure(repeatRoute, navigation.directive.segnoMeasure);
+        if (segnoIndex < 0) {
+          throw new TimelineExpansionError(
+            `Segno measure ${String(navigation.directive.segnoMeasure)} is absent after volta expansion`,
+          );
+        }
+        routeIndex = segnoIndex;
       }
+      continue;
     }
-    const durationSec = count * beatSec;
-    entries.push({
-      measureNumber: item.measure,
-      pass: item.pass,
-      sectionId: sec.id,
-      startTimeSec: t,
-      durationSec,
-      beats,
-    });
-    t += durationSec;
+
+    routeIndex += 1;
   }
 
-  return { tempoMapRevision: map.revision, entries, totalDurationSec: t };
+  return result;
 }
 
-// ---------- 위치 탐색 ----------
-
-export interface TimelinePosition {
-  entryIndex: number;
-  beatIndex: number;
-}
-
-/** 경과 시간(초) → 현재 마디·박 (이진 탐색) */
-export function locate(tl: PerformanceTimeline, elapsedSec: number): TimelinePosition | null {
-  const { entries } = tl;
-  if (entries.length === 0 || elapsedSec < 0 || elapsedSec >= tl.totalDurationSec) return null;
-  let lo = 0;
-  let hi = entries.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (entries[mid]!.startTimeSec <= elapsedSec) lo = mid;
-    else hi = mid - 1;
+function sectionForMeasure(map: TempoMap, measure: number): TempoSection {
+  let low = 0;
+  let high = map.sections.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const section = map.sections[middle];
+    if (section === undefined) break;
+    if (measure < section.startMeasure) high = middle - 1;
+    else if (measure > section.endMeasure) low = middle + 1;
+    else return section;
   }
-  const entry = entries[lo]!;
-  let beatIndex = 0;
-  for (let i = entry.beats.length - 1; i >= 0; i--) {
-    if (entry.beats[i]!.timeSec <= elapsedSec + 1e-9) {
-      beatIndex = i;
-      break;
+  throw new TimelineExpansionError(`No tempo section covers measure ${String(measure)}`);
+}
+
+function createSectionTimings(map: TempoMap): Map<string, SectionTiming> {
+  const timings = new Map<string, SectionTiming>();
+  for (const section of map.sections) {
+    const fullBeatCount = Math.round(beatsPerMeasure(section));
+    const measures = new Map<number, MeasureTiming>();
+    const anacrusisBeats = map.anacrusis?.beats;
+    let beatOffset = 0;
+    for (let measure = section.startMeasure; measure <= section.endMeasure; measure += 1) {
+      const isPickup = measure === 1 && anacrusisBeats !== undefined;
+      const beatCount = isPickup ? anacrusisBeats : fullBeatCount;
+      const nominalBeatStart = isPickup ? fullBeatCount - beatCount : 0;
+      measures.set(measure, { beatOffset, beatCount, nominalBeatStart });
+      beatOffset += beatCount;
+    }
+    timings.set(section.id, { section, totalBeats: beatOffset, measures });
+  }
+  return timings;
+}
+
+function tempoAt(sectionTiming: SectionTiming, beatPosition: number): number {
+  const { section, totalBeats } = sectionTiming;
+  const targetBpm = section.tempoChange?.targetBpm ?? section.bpm;
+  return section.bpm + ((targetBpm - section.bpm) * beatPosition) / totalBeats;
+}
+
+/** Integrates 60 / BPM over score-beat position for continuous linear BPM changes. */
+function durationBetween(sectionTiming: SectionTiming, startBeat: number, endBeat: number): number {
+  const { section, totalBeats } = sectionTiming;
+  const targetBpm = section.tempoChange?.targetBpm ?? section.bpm;
+  const slope = (targetBpm - section.bpm) / totalBeats;
+  if (Math.abs(slope) < Number.EPSILON) return (60 * (endBeat - startBeat)) / section.bpm;
+
+  const startBpm = section.bpm + slope * startBeat;
+  const endBpm = section.bpm + slope * endBeat;
+  return (60 / slope) * Math.log(endBpm / startBpm);
+}
+
+function accentPattern(section: TempoSection, fullBeatCount: number): Accent[] {
+  if (section.accentPattern !== undefined) return section.accentPattern;
+  return Array.from({ length: fullBeatCount }, (_, index): Accent => (index === 0 ? 2 : 0));
+}
+
+function createTimelineMeasure(
+  map: TempoMap,
+  measureNumber: number,
+  pass: number,
+  startTimeSec: number,
+  sectionTimings: ReadonlyMap<string, SectionTiming>,
+): { entry: TimelineMeasure; durationSec: number } {
+  const section = sectionForMeasure(map, measureNumber);
+  const sectionTiming = sectionTimings.get(section.id);
+  const measureTiming = sectionTiming?.measures.get(measureNumber);
+  if (sectionTiming === undefined || measureTiming === undefined) {
+    throw new TimelineExpansionError(`Missing timing data for measure ${String(measureNumber)}`);
+  }
+
+  const fullBeatCount = Math.round(beatsPerMeasure(section));
+  const accents = accentPattern(section, fullBeatCount);
+  const subdivision = section.subdivision ?? 1;
+  const beats: Beat[] = [];
+
+  for (let localBeat = 0; localBeat < measureTiming.beatCount; localBeat += 1) {
+    const nominalBeat = measureTiming.nominalBeatStart + localBeat;
+    const scoreBeat = measureTiming.beatOffset + localBeat;
+    for (let sub = 0; sub < subdivision; sub += 1) {
+      const fraction = sub / subdivision;
+      beats.push({
+        timeSec:
+          startTimeSec +
+          durationBetween(sectionTiming, measureTiming.beatOffset, scoreBeat + fraction),
+        accent: sub === 0 ? (accents[nominalBeat] ?? 0) : 0,
+        isSubdivision: sub !== 0,
+        beatIndex: nominalBeat,
+        subdivisionIndex: sub,
+      });
     }
   }
-  return { entryIndex: lo, beatIndex };
+
+  const durationSec = durationBetween(
+    sectionTiming,
+    measureTiming.beatOffset,
+    measureTiming.beatOffset + measureTiming.beatCount,
+  );
+  return {
+    entry: { measureNumber, pass, sectionId: section.id, startTimeSec, beats },
+    durationSec,
+  };
 }
 
-/** "measure마디 pass번째 패스부터" → 타임라인 오프셋(초) */
-export function seekPoint(tl: PerformanceTimeline, measure: number, pass = 1): number {
-  const idx = tl.entries.findIndex((e) => e.measureNumber === measure && e.pass === pass);
-  if (idx < 0) throw new Error(`타임라인에 ${measure}마디(패스 ${pass})가 없습니다`);
-  return tl.entries[idx]!.startTimeSec;
-}
-
-// ---------- 예비박 ----------
-
-/**
- * 예비박 생성 (설계문서 §5.3).
- * 시작 지점 구간의 박자·템포로 countIn.measures 마디를 앵커 앞(음수 시간)에 배치.
- * 반환된 첫 박의 timeSec 절대값이 예비박 총 길이다.
- */
-export function buildCountIn(map: TempoMap, anchorMeasure: number): CountInBeat[] {
-  const sec = sectionForMeasure(map, anchorMeasure);
-  if (!sec) throw new Error(`${anchorMeasure}마디를 포함하는 구간이 없습니다`);
-  const { count, beatSec } = measureBeatTiming(sec, anchorMeasure);
-  const measures = map.countIn.measures;
-  const beats: CountInBeat[] = [];
-  const total = measures * count;
-  for (let i = 0; i < total; i++) {
-    const beatInMeasure = i % count;
-    beats.push({
-      timeSec: -(total - i) * beatSec,
-      accent: beatInMeasure === 0 ? 2 : 1,
-      countdown: count - beatInMeasure,
-    });
+/** 반복·볼타·D.C./D.S./Coda를 펼친 뒤 각 마디의 시작 시각을 로컬에서 계산한다. */
+export function expandTimeline(
+  map: TempoMap,
+  options: ExpandTimelineOptions = {},
+): PerformanceTimeline {
+  assertValidTempoMap(map);
+  const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+  if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+    throw new RangeError('maxEntries must be a positive integer');
   }
-  return beats;
+
+  const repeatRoute = buildRepeatRoute(map, maxEntries);
+  const route = applyNavigation(map, repeatRoute, maxEntries);
+  if (route.length === 0) {
+    throw new TimelineExpansionError('TempoMap expands to an empty performance timeline');
+  }
+
+  const sectionTimings = createSectionTimings(map);
+  const passes = new Map<number, number>();
+  const entries: TimelineMeasure[] = [];
+  let timelineTime = 0;
+
+  for (const measureNumber of route) {
+    const pass = (passes.get(measureNumber) ?? 0) + 1;
+    passes.set(measureNumber, pass);
+    const { entry, durationSec } = createTimelineMeasure(
+      map,
+      measureNumber,
+      pass,
+      timelineTime,
+      sectionTimings,
+    );
+    entries.push(entry);
+    timelineTime += durationSec;
+  }
+
+  return {
+    tempoMapRevision: map.revision,
+    entries,
+    totalDurationSec: timelineTime,
+  };
+}
+
+export function locate(timeline: PerformanceTimeline, elapsedSec: number): LocateResult {
+  if (!Number.isFinite(elapsedSec)) throw new RangeError('elapsedSec must be finite');
+  if (timeline.entries.length === 0) throw new RangeError('timeline must contain an entry');
+
+  const boundedTime = Math.min(Math.max(elapsedSec, 0), timeline.totalDurationSec);
+  let low = 0;
+  let high = timeline.entries.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const entry = timeline.entries[middle];
+    if (entry !== undefined && entry.startTimeSec <= boundedTime) low = middle + 1;
+    else high = middle - 1;
+  }
+  const entryIndex = Math.max(0, high);
+  const entry = timeline.entries[entryIndex];
+  if (entry === undefined || entry.beats.length === 0) {
+    throw new RangeError('timeline entry must contain at least one beat');
+  }
+
+  low = 0;
+  high = entry.beats.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const beat = entry.beats[middle];
+    if (beat !== undefined && beat.timeSec <= boundedTime) low = middle + 1;
+    else high = middle - 1;
+  }
+  return { entryIndex, beatIndex: Math.max(0, high) };
+}
+
+export function seekPoint(timeline: PerformanceTimeline, measure: number, pass?: number): number {
+  if (!Number.isInteger(measure) || measure <= 0) {
+    throw new RangeError('measure must be a positive integer');
+  }
+  if (pass !== undefined && (!Number.isInteger(pass) || pass <= 0)) {
+    throw new RangeError('pass must be a positive integer');
+  }
+  const entry = timeline.entries.find(
+    (candidate) =>
+      candidate.measureNumber === measure && (pass === undefined || candidate.pass === pass),
+  );
+  if (entry === undefined) {
+    throw new RangeError(
+      `Measure ${String(measure)}${pass === undefined ? '' : ` pass ${String(pass)}`} is not in the timeline`,
+    );
+  }
+  return entry.startTimeSec;
+}
+
+export function buildCountIn(map: TempoMap, fromTimeSec: number): Beat[] {
+  assertValidTempoMap(map);
+  if (!Number.isFinite(fromTimeSec)) throw new RangeError('fromTimeSec must be finite');
+  const timeline = expandTimeline(map);
+  const anchor = timeline.entries.find(
+    (entry) => Math.abs(entry.startTimeSec - fromTimeSec) <= TIME_EPSILON_SEC,
+  );
+  if (anchor === undefined) {
+    throw new RangeError('fromTimeSec must be an exact value returned by seekPoint');
+  }
+
+  const section = sectionForMeasure(map, anchor.measureNumber);
+  const sectionTiming = createSectionTimings(map).get(section.id);
+  const measureTiming = sectionTiming?.measures.get(anchor.measureNumber);
+  if (sectionTiming === undefined || measureTiming === undefined) {
+    throw new TimelineExpansionError('Unable to derive count-in tempo');
+  }
+
+  const fullBeatCount = Math.round(beatsPerMeasure(section));
+  const bpm = tempoAt(sectionTiming, measureTiming.beatOffset);
+  const beatDurationSec = 60 / bpm;
+  const count = map.countIn.measures * fullBeatCount;
+  const startTimeSec = fromTimeSec - count * beatDurationSec;
+  const accents = accentPattern(section, fullBeatCount);
+
+  return Array.from({ length: count }, (_, index): Beat => {
+    const beatIndex = index % fullBeatCount;
+    return {
+      timeSec: startTimeSec + index * beatDurationSec,
+      accent: accents[beatIndex] ?? 0,
+      isSubdivision: false,
+      beatIndex,
+      subdivisionIndex: 0,
+    };
+  });
 }

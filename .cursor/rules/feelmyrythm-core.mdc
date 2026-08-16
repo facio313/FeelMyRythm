@@ -11,5 +11,5 @@ alwaysApply: true
 - **동기화**: 박 스트리밍 금지. 시계 합의 + 로컬 타임라인 전개.
 - **오디오**: 클릭/시각은 오디오 클럭 기준. `packages/core`에 DOM 의존성 금지.
 - **`.env` 커밋 금지**. 키 하드코딩 금지.
-- **브랜치**: `{tool}/feature` → `{tool}` → `dev` → `main`. 영문 kebab-case만.
-- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor/*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.
+- **브랜치**: `{tool}-feature-*` → `{tool}` → `dev` → `main`. 영문 kebab-case만. git은 `refs/heads/cursor`가 있으면 `cursor/feature`를 만들지 못하므로 슬래시 대신 하이픈을 쓴다.
+- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor-feature-*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.

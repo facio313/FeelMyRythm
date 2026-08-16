@@ -1,202 +1,297 @@
 import { describe, expect, it } from 'vitest';
+
 import {
+  TimelineExpansionError,
   buildCountIn,
-  buildPerformanceOrder,
-  createDefaultTempoMap,
   expandTimeline,
   locate,
   seekPoint,
-  validateTempoMap,
-  type TempoMap,
-} from '../src/index';
+} from '../src/index.js';
+import { section, tempoMap } from './fixtures.js';
 
-function map(partial: Partial<TempoMap>): TempoMap {
-  return createDefaultTempoMap(partial);
-}
+describe('expandTimeline', () => {
+  it('expands the 1-25/26 tempo transition with first and second endings', () => {
+    const map = tempoMap({
+      revision: 7,
+      totalMeasures: 30,
+      sections: [
+        section(1, 25, { id: 'slow', bpm: 100 }),
+        section(26, 30, { id: 'fast', bpm: 130 }),
+      ],
+      jumps: [
+        {
+          type: 'repeat',
+          startMeasure: 23,
+          endMeasure: 30,
+          times: 2,
+          endings: [
+            { measures: [29, 29], forPass: [1] },
+            { measures: [30, 30], forPass: [2] },
+          ],
+        },
+      ],
+    });
 
-describe('expandTimeline: 기본', () => {
-  it('4/4 ♩=100, 4마디 → 16박, 총 9.6초', () => {
-    const tl = expandTimeline(
-      map({
-        totalMeasures: 4,
-        sections: [
-          { id: 's1', startMeasure: 1, endMeasure: 4, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-        ],
-      }),
+    const timeline = expandTimeline(map);
+    expect(expandTimeline(map)).toEqual(timeline);
+    expect(timeline.tempoMapRevision).toBe(7);
+    expect(timeline.entries.slice(-14).map((entry) => entry.measureNumber)).toEqual([
+      23, 24, 25, 26, 27, 28, 29, 23, 24, 25, 26, 27, 28, 30,
+    ]);
+
+    const firstMeasure26 = timeline.entries.find(
+      (entry) => entry.measureNumber === 26 && entry.pass === 1,
     );
-    expect(tl.entries).toHaveLength(4);
-    expect(tl.entries.flatMap((e) => e.beats)).toHaveLength(16);
-    expect(tl.totalDurationSec).toBeCloseTo(4 * 4 * 0.6, 9);
-    expect(tl.entries[1]!.startTimeSec).toBeCloseTo(2.4, 9);
-    expect(tl.entries[0]!.beats[0]!.accent).toBe(2); // 다운비트
-    expect(tl.entries[0]!.beats[1]!.accent).toBe(1);
+    const secondMeasure26 = timeline.entries.find(
+      (entry) => entry.measureNumber === 26 && entry.pass === 2,
+    );
+    expect(firstMeasure26?.sectionId).toBe('fast');
+    expect(firstMeasure26?.startTimeSec).toBeCloseTo(60, 10);
+    expect(secondMeasure26?.startTimeSec).toBeGreaterThan(firstMeasure26?.startTimeSec ?? 0);
   });
 
-  it('6/8 ♪.=60 → 마디당 2박, 마디 길이 2초', () => {
-    const tl = expandTimeline(
-      map({
-        totalMeasures: 2,
-        sections: [
-          { id: 's1', startMeasure: 1, endMeasure: 2, timeSignature: { num: 6, denom: 8 }, bpm: 60, beatUnit: 'dottedQuarter' },
-        ],
-      }),
-    );
-    expect(tl.entries[0]!.beats).toHaveLength(2);
-    expect(tl.entries[0]!.durationSec).toBeCloseTo(2, 9);
-  });
-
-  it('subdivision=2 → 박 사이 분할 클릭 삽입', () => {
-    const tl = expandTimeline(
-      map({
+  it('uses two dotted-quarter beats and triplet subdivisions in 6/8', () => {
+    const timeline = expandTimeline(
+      tempoMap({
         totalMeasures: 1,
         sections: [
-          { id: 's1', startMeasure: 1, endMeasure: 1, timeSignature: { num: 4, denom: 4 }, bpm: 120, beatUnit: 'quarter', subdivision: 2 },
+          section(1, 1, {
+            bpm: 120,
+            timeSignature: { num: 6, denom: 8 },
+            beatUnit: 'dottedQuarter',
+            accentPattern: [2, 0],
+            subdivision: 3,
+          }),
         ],
       }),
     );
-    expect(tl.entries[0]!.beats).toHaveLength(8);
-    expect(tl.entries[0]!.beats.filter((b) => b.isSubdivision)).toHaveLength(4);
+
+    expect(timeline.totalDurationSec).toBeCloseTo(1, 12);
+    expect(timeline.entries[0]?.beats).toHaveLength(6);
+    const expectedTimes = [0, 1 / 6, 1 / 3, 1 / 2, 2 / 3, 5 / 6];
+    timeline.entries[0]?.beats.forEach((beat, index) => {
+      expect(beat.timeSec).toBeCloseTo(expectedTimes[index] ?? Number.NaN, 12);
+    });
+    expect(timeline.entries[0]?.beats.map((beat) => beat.isSubdivision)).toEqual([
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+    ]);
   });
 
-  it('못갖춘마디: 첫 마디가 1박', () => {
-    const tl = expandTimeline(
-      map({
+  it('shortens the pickup and places it on the final nominal beat', () => {
+    const timeline = expandTimeline(
+      tempoMap({
         totalMeasures: 2,
         anacrusis: { beats: 1 },
+        sections: [section(1, 2, { bpm: 60 })],
+      }),
+    );
+
+    expect(timeline.entries[0]?.beats).toEqual([
+      expect.objectContaining({ timeSec: 0, beatIndex: 3, accent: 0 }),
+    ]);
+    expect(timeline.entries[1]?.startTimeSec).toBeCloseTo(1, 12);
+    expect(timeline.totalDurationSec).toBeCloseTo(5, 12);
+  });
+
+  it('integrates a continuous linear accelerando and produces shorter beats', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 1,
         sections: [
-          { id: 's1', startMeasure: 1, endMeasure: 2, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
+          section(1, 1, {
+            bpm: 60,
+            tempoChange: { type: 'accel', targetBpm: 120 },
+          }),
         ],
       }),
     );
-    expect(tl.entries[0]!.beats).toHaveLength(1);
-    expect(tl.entries[1]!.beats).toHaveLength(4);
-  });
-});
+    const beatTimes = timeline.entries[0]?.beats.map((beat) => beat.timeSec) ?? [];
+    const intervals = [
+      beatTimes[1]! - beatTimes[0]!,
+      beatTimes[2]! - beatTimes[1]!,
+      beatTimes[3]! - beatTimes[2]!,
+      timeline.totalDurationSec - beatTimes[3]!,
+    ];
 
-describe('사용자 시나리오: 템포 변화 + 도돌이/엔딩', () => {
-  // "♩=100 4/4로 시작, 26마디에서 ♩=130, 1~8마디 반복(1st: 7마디 / 2nd: 8마디)"
-  const scenario = map({
-    totalMeasures: 32,
-    sections: [
-      { id: 'a', startMeasure: 1, endMeasure: 25, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-      { id: 'b', startMeasure: 26, endMeasure: 32, timeSignature: { num: 4, denom: 4 }, bpm: 130, beatUnit: 'quarter' },
-    ],
-    jumps: [
-      {
-        type: 'repeat',
-        startMeasure: 1,
-        endMeasure: 8,
-        times: 2,
-        endings: [
-          { measures: [7, 7], forPass: [1] },
-          { measures: [8, 8], forPass: [2] },
+    expect(timeline.totalDurationSec).toBeCloseTo(4 * Math.log(2), 12);
+    expect(intervals[0]).toBeGreaterThan(intervals[1]!);
+    expect(intervals[1]).toBeGreaterThan(intervals[2]!);
+    expect(intervals[2]).toBeGreaterThan(intervals[3]!);
+  });
+
+  it('integrates a continuous linear ritardando and produces longer beats', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 1,
+        sections: [
+          section(1, 1, {
+            bpm: 120,
+            tempoChange: { type: 'rit', targetBpm: 60 },
+          }),
         ],
-      },
-    ],
+      }),
+    );
+    const beatTimes = timeline.entries[0]?.beats.map((beat) => beat.timeSec) ?? [];
+    const intervals = [
+      beatTimes[1]! - beatTimes[0]!,
+      beatTimes[2]! - beatTimes[1]!,
+      beatTimes[3]! - beatTimes[2]!,
+      timeline.totalDurationSec - beatTimes[3]!,
+    ];
+
+    expect(intervals[0]).toBeLessThan(intervals[1]!);
+    expect(intervals[1]).toBeLessThan(intervals[2]!);
+    expect(intervals[2]).toBeLessThan(intervals[3]!);
   });
 
-  it('연주 순서: 1..7, 1..6, 8, 9..32', () => {
-    const order = buildPerformanceOrder(scenario).map((o) => o.measure);
-    expect(order.slice(0, 7)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(order.slice(7, 14)).toEqual([1, 2, 3, 4, 5, 6, 8]);
-    expect(order[14]).toBe(9);
-    expect(order[order.length - 1]).toBe(32);
-    expect(order).toHaveLength(7 + 7 + 24);
+  it('expands nested repeats deterministically', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 6,
+        sections: [section(1, 6)],
+        jumps: [
+          { type: 'repeat', startMeasure: 1, endMeasure: 6, times: 2 },
+          { type: 'repeat', startMeasure: 2, endMeasure: 3, times: 2 },
+        ],
+      }),
+    );
+
+    expect(timeline.entries.map((entry) => entry.measureNumber)).toEqual([
+      1, 2, 3, 2, 3, 4, 5, 6, 1, 2, 3, 2, 3, 4, 5, 6,
+    ]);
+    expect(
+      timeline.entries.filter((entry) => entry.measureNumber === 2).map((entry) => entry.pass),
+    ).toEqual([1, 2, 3, 4]);
   });
 
-  it('26마디부터는 ♩=130 (박 간격 60/130초)', () => {
-    const tl = expandTimeline(scenario);
-    const m26 = tl.entries.find((e) => e.measureNumber === 26)!;
-    const gap = m26.beats[1]!.timeSec - m26.beats[0]!.timeSec;
-    expect(gap).toBeCloseTo(60 / 130, 9);
+  it('performs D.C. al Fine exactly once', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 8,
+        sections: [section(1, 8)],
+        jumps: [{ type: 'dc', atMeasure: 8, alFine: 4 }],
+      }),
+    );
+
+    expect(timeline.entries.map((entry) => entry.measureNumber)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
+    ]);
   });
 
-  it('두 번째 패스의 pass 번호가 2', () => {
-    const tl = expandTimeline(scenario);
-    const passes = tl.entries.filter((e) => e.measureNumber === 3).map((e) => e.pass);
-    expect(passes).toEqual([1, 2]);
-    // seekPoint로 특정 패스 시작점 조회
-    expect(seekPoint(tl, 3, 2)).toBeGreaterThan(seekPoint(tl, 3, 1));
+  it('performs D.S. al Coda and skips to the coda target', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 8,
+        sections: [section(1, 8)],
+        jumps: [
+          { type: 'ds', atMeasure: 8, segnoMeasure: 3, alCoda: true },
+          { type: 'coda', toCodaMeasure: 5, codaMeasure: 7 },
+        ],
+      }),
+    );
+
+    expect(timeline.entries.map((entry) => entry.measureNumber)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 3, 4, 5, 7, 8,
+    ]);
+  });
+
+  it('enforces the expansion guard before a repeat can exhaust memory', () => {
+    const map = tempoMap({
+      totalMeasures: 2,
+      sections: [section(1, 2)],
+      jumps: [{ type: 'repeat', startMeasure: 1, endMeasure: 2, times: 100 }],
+    });
+
+    expect(() => expandTimeline(map, { maxEntries: 10 })).toThrow(TimelineExpansionError);
   });
 });
 
-describe('D.C. / D.S. / Coda', () => {
-  it('D.C. al Fine: 끝까지 연주 후 처음부터 Fine까지', () => {
-    const m = map({
-      totalMeasures: 8,
-      sections: [
-        { id: 's1', startMeasure: 1, endMeasure: 8, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-      ],
-      jumps: [{ type: 'dc', atMeasure: 8, alFine: 4 }],
+describe('timeline navigation helpers', () => {
+  it('locates measure and click boundaries with binary search semantics', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 2,
+        sections: [section(1, 2, { bpm: 60, subdivision: 2 })],
+      }),
+    );
+
+    expect(locate(timeline, -5)).toEqual({ entryIndex: 0, beatIndex: 0 });
+    expect(locate(timeline, 0.5)).toEqual({ entryIndex: 0, beatIndex: 1 });
+    expect(locate(timeline, 4)).toEqual({ entryIndex: 1, beatIndex: 0 });
+    expect(locate(timeline, timeline.totalDurationSec)).toEqual({ entryIndex: 1, beatIndex: 7 });
+  });
+
+  it('matches a linear reference locator over dense boundary samples', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 20,
+        sections: [section(1, 20, { bpm: 137, subdivision: 4 })],
+      }),
+    );
+
+    for (let elapsedSec = 0; elapsedSec <= timeline.totalDurationSec; elapsedSec += 0.03125) {
+      const entryIndex = Math.max(
+        0,
+        timeline.entries.findLastIndex((entry) => entry.startTimeSec <= elapsedSec),
+      );
+      const entry = timeline.entries[entryIndex]!;
+      const beatIndex = Math.max(
+        0,
+        entry.beats.findLastIndex((beat) => beat.timeSec <= elapsedSec),
+      );
+      expect(locate(timeline, elapsedSec)).toEqual({ entryIndex, beatIndex });
+    }
+  });
+
+  it('seeks repeated measures by pass and defaults to the first visit', () => {
+    const timeline = expandTimeline(
+      tempoMap({ jumps: [{ type: 'repeat', startMeasure: 2, endMeasure: 3, times: 2 }] }),
+    );
+
+    expect(seekPoint(timeline, 2)).toBeCloseTo(2, 12);
+    expect(seekPoint(timeline, 2, 2)).toBeCloseTo(6, 12);
+    expect(() => seekPoint(timeline, 2, 3)).toThrow(RangeError);
+  });
+
+  it('builds two full count-in measures at the anchor section tempo', () => {
+    const map = tempoMap({
+      totalMeasures: 2,
+      sections: [section(1, 1, { id: 'slow', bpm: 60 }), section(2, 2, { id: 'fast', bpm: 120 })],
+      countIn: { measures: 2, useSectionMeter: true },
     });
-    const order = buildPerformanceOrder(m).map((o) => o.measure);
-    expect(order).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4]);
+    const timeline = expandTimeline(map);
+    const anchor = seekPoint(timeline, 2);
+    const countIn = buildCountIn(map, anchor);
+
+    expect(anchor).toBeCloseTo(4, 12);
+    expect(countIn).toHaveLength(8);
+    expect(countIn[0]?.timeSec).toBeCloseTo(0, 12);
+    expect(countIn[7]?.timeSec).toBeCloseTo(3.5, 12);
+    expect(countIn.map((beat) => beat.accent)).toEqual([2, 0, 0, 0, 2, 0, 0, 0]);
+    expect(() => buildCountIn(map, 1)).toThrow(RangeError);
   });
 
-  it('D.S. al Coda: 세뇨로 복귀 후 To Coda에서 Coda로 점프', () => {
-    const m = map({
-      totalMeasures: 10,
+  it('counts compound meter in dotted-quarter beats, not denominator units', () => {
+    const map = tempoMap({
+      totalMeasures: 1,
       sections: [
-        { id: 's1', startMeasure: 1, endMeasure: 10, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
+        section(1, 1, {
+          bpm: 120,
+          timeSignature: { num: 6, denom: 8 },
+          beatUnit: 'dottedQuarter',
+          accentPattern: [2, 0],
+        }),
       ],
-      jumps: [
-        { type: 'ds', atMeasure: 8, segnoMeasure: 3, alCoda: true },
-        { type: 'coda', toCodaMeasure: 5, codaMeasure: 9 },
-      ],
+      countIn: { measures: 2, useSectionMeter: true },
     });
-    const order = buildPerformanceOrder(m).map((o) => o.measure);
-    expect(order).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 3, 4, 5, 9, 10]);
-  });
 
-  it('무한 루프는 명확한 에러로 검출', () => {
-    const m = map({
-      totalMeasures: 6,
-      sections: [
-        { id: 's1', startMeasure: 1, endMeasure: 6, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-      ],
-      jumps: [
-        { type: 'dc', atMeasure: 6, alCoda: true },
-        { type: 'coda', toCodaMeasure: 5, codaMeasure: 2 }, // 2→5→2→5... 루프
-      ],
-    });
-    expect(() => buildPerformanceOrder(m)).toThrow(/무한 루프/);
-  });
-});
-
-describe('locate / countIn / validate', () => {
-  const simple = map({
-    totalMeasures: 4,
-    sections: [
-      { id: 's1', startMeasure: 1, endMeasure: 4, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-    ],
-  });
-
-  it('locate: 경과 시간으로 마디·박 찾기', () => {
-    const tl = expandTimeline(simple);
-    expect(locate(tl, 0)).toEqual({ entryIndex: 0, beatIndex: 0 });
-    expect(locate(tl, 2.4)).toEqual({ entryIndex: 1, beatIndex: 0 });
-    expect(locate(tl, 3.05)).toEqual({ entryIndex: 1, beatIndex: 1 });
-    expect(locate(tl, -1)).toBeNull();
-    expect(locate(tl, 999)).toBeNull();
-  });
-
-  it('예비박: 1마디 4/4@100 → 4박, 음수 오프셋, 카운트다운 4..1', () => {
-    const beats = buildCountIn(simple, 1);
-    expect(beats).toHaveLength(4);
-    expect(beats[0]!.timeSec).toBeCloseTo(-2.4, 9);
-    expect(beats.map((b) => b.countdown)).toEqual([4, 3, 2, 1]);
-    expect(beats[0]!.accent).toBe(2);
-  });
-
-  it('validate: 구간 빈틈 검출', () => {
-    const bad = map({
-      totalMeasures: 10,
-      sections: [
-        { id: 'a', startMeasure: 1, endMeasure: 4, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-        { id: 'b', startMeasure: 6, endMeasure: 10, timeSignature: { num: 4, denom: 4 }, bpm: 100, beatUnit: 'quarter' },
-      ],
-    });
-    expect(validateTempoMap(bad).some((i) => i.includes('빈틈'))).toBe(true);
-    expect(() => expandTimeline(bad)).toThrow(/검증 실패/);
+    const countIn = buildCountIn(map, 0);
+    expect(countIn).toHaveLength(4);
+    expect(countIn.map((beat) => beat.timeSec)).toEqual([-2, -1.5, -1, -0.5]);
   });
 });

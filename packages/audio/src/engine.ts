@@ -1,18 +1,45 @@
-/** 플랫폼 어댑터 인터페이스 (설계문서 §5.1). 모바일 지연 문제 시 이 구현체만 교체한다. */
+export const CLICK_KINDS = ['downbeat', 'beat', 'sub', 'countIn'] as const;
 
-export type ClickKind = 'downbeat' | 'beat' | 'sub' | 'countIn';
+export type ClickKind = (typeof CLICK_KINDS)[number];
 
+/** Platform adapter from DESIGN.md §5.1. All times and latencies are seconds. */
 export interface AudioEngine {
-  /** 절대 시각(오디오 클럭 기준, 초)에 클릭음 예약 */
+  /**
+   * Native adapters can retain an entire deterministic timeline themselves. This lets
+   * playback continue when a WebView suspends its Worker after entering the background.
+   */
+  readonly schedulingStrategy?: 'lookahead' | 'entireTimeline';
+  /** Reserve a click at an absolute audio-clock time. */
   scheduleClick(atAudioTime: number, kind: ClickKind): void;
-  /** 예약됐지만 아직 울리지 않은 클릭 전부 취소 */
-  cancelScheduled(): void;
-  /** 오디오 클럭 현재 시각 (초) */
+  /** Current monotonic audio-clock time in seconds. */
   now(): number;
-  /** 추정 출력 지연 (초) */
-  outputLatencySec(): number;
-  /** 사용자 제스처 안에서 호출 필요 (AudioContext 정책) */
+  /** Estimated graph + output-device latency in seconds. */
+  outputLatency(): number;
+  /** Resume/prepare the platform audio system. Call from a user gesture. */
   start(): Promise<void>;
+  /** Stop pending output and suspend the platform audio system. */
   stop(): void;
-  setVolume(v: number): void;
+}
+
+/** Optional capability used to replace an already-looked-ahead timeline safely. */
+export interface CancellableAudioEngine extends AudioEngine {
+  cancelScheduledFrom(atAudioTime: number): void;
+}
+
+export interface ScheduledClick {
+  readonly atAudioTime: number;
+  readonly kind: ClickKind;
+}
+
+/** Optional bridge optimization used to transfer a whole native timeline in one call. */
+export interface BatchAudioEngine extends AudioEngine {
+  scheduleClicks(clicks: readonly ScheduledClick[]): void;
+}
+
+export function canCancelScheduledAudio(engine: AudioEngine): engine is CancellableAudioEngine {
+  return 'cancelScheduledFrom' in engine && typeof engine.cancelScheduledFrom === 'function';
+}
+
+export function canScheduleAudioBatch(engine: AudioEngine): engine is BatchAudioEngine {
+  return 'scheduleClicks' in engine && typeof engine.scheduleClicks === 'function';
 }

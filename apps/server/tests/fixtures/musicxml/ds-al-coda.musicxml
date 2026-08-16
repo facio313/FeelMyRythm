@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1"><part-name>Cello</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1"/>
+    <measure number="2">
+      <direction>
+        <direction-type><segno id="segno-a"/></direction-type>
+        <sound segno="segno-a"/>
+      </direction>
+    </measure>
+    <measure number="3"/>
+    <measure number="4">
+      <direction>
+        <direction-type><words>To Coda</words></direction-type>
+        <sound tocoda="coda-a"/>
+      </direction>
+    </measure>
+    <measure number="5"/>
+    <measure number="6">
+      <direction>
+        <direction-type><words>D.S. al Coda</words></direction-type>
+        <sound dalsegno="segno-a"/>
+      </direction>
+    </measure>
+    <measure number="7">
+      <direction>
+        <direction-type><coda id="coda-a"/><words>Coda</words></direction-type>
+        <sound coda="coda-a"/>
+      </direction>
+    </measure>
+  </part>
+</score-partwise>

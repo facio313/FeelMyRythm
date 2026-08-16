@@ -1,114 +1,148 @@
-import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { useAuth } from './lib/auth';
-import CalibrationPage from './pages/CalibrationPage';
-import DashboardPage from './pages/DashboardPage';
-import EditorPage from './pages/EditorPage';
-import LoginPage from './pages/LoginPage';
-import MetronomePage from './pages/MetronomePage';
-import RepertoirePage from './pages/RepertoirePage';
-import ScorePage from './pages/ScorePage';
-import SessionPage from './pages/SessionPage';
-import TunerPage from './pages/TunerPage';
+import { ToastProvider } from '@feelmyrythm/ui';
+import { nativeBridge } from '@feelmyrythm/mobile';
+import { lazy, Suspense, useEffect } from 'react';
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  Navigate,
+  Outlet,
+  Route,
+  RouterProvider,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
+import { AppShell } from './components/AppShell';
+import { AuthProvider, useAuth } from './lib/auth';
+import { ROUTER_BASENAME } from './lib/paths';
+import { MetronomePage } from './pages/MetronomePage';
 
-function RequireAuth({ children }: { children: React.ReactNode }) {
-  const token = useAuth((s) => s.token);
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
-}
+const CalibrationPage = lazy(() =>
+  import('./pages/CalibrationPage').then((module) => ({ default: module.CalibrationPage })),
+);
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
+);
+const EditorPage = lazy(() =>
+  import('./pages/EditorPage').then((module) => ({ default: module.EditorPage })),
+);
+const LoginPage = lazy(() =>
+  import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })),
+);
+const PracticePage = lazy(() =>
+  import('./pages/PracticePage').then((module) => ({ default: module.PracticePage })),
+);
+const PrivacyPage = lazy(() =>
+  import('./pages/PrivacyPage').then((module) => ({ default: module.PrivacyPage })),
+);
+const AccountDeletionPage = lazy(() =>
+  import('./pages/AccountDeletionPage').then((module) => ({
+    default: module.AccountDeletionPage,
+  })),
+);
+const ScoresPage = lazy(() =>
+  import('./pages/ScoresPage').then((module) => ({ default: module.ScoresPage })),
+);
+const SessionPage = lazy(() =>
+  import('./pages/SessionPage').then((module) => ({ default: module.SessionPage })),
+);
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
+);
+const TunerPage = lazy(() =>
+  import('./pages/TunerPage').then((module) => ({ default: module.TunerPage })),
+);
 
-const navItems = [
-  { to: '/', label: '메트로놈' },
-  { to: '/editor', label: '템포맵' },
-  { to: '/tuner', label: '튜너' },
-  { to: '/calibrate', label: '캘리브레이션' },
-  { to: '/dash', label: '그룹' },
-];
-
-export default function App() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-
+export function RouteLoadingFallback() {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-5xl flex-col px-4">
-      <header className="flex items-center gap-4 border-b py-3" style={{ borderColor: 'var(--border)' }}>
-        <span className="text-lg font-semibold" style={{ color: 'var(--accent)' }}>
-          FeelMyRythm
-        </span>
-        <nav className="flex flex-1 gap-1 overflow-x-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className="btn btn-ghost"
-              style={({ isActive }) => (isActive ? { color: 'var(--accent)' } : undefined)}
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        {user ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              {user.displayName}
-            </span>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                logout();
-                navigate('/');
-              }}
-            >
-              로그아웃
-            </button>
-          </div>
-        ) : (
-          <NavLink to="/login" className="btn">
-            로그인
-          </NavLink>
-        )}
-      </header>
-
-      <main className="flex-1 py-6">
-        <Routes>
-          <Route path="/" element={<MetronomePage />} />
-          <Route path="/editor" element={<EditorPage />} />
-          <Route path="/tuner" element={<TunerPage />} />
-          <Route path="/calibrate" element={<CalibrationPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/dash"
-            element={
-              <RequireAuth>
-                <DashboardPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/repertoire/:id"
-            element={
-              <RequireAuth>
-                <RepertoirePage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/score/:id"
-            element={
-              <RequireAuth>
-                <ScorePage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/session/:roomId"
-            element={
-              <RequireAuth>
-                <SessionPage />
-              </RequireAuth>
-            }
-          />
-        </Routes>
-      </main>
+    <div className="loading-panel" role="status" aria-live="polite" aria-busy="true">
+      화면을 준비하는 중…
     </div>
   );
+}
+
+export function localPracticeRedirect(
+  authenticated: boolean,
+  repertoireItemId: string | undefined,
+): string | null {
+  return authenticated && (!repertoireItemId || repertoireItemId === 'local') ? '/dashboard' : null;
+}
+
+function PracticeRoute() {
+  const { user } = useAuth();
+  const { repertoireItemId } = useParams();
+  const redirect = localPracticeRedirect(Boolean(user), repertoireItemId);
+  return redirect ? <Navigate to={redirect} replace /> : <PracticePage />;
+}
+
+function NativeLifecycle() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let active = true;
+    let remove: () => void = () => undefined;
+    void nativeBridge
+      .onDeepLink((path) => {
+        void navigate(path);
+      })
+      .then((cleanup) => {
+        if (!active) {
+          cleanup();
+          return;
+        }
+        remove = cleanup;
+      })
+      .catch((error: unknown) => {
+        console.error('Native deep-link listener could not be registered', error);
+      });
+    return () => {
+      active = false;
+      remove();
+    };
+  }, [navigate]);
+  return null;
+}
+
+function AppProviders() {
+  return (
+    <AuthProvider>
+      <ToastProvider>
+        <NativeLifecycle />
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <Outlet />
+        </Suspense>
+      </ToastProvider>
+    </AuthProvider>
+  );
+}
+
+export function createAppRouter(basename = ROUTER_BASENAME) {
+  return createBrowserRouter(
+    createRoutesFromElements(
+      <Route element={<AppProviders />}>
+        <Route element={<AppShell />}>
+          <Route index element={<MetronomePage />} />
+          <Route path="editor/:tempoMapId?" element={<EditorPage />} />
+          <Route path="session/:roomId?" element={<SessionPage />} />
+          <Route path="scores/:scoreId?" element={<ScoresPage />} />
+          <Route path="repertoire/:repertoireItemId/scores/:scoreId?" element={<ScoresPage />} />
+          <Route path="practice/:repertoireItemId?" element={<PracticeRoute />} />
+          <Route path="tuner" element={<TunerPage />} />
+          <Route path="calibration" element={<CalibrationPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="login" element={<LoginPage />} />
+          <Route path="privacy" element={<PrivacyPage />} />
+          <Route path="delete-account" element={<AccountDeletionPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Route>,
+    ),
+    { basename },
+  );
+}
+
+let appRouter: ReturnType<typeof createAppRouter> | undefined;
+
+export function App() {
+  appRouter ??= createAppRouter();
+  return <RouterProvider router={appRouter} />;
 }

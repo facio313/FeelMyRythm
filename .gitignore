@@ -3,22 +3,37 @@ dist/
 build/
 *.tsbuildinfo
 .DS_Store
+.vite/
+.turbo/
 
 # Python
 __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
+*.py[cod]
+*.db
+*.sqlite3
 
 # Local data
 apps/server/dev.db
 apps/server/uploads/
 apps/server/tests/test.db
 apps/server/tests/uploads/
+apps/server/.data/
 /uploadsmnt/
 .env
 .env.*
+!.env.example
+
+# Tests and coverage
+coverage/
+.coverage
+htmlcov/
+playwright-report/
+test-results/
 
 # Git worktrees (AI tool workspaces)
 worktrees/

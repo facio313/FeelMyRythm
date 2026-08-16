@@ -1,269 +1,704 @@
-/** 메트로놈 메인 (UI_DESIGN.md §7.1). 빠른 모드 + 템포맵 모드(?map=로컬id 또는 ?rep=서버곡id) */
+import { assertValidTempoMap, type TempoMap, type TempoSection } from '@feelmyrythm/core';
+import type { components } from '@feelmyrythm/protocol';
+import { BeatVisualizer, Button, Card, Modal, StatusBadge, useToast } from '@feelmyrythm/ui';
 import {
-  createDefaultTempoMap,
-  sectionForMeasure,
-  type NoteValue,
-  type TempoMap,
-} from '@feelmyrythm/core';
-import type { ScheduledBeat } from '@feelmyrythm/audio';
-import type { TempoMapOut } from '@feelmyrythm/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { BeatVisualizer } from '../components/BeatVisualizer';
-import { api } from '../lib/api';
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Expand,
+  Gauge,
+  Minus,
+  Music2,
+  Plus,
+  Settings2,
+  Shrink,
+  SlidersHorizontal,
+  Square,
+  Volume2,
+} from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { listLocalMaps } from '../lib/localMaps';
+import { localDb } from '../lib/localDb';
 import { useMetronome } from '../lib/useMetronome';
+import { createDefaultTempoMap } from '../lib/defaultTempoMap';
 
-const TIME_SIGS = ['2/4', '3/4', '4/4', '5/4', '3/8', '6/8', '9/8', '12/8', '7/8'] as const;
-
-function beatUnitFor(num: number, denom: number): NoteValue {
-  if (denom === 8 && num % 3 === 0) return 'dottedQuarter';
-  if (denom === 8) return 'eighth';
-  if (denom === 2) return 'half';
-  return 'quarter';
+function meterBeatCount(section: TempoSection): number {
+  return section.beatUnit === 'dottedQuarter'
+    ? Math.max(1, Math.round(section.timeSignature.num / 3))
+    : section.timeSignature.num;
 }
 
-interface QuickSettings {
-  bpm: number;
-  timeSig: string;
-  subdivision: 1 | 2 | 3 | 4;
-  countIn: boolean;
+export function normalizeBpm(value: number): number | null {
+  if (!Number.isFinite(value) || value < 20 || value > 400) return null;
+  return Math.round(value);
 }
 
-function loadQuick(): QuickSettings {
-  try {
-    const v = JSON.parse(localStorage.getItem('fmr-quick') ?? '');
-    if (v && typeof v.bpm === 'number') return v;
-  } catch {
-    // 기본값 사용
-  }
-  return { bpm: 100, timeSig: '4/4', subdivision: 1, countIn: true };
+type TempoMapLoadState =
+  | {
+      status: 'local-loading' | 'local-ready' | 'remote-loading' | 'remote-ready';
+    }
+  | {
+      status: 'local-error' | 'remote-cached' | 'remote-error';
+      message: string;
+    };
+
+function isNetworkFailure(error: unknown): error is TypeError {
+  return error instanceof TypeError;
 }
 
-export default function MetronomePage() {
-  const [params] = useSearchParams();
-  const token = useAuth((s) => s.token);
-  const { isRunning, timeline, queueRef, start, stop } = useMetronome();
-
-  const [quick, setQuick] = useState<QuickSettings>(loadQuick);
-  const [loadedMap, setLoadedMap] = useState<TempoMap | null>(null);
-  const [startMeasure, setStartMeasure] = useState(1);
-  const [display, setDisplay] = useState<{ measure: number | null; countIn: boolean }>({
-    measure: null,
-    countIn: false,
+export function MetronomePage() {
+  const { notify } = useToast();
+  const { user, client } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedMeasure = Number(searchParams.get('measure'));
+  const repertoireItemId = searchParams.get('repertoire');
+  const [map, setMap] = useState<TempoMap>(() => createDefaultTempoMap());
+  const [startMeasure, setStartMeasure] = useState(() =>
+    Number.isInteger(requestedMeasure) && requestedMeasure > 0 ? requestedMeasure : 1,
+  );
+  const [withCountIn, setWithCountIn] = useState(
+    () => localStorage.getItem('fmr.countInEnabled') !== 'false',
+  );
+  const [volume, setVolume] = useState(() => Number(localStorage.getItem('fmr.volume') ?? 0.75));
+  const [fullscreen, setFullscreen] = useState(false);
+  const [shortSettingsOpen, setShortSettingsOpen] = useState(false);
+  const [tempoMapLoadAttempt, setTempoMapLoadAttempt] = useState(0);
+  const [tempoMapLoadState, setTempoMapLoadState] = useState<TempoMapLoadState>({
+    status: user && repertoireItemId ? 'remote-loading' : 'local-loading',
   });
-  const [bpmEditing, setBpmEditing] = useState(false);
-  const tapTimesRef = useRef<number[]>([]);
-  const [error, setError] = useState('');
+  const tapsRef = useRef<number[]>([]);
+  const fullscreenTapRef = useRef<number | undefined>(undefined);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const persistenceTimerRef = useRef<number | undefined>(undefined);
+  const metronome = useMetronome(map);
+  const stopMetronome = metronome.stop;
+  const validStartMeasure = Math.min(map.totalMeasures, Math.max(1, startMeasure));
+  const usesRemoteMap = Boolean(user && repertoireItemId);
+  const mapReadyForPlayback = usesRemoteMap
+    ? (tempoMapLoadState.status === 'remote-ready' ||
+        tempoMapLoadState.status === 'remote-cached') &&
+      map.repertoireItemId === repertoireItemId
+    : (tempoMapLoadState.status === 'local-ready' || tempoMapLoadState.status === 'local-error') &&
+      map.repertoireItemId === 'local';
+  const remoteMapLoading =
+    usesRemoteMap &&
+    tempoMapLoadState.status !== 'remote-ready' &&
+    tempoMapLoadState.status !== 'remote-cached' &&
+    tempoMapLoadState.status !== 'remote-error';
+  const localMapLoading =
+    !usesRemoteMap &&
+    tempoMapLoadState.status !== 'local-ready' &&
+    tempoMapLoadState.status !== 'local-error';
 
   useEffect(() => {
-    localStorage.setItem('fmr-quick', JSON.stringify(quick));
-  }, [quick]);
-
-  // ?map=<로컬id> 또는 ?rep=<서버 곡 id> 로 템포맵 로드
-  useEffect(() => {
-    const mapId = params.get('map');
-    const repId = params.get('rep');
-    const measure = Number(params.get('measure'));
-    if (Number.isFinite(measure) && measure >= 1) setStartMeasure(measure);
-    if (mapId) {
-      const found = listLocalMaps().find((m) => m.id === mapId);
-      if (found) setLoadedMap(found);
-      else setError('로컬 템포맵을 찾을 수 없습니다');
-    } else if (repId && token) {
-      api<TempoMapOut>(`/api/repertoire/${repId}/tempomap`)
-        .then((r) => setLoadedMap(r.data as TempoMap))
-        .catch((e) => setError(e.message));
-    }
-  }, [params, token]);
-
-  const quickMap = useMemo<TempoMap>(() => {
-    const [num, denom] = quick.timeSig.split('/').map(Number) as [number, number];
-    return createDefaultTempoMap({
-      id: 'quick',
-      totalMeasures: 1000,
-      sections: [
-        {
-          id: 'q',
-          startMeasure: 1,
-          endMeasure: 1000,
-          timeSignature: { num, denom },
-          bpm: quick.bpm,
-          beatUnit: beatUnitFor(num, denom),
-          subdivision: quick.subdivision,
-        },
-      ],
-      countIn: { measures: 1, useSectionMeter: true },
-    });
-  }, [quick]);
-
-  const activeMap = loadedMap ?? quickMap;
-  const isQuick = loadedMap === null;
-
-  const handleStart = useCallback(async () => {
-    setError('');
-    try {
-      await start(activeMap, {
-        startMeasure: isQuick ? 1 : startMeasure,
-        countIn: quick.countIn,
-        loop: isQuick,
+    let cancelled = false;
+    stopMetronome();
+    if (user && repertoireItemId) {
+      type ServerTempoMap = components['schemas']['TempoMapOut'];
+      queueMicrotask(() => {
+        if (!cancelled) setTempoMapLoadState({ status: 'remote-loading' });
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const remoteCacheScope = { userId: user.id };
+      const cachedMap = localDb
+        .getTempoMapForRepertoire(repertoireItemId, remoteCacheScope)
+        .catch(() => undefined);
+      void (async () => {
+        try {
+          const response = await client.get<ServerTempoMap>(
+            `/repertoire/${encodeURIComponent(repertoireItemId)}/tempomap`,
+          );
+          const data: unknown = response.data;
+          assertValidTempoMap(data);
+          const nextMap: TempoMap = {
+            ...data,
+            repertoireItemId,
+            revision: response.revision,
+          };
+          if (cancelled) return;
+          setMap(nextMap);
+          setTempoMapLoadState({ status: 'remote-ready' });
+          void localDb.putTempoMap(nextMap, remoteCacheScope).catch((error: unknown) => {
+            notify({
+              title: '오프라인 템포맵 캐시를 저장하지 못했습니다.',
+              description: error instanceof Error ? error.message : String(error),
+              tone: 'neutral',
+            });
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!isNetworkFailure(error)) {
+            if (cancelled) return;
+            setTempoMapLoadState({ status: 'remote-error', message });
+            notify({
+              title: '레퍼토리 템포맵을 불러오지 못했습니다.',
+              description: message,
+              tone: 'danger',
+            });
+            return;
+          }
+          let cached: TempoMap | undefined;
+          try {
+            cached = await cachedMap;
+            if (cached) assertValidTempoMap(cached);
+          } catch {
+            cached = undefined;
+          }
+          if (cancelled) return;
+          if (cached) {
+            setMap(cached);
+            setTempoMapLoadState({ status: 'remote-cached', message });
+            notify({
+              title: '저장된 템포맵으로 오프라인 연습을 엽니다.',
+              description: message,
+              tone: 'info',
+            });
+          } else {
+            setTempoMapLoadState({ status: 'remote-error', message });
+            notify({
+              title: '레퍼토리 템포맵을 불러오지 못했습니다.',
+              description: message,
+              tone: 'danger',
+            });
+          }
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [activeMap, isQuick, startMeasure, quick.countIn, start]);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setMap(createDefaultTempoMap());
+      setTempoMapLoadState({ status: 'local-loading' });
+    });
+    void localDb
+      .listTempoMaps()
+      .then((maps) => {
+        if (cancelled) return;
+        const localMaps = maps.filter((candidate) => candidate.repertoireItemId === 'local');
+        const activeId = localStorage.getItem('fmr.activeTempoMap');
+        const active = localMaps.find((candidate) => candidate.id === activeId) ?? localMaps[0];
+        if (active) setMap(active);
+        setTempoMapLoadState({ status: 'local-ready' });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setTempoMapLoadState({ status: 'local-error', message });
+        notify({
+          title: '이 기기의 템포맵을 불러오지 못했습니다.',
+          description: message,
+          tone: 'danger',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, notify, repertoireItemId, stopMetronome, tempoMapLoadAttempt, user]);
 
-  const onDisplayBeat = useCallback((b: ScheduledBeat | null) => {
-    setDisplay({ measure: b?.measureNumber ?? null, countIn: b?.isCountIn ?? false });
+  useEffect(() => {
+    let cancelled = false;
+    const nextMeasure =
+      Number.isInteger(requestedMeasure) && requestedMeasure > 0 ? requestedMeasure : 1;
+    queueMicrotask(() => {
+      if (!cancelled) setStartMeasure(nextMeasure);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedMeasure]);
+
+  useEffect(() => {
+    const onFullscreen = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
   }, []);
 
+  useEffect(() => {
+    document.title = '메트로놈 · FeelMyRythm';
+  }, []);
+
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (persistenceTimerRef.current !== undefined) {
+        window.clearTimeout(persistenceTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const currentSection =
+    map.sections.find(
+      (section) =>
+        metronome.position.measureNumber >= section.startMeasure &&
+        metronome.position.measureNumber <= section.endMeasure,
+    ) ?? map.sections[0]!;
+  const nextSection = map.sections.find(
+    (section) => section.startMeasure > metronome.position.measureNumber,
+  );
+
+  const updateSection = useCallback(
+    (patch: Partial<TempoSection>) => {
+      const next = {
+        ...map,
+        sections: map.sections.map((section) =>
+          section.id === currentSection.id ? { ...section, ...patch } : section,
+        ),
+      };
+      setMap(next);
+      if (next.repertoireItemId === 'local') {
+        if (persistenceTimerRef.current !== undefined) {
+          window.clearTimeout(persistenceTimerRef.current);
+        }
+        persistenceTimerRef.current = window.setTimeout(() => {
+          localStorage.setItem('fmr.activeTempoMap', next.id);
+          void localDb.putTempoMap(next).catch((error: unknown) => {
+            notify({
+              title: '메트로놈 설정을 저장하지 못했습니다.',
+              description: error instanceof Error ? error.message : String(error),
+              tone: 'danger',
+            });
+          });
+        }, 250);
+      }
+    },
+    [currentSection.id, map, notify],
+  );
+
+  const setBpm = useCallback(
+    (next: number) => {
+      const normalized = normalizeBpm(next);
+      if (normalized === null) return false;
+      updateSection({ bpm: normalized });
+      return true;
+    },
+    [updateSection],
+  );
+
   const tapTempo = () => {
-    const now = Date.now();
-    const taps = tapTimesRef.current.filter((t) => now - t < 3000);
+    const now = performance.now();
+    const taps = tapsRef.current;
+    if (taps.length > 0 && now - (taps.at(-1) ?? now) > 2000) taps.length = 0;
     taps.push(now);
-    tapTimesRef.current = taps;
+    if (taps.length > 8) taps.shift();
     if (taps.length >= 2) {
-      const intervals = taps.slice(1).map((t, i) => t - taps[i]!);
-      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      const bpm = Math.min(400, Math.max(20, Math.round(60000 / avg)));
-      setQuick((q) => ({ ...q, bpm }));
+      const intervals = taps.slice(1).map((value, index) => value - taps[index]!);
+      const sorted = [...intervals].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)] ?? 500;
+      setBpm(60_000 / median);
     }
   };
 
-  // 현재/다음 구간 정보 (상황 인식, 설계문서 §9)
-  const currentSection = display.measure !== null ? sectionForMeasure(activeMap, display.measure) : null;
-  const nextChange = useMemo(() => {
-    if (display.measure === null) return null;
-    const next = activeMap.sections.find((s) => s.startMeasure > display.measure!);
-    if (!next) return null;
-    return { inMeasures: next.startMeasure - display.measure, bpm: next.bpm };
-  }, [activeMap, display.measure]);
+  const toggleAccent = (index: number) => {
+    const count = meterBeatCount(currentSection);
+    const pattern = Array.from(
+      { length: count },
+      (_, beat) => currentSection.accentPattern?.[beat] ?? (beat === 0 ? 2 : 1),
+    );
+    const value = pattern[index] ?? 0;
+    pattern[index] = ((value + 1) % 3) as 0 | 1 | 2;
+    updateSection({ accentPattern: pattern });
+  };
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) await containerRef.current?.requestFullscreen();
+      else await document.exitFullscreen();
+    } catch (error) {
+      notify({
+        title: '보면대 모드를 전환하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    }
+  };
+
+  const handleFullscreenTap = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!fullscreen || event.pointerType !== 'touch') return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest('button, input, select, textarea, a, [role="button"]')
+    ) {
+      fullscreenTapRef.current = undefined;
+      return;
+    }
+    const now = performance.now();
+    if (fullscreenTapRef.current !== undefined && now - fullscreenTapRef.current <= 450) {
+      fullscreenTapRef.current = undefined;
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch((error: unknown) => {
+          notify({
+            title: '보면대 모드를 종료하지 못했습니다.',
+            description: error instanceof Error ? error.message : String(error),
+            tone: 'danger',
+          });
+        });
+      }
+      return;
+    }
+    fullscreenTapRef.current = now;
+  };
+
+  const play = async () => {
+    if (!mapReadyForPlayback) {
+      notify({
+        title: '템포맵을 준비한 뒤 재생할 수 있습니다.',
+        tone: 'danger',
+      });
+      return;
+    }
+    try {
+      await metronome.start(validStartMeasure, 1, withCountIn);
+    } catch (error) {
+      notify({
+        title: '오디오를 시작하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    }
+  };
+
+  const sectionBeatCount = meterBeatCount(currentSection);
+  const accentPattern = Array.from(
+    { length: sectionBeatCount },
+    (_, index) => currentSection.accentPattern?.[index] ?? (index === 0 ? 2 : 1),
+  );
+  const contextLine = nextSection
+    ? `${nextSection.startMeasure - metronome.position.measureNumber}마디 뒤 ♩=${nextSection.bpm}`
+    : '마지막 구간';
+  const settingsControls = (
+    <>
+      <div className="accent-editor">
+        <span className="fmr-field__label">강세 패턴</span>
+        <div>
+          {accentPattern.map((accent, index) => (
+            <button
+              key={index}
+              type="button"
+              className={`accent-dot accent-dot--${accent}`}
+              disabled={!mapReadyForPlayback}
+              onClick={() => toggleAccent(index)}
+              aria-label={`${index + 1}박 강세 ${accent}`}
+            >
+              {index + 1}
+            </button>
+          ))}
+        </div>
+      </div>
+      <label className="range-field">
+        <Volume2 size={18} aria-label="볼륨" />
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={volume}
+          disabled={!mapReadyForPlayback}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            setVolume(next);
+            metronome.setVolume(next);
+          }}
+        />
+        <output>{Math.round(volume * 100)}%</output>
+      </label>
+      <label className="meter-select">
+        <span className="fmr-field__label">박자</span>
+        <select
+          className="fmr-input"
+          disabled={!mapReadyForPlayback}
+          value={`${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`}
+          onChange={(event) => {
+            const [num, denom] = event.target.value.split('/').map(Number);
+            updateSection({
+              timeSignature: { num: num ?? 4, denom: denom ?? 4 },
+              beatUnit: denom === 8 && (num ?? 0) % 3 === 0 ? 'dottedQuarter' : 'quarter',
+            });
+          }}
+        >
+          {['2/4', '3/4', '4/4', '5/4', '6/8', '9/8', '12/8'].map((meter) => (
+            <option key={meter}>{meter}</option>
+          ))}
+        </select>
+        <ChevronDown size={16} aria-hidden />
+      </label>
+    </>
+  );
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      {loadedMap && (
-        <div className="chip">
-          템포맵: {loadedMap.title ?? loadedMap.id} ({loadedMap.totalMeasures}마디)
-          <button className="btn-ghost cursor-pointer" onClick={() => setLoadedMap(null)}>
-            ✕ 빠른 모드로
-          </button>
+    <div
+      ref={containerRef}
+      className={fullscreen ? 'metronome-page metronome-page--fullscreen' : 'metronome-page'}
+      data-count-in={metronome.position.isCountIn || undefined}
+      data-beat-tone={
+        metronome.position.isCountIn
+          ? 'count-in'
+          : metronome.position.beatIndex === 0
+            ? 'downbeat'
+            : 'beat'
+      }
+      data-beat-parity={metronome.position.beatIndex % 2 === 0 ? 'even' : 'odd'}
+      onPointerUp={handleFullscreenTap}
+    >
+      <header className="metronome-heading">
+        <div>
+          <h1 ref={headingRef} className="sr-only" tabIndex={-1}>
+            메트로놈
+          </h1>
+          <span className="eyebrow">Local performance</span>
+          <div className="cluster">
+            <Music2 size={18} aria-hidden />
+            <strong>개인 연습</strong>
+            <StatusBadge>{currentSection.label ?? 'Section'}</StatusBadge>
+          </div>
         </div>
-      )}
-
-      <div className="w-full max-w-2xl">
-        <BeatVisualizer queueRef={queueRef} timeline={timeline} running={isRunning} onDisplayBeat={onDisplayBeat} />
-      </div>
-
-      {/* BPM 디스플레이 */}
-      <div className="flex flex-col items-center gap-1">
-        {bpmEditing && isQuick ? (
-          <input
-            autoFocus
-            className="input bpm-display w-56 text-center"
-            style={{ height: 'auto', fontSize: 72 }}
-            defaultValue={quick.bpm}
-            onBlur={(e) => {
-              const v = Math.min(400, Math.max(20, Number(e.target.value) || quick.bpm));
-              setQuick((q) => ({ ...q, bpm: v }));
-              setBpmEditing(false);
+        <div className="cluster metronome-heading__actions">
+          <Button
+            className="metronome-heading__fullscreen"
+            variant="ghost"
+            onClick={() => void toggleFullscreen()}
+          >
+            {fullscreen ? <Shrink size={18} /> : <Expand size={18} />}
+            {fullscreen ? '나가기' : '보면대 모드'}
+          </Button>
+          <Button
+            className="metronome-heading__editor"
+            variant="ghost"
+            onClick={() => {
+              void navigate(`/editor/${map.id}`);
             }}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          />
-        ) : (
-          <button className="bpm-display cursor-pointer border-0 bg-transparent" style={{ color: 'var(--text)' }} onClick={() => isQuick && setBpmEditing(true)}>
-            {currentSection?.bpm ?? quick.bpm}
-          </button>
-        )}
-        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          ♩ = BPM · {currentSection ? `${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}` : quick.timeSig}
+          >
+            <SlidersHorizontal size={18} /> 템포맵
+          </Button>
+          <Button
+            className="metronome-heading__short-settings"
+            variant="secondary"
+            aria-haspopup="dialog"
+            onClick={() => setShortSettingsOpen(true)}
+          >
+            <Settings2 size={18} /> 세부 설정
+          </Button>
         </div>
-        <div className="tnum text-sm" style={{ color: 'var(--text-secondary)' }}>
-          {display.countIn
-            ? '예비박…'
-            : display.measure !== null
-              ? `마디 ${display.measure}${currentSection?.label ? ` · ${currentSection.label}` : ''}`
-              : '\u00a0'}
-          {nextChange && !display.countIn && (
-            <span style={{ color: 'var(--accent)' }}> · {nextChange.inMeasures}마디 뒤 ♩={nextChange.bpm}</span>
-          )}
-        </div>
-      </div>
+      </header>
 
-      {/* 조작 영역 (하단 배치, UI_DESIGN.md §4) */}
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        {isQuick && (
-          <>
-            <button className="btn" onClick={() => setQuick((q) => ({ ...q, bpm: Math.max(20, q.bpm - 5) }))}>
-              −5
-            </button>
-            <button className="btn" onClick={() => setQuick((q) => ({ ...q, bpm: Math.min(400, q.bpm + 5) }))}>
-              +5
-            </button>
-            <select
-              className="select"
-              value={quick.timeSig}
-              onChange={(e) => setQuick((q) => ({ ...q, timeSig: e.target.value }))}
-            >
-              {TIME_SIGS.map((ts) => (
-                <option key={ts}>{ts}</option>
-              ))}
-            </select>
-            <select
-              className="select"
-              value={quick.subdivision}
-              onChange={(e) => setQuick((q) => ({ ...q, subdivision: Number(e.target.value) as 1 | 2 | 3 | 4 }))}
-            >
-              <option value={1}>분할 없음</option>
-              <option value={2}>2분할</option>
-              <option value={3}>3분할</option>
-              <option value={4}>4분할</option>
-            </select>
-            <button className="btn" onClick={tapTempo}>
-              탭 템포
-            </button>
-          </>
-        )}
-        {!isQuick && (
-          <label className="flex items-center gap-2 text-sm">
-            시작 마디
+      {remoteMapLoading || localMapLoading ? (
+        <div
+          id="metronome-map-status"
+          className="metronome-map-status"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          {remoteMapLoading
+            ? '레퍼토리 템포맵을 불러오는 중입니다. 준비될 때까지 재생할 수 없습니다.'
+            : '이 기기의 템포맵을 불러오는 중입니다. 준비될 때까지 재생할 수 없습니다.'}
+        </div>
+      ) : usesRemoteMap && tempoMapLoadState.status === 'remote-error' ? (
+        <div id="metronome-map-status" className="metronome-map-status" role="alert">
+          <span>템포맵을 불러오지 못했습니다: {tempoMapLoadState.message}</span>
+          <Button
+            size="compact"
+            onClick={() => {
+              setTempoMapLoadState({ status: 'remote-loading' });
+              setTempoMapLoadAttempt((attempt) => attempt + 1);
+            }}
+          >
+            다시 시도
+          </Button>
+        </div>
+      ) : !usesRemoteMap && tempoMapLoadState.status === 'local-error' ? (
+        <div id="metronome-map-status" className="metronome-map-status" role="alert">
+          <span>
+            이 기기의 템포맵을 불러오지 못해 기본 템포맵을 사용합니다: {tempoMapLoadState.message}
+          </span>
+          <Button
+            size="compact"
+            onClick={() => {
+              setTempoMapLoadState({ status: 'local-loading' });
+              setTempoMapLoadAttempt((attempt) => attempt + 1);
+            }}
+          >
+            다시 시도
+          </Button>
+        </div>
+      ) : usesRemoteMap && tempoMapLoadState.status === 'remote-cached' ? (
+        <div id="metronome-map-status" className="metronome-map-status">
+          <span role="status">서버에 연결할 수 없어 검증된 오프라인 캐시를 사용합니다.</span>
+          <Button
+            size="compact"
+            onClick={() => {
+              setTempoMapLoadState({ status: 'remote-loading' });
+              setTempoMapLoadAttempt((attempt) => attempt + 1);
+            }}
+          >
+            서버 다시 확인
+          </Button>
+        </div>
+      ) : null}
+
+      <section className="metronome-stage" aria-label="메트로놈 상태">
+        <BeatVisualizer
+          className="metronome-visualizer"
+          running={metronome.playing}
+          frameSource={metronome.frameSource}
+          label="오디오 시계 기준 메트로놈 박"
+        />
+        <div className="bpm-display">
+          <button
+            type="button"
+            aria-label={`현재 BPM ${currentSection.bpm}, 눌러서 직접 입력`}
+            disabled={!mapReadyForPlayback}
+            onClick={() => {
+              const value = window.prompt('BPM', String(currentSection.bpm));
+              if (value === null) return;
+              if (!setBpm(Number(value))) {
+                notify({
+                  title: 'BPM은 20에서 400 사이의 숫자로 입력해 주세요.',
+                  tone: 'danger',
+                });
+              }
+            }}
+          >
+            <span className="fmr-tabular">{currentSection.bpm}</span>
+          </button>
+          <div>
+            <span>{currentSection.beatUnit === 'dottedQuarter' ? '♩.' : '♩'} = BPM</span>
+            <strong>
+              {currentSection.timeSignature.num}/{currentSection.timeSignature.denom}
+            </strong>
+          </div>
+        </div>
+        <div className="performance-context">
+          <strong className="fmr-tabular">
+            {metronome.position.isCountIn
+              ? `예비박 ${metronome.position.countdown ?? ''}`
+              : `마디 ${metronome.position.measureNumber}`}
+          </strong>
+          <span>다음: {contextLine}</span>
+        </div>
+      </section>
+
+      <section className="metronome-controls" aria-label="메트로놈 조작">
+        <div
+          className="bpm-steppers"
+          inert={fullscreen ? true : undefined}
+          aria-hidden={fullscreen || undefined}
+        >
+          <Button
+            size="icon"
+            aria-label="BPM 5 낮추기"
+            disabled={!mapReadyForPlayback}
+            onClick={() => setBpm(currentSection.bpm - 5)}
+          >
+            <ChevronLeft size={20} />
+          </Button>
+          <Button
+            size="icon"
+            aria-label="BPM 1 낮추기"
+            disabled={!mapReadyForPlayback}
+            onClick={() => setBpm(currentSection.bpm - 1)}
+          >
+            <Minus size={18} />
+          </Button>
+          <Button className="tap-button" onClick={tapTempo} disabled={!mapReadyForPlayback}>
+            <Gauge size={18} /> 탭 템포
+          </Button>
+          <Button
+            size="icon"
+            aria-label="BPM 1 높이기"
+            disabled={!mapReadyForPlayback}
+            onClick={() => setBpm(currentSection.bpm + 1)}
+          >
+            <Plus size={18} />
+          </Button>
+          <Button
+            size="icon"
+            aria-label="BPM 5 높이기"
+            disabled={!mapReadyForPlayback}
+            onClick={() => setBpm(currentSection.bpm + 5)}
+          >
+            <ChevronRight size={20} />
+          </Button>
+        </div>
+
+        <button
+          type="button"
+          className={metronome.playing ? 'play-button play-button--playing' : 'play-button'}
+          aria-label={metronome.playing ? '메트로놈 정지' : '메트로놈 재생'}
+          aria-describedby={!mapReadyForPlayback ? 'metronome-map-status' : undefined}
+          disabled={!mapReadyForPlayback}
+          onClick={() => (metronome.playing ? metronome.stop() : void play())}
+        >
+          {metronome.playing ? (
+            <Square size={26} fill="currentColor" />
+          ) : (
+            <span className="play-triangle" aria-hidden />
+          )}
+        </button>
+
+        <div
+          className="quick-settings"
+          inert={fullscreen ? true : undefined}
+          aria-hidden={fullscreen || undefined}
+        >
+          <label>
+            <span>시작</span>
             <input
               type="number"
               min={1}
-              max={activeMap.totalMeasures}
-              className="input tnum w-24"
-              value={startMeasure}
-              onChange={(e) => setStartMeasure(Number(e.target.value) || 1)}
+              max={map.totalMeasures}
+              value={validStartMeasure}
+              onChange={(event) => setStartMeasure(Number(event.target.value))}
+              disabled={metronome.playing || !mapReadyForPlayback}
             />
           </label>
-        )}
-        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          <input
-            type="checkbox"
-            checked={quick.countIn}
-            onChange={(e) => setQuick((q) => ({ ...q, countIn: e.target.checked }))}
-          />
-          예비박
-        </label>
-      </div>
+          <Button
+            variant={withCountIn ? 'primary' : 'secondary'}
+            disabled={!mapReadyForPlayback}
+            onClick={() =>
+              setWithCountIn((current) => {
+                const next = !current;
+                localStorage.setItem('fmr.countInEnabled', String(next));
+                return next;
+              })
+            }
+            aria-pressed={withCountIn}
+          >
+            <Settings2 size={17} /> 예비박
+          </Button>
+        </div>
+      </section>
 
-      <div className="flex items-center gap-4">
-        {isRunning ? (
-          <button className="btn btn-primary h-16 w-16 rounded-full text-xl" onClick={stop}>
-            ■
-          </button>
-        ) : (
-          <button className="btn btn-primary h-16 w-16 rounded-full text-xl" onClick={handleStart}>
-            ▶
-          </button>
-        )}
-      </div>
+      <Card
+        className="metronome-settings"
+        inert={fullscreen ? true : undefined}
+        aria-hidden={fullscreen || undefined}
+      >
+        {settingsControls}
+      </Card>
 
-      {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
-
-      <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        구간·박자 변화·반복이 있는 곡은 <Link to="/editor">템포맵 편집기</Link>에서 만들어 여세요.
-      </div>
+      <Modal
+        open={shortSettingsOpen}
+        onOpenChange={setShortSettingsOpen}
+        title="메트로놈 세부 설정"
+        description="짧은 화면에서도 강세 패턴, 볼륨, 박자를 조절할 수 있습니다."
+      >
+        <div className="metronome-settings-dialog">{settingsControls}</div>
+      </Modal>
     </div>
   );
 }

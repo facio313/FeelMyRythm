@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1"><part-name>Clarinet</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1"><direction><sound segno="first"/></direction></measure>
+    <measure number="2"><direction><sound segno="second"/></direction></measure>
+    <measure number="3"><direction><sound tocoda="missing-coda"/></direction></measure>
+    <measure number="4">
+      <direction>
+        <direction-type><words>D.S. al Coda</words></direction-type>
+        <sound dalsegno="yes"/>
+      </direction>
+    </measure>
+    <measure number="5">
+      <direction><sound dacapo="yes" time-only="2"/></direction>
+    </measure>
+    <measure number="6">
+      <direction><sound forward-repeat="yes"/></direction>
+    </measure>
+  </part>
+</score-partwise>
