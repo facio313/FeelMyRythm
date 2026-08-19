@@ -59,7 +59,11 @@ jobs:
       - name: Sync Android project from a clean checkout
         run: pnpm --filter @feelmyrythm/mobile sync:android
       - name: Install pinned Android native toolchain
-        run: sdkmanager 'platforms;android-36' 'ndk;27.3.13750724' 'cmake;3.22.1'
+        run: |
+          set -Eeuo pipefail
+          sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager_path"
+          "$sdkmanager_path" 'platforms;android-36' 'ndk;27.3.13750724' 'cmake;3.22.1'
       - name: Compile Android native debug shell
         working-directory: apps/mobile/android
         run: ./gradlew assembleDebug --stacktrace
