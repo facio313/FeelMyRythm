@@ -16,6 +16,8 @@ permissions:
 jobs:
   javascript:
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -35,7 +37,6 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter @feelmyrythm/mobile sync
-      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm test:e2e:pwa
 
