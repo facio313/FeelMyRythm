@@ -2,6 +2,8 @@
 
 `ios/`와 `android/`는 모바일 전용 상대경로 빌드인 `web/`을 감싸는 Capacitor 8 네이티브 프로젝트다. `sync`는 Vite `mobile` 모드로 웹을 다시 빌드하고 자산 참조를 검증한 뒤 두 플랫폼에 동기화한다.
 
+Android native compile에는 JDK 21, Android platform 36, NDK `27.3.13750724`, CMake `3.22.1`이 필요하다. GitHub `Validate`도 Temurin JDK 21과 이 Android 도구 버전을 명시적으로 설치한다. iOS compile은 `macos-15` runner의 Xcode를 기준으로 한다.
+
 ```sh
 pnpm sync
 ```
