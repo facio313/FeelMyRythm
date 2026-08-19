@@ -22,7 +22,7 @@ COPY scripts ./scripts
 COPY tests ./tests
 RUN uv run ruff check app tests scripts alembic \
     && uv run mypy app \
-    && uv run pytest
+    && uv run pytest -m "not repository_contract"
 
 FROM base AS development
 RUN uv sync --frozen --group dev

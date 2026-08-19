@@ -37,6 +37,9 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers"
+markers = [
+  "repository_contract: requires files from the monorepo root that are intentionally absent from the isolated server image context",
+]
 
 [tool.ruff]
 target-version = "py313"

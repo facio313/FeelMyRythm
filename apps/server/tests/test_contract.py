@@ -115,6 +115,7 @@ def test_production_email_verification_configuration_fails_closed() -> None:
         )
 
 
+@pytest.mark.repository_contract
 def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -> None:
     repository_root = Path(__file__).resolve().parents[3]
     example = (repository_root / ".env.example").read_text()
@@ -170,6 +171,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     assert settings.room_lock_wait_seconds == 2
 
 
+@pytest.mark.repository_contract
 def test_production_compose_passes_required_runtime_settings() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     compose = (repository_root / "docker-compose.prod.yml").read_text()

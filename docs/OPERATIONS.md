@@ -121,7 +121,7 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish하고, forced command가 임의 명령을 거부하는지, health 실패 시 이전 SHA로 복귀하는지, `cksDB` container/network/data에 변화가 없는지 확인한다. 서버 장애는 앞 단계의 네이티브 compile·association 생성·provider preflight 구현을 생략하는 근거가 아니다.
 
-Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고정 Microsoft Playwright 이미지에서 실행하며, runner마다 `playwright install --with-deps`를 다시 수행하지 않는다. server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. Android job은 Gradle/Capacitor의 source level과 일치하는 Temurin JDK 21 및 고정 Android platform·NDK·CMake를 사용한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
+Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고정 Microsoft Playwright 이미지에서 실행하며, runner마다 `playwright install --with-deps`를 다시 수행하지 않는다. server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. 저장소 루트의 `.env.example`·`docker-compose.prod.yml`을 읽는 `repository_contract` 테스트는 전체 checkout을 가진 server job에서 반드시 실행한다. `apps/server`만 컨텍스트로 받는 ARM64 서버 이미지의 test target은 이 두 저장소 계약만 제외하고 나머지 서버 suite를 다시 실행한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. Android job은 Gradle/Capacitor의 source level과 일치하는 Temurin JDK 21 및 고정 Android platform·NDK·CMake를 사용한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
 
 배포 완료 판정에는 다음 세 증거가 모두 필요하다.
 
