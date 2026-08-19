@@ -5,6 +5,7 @@ set -Eeuo pipefail
 : "${SERVER_RUNTIME_IMAGE:?SERVER_RUNTIME_IMAGE is required}"
 : "${WEB_RUNTIME_IMAGE:?WEB_RUNTIME_IMAGE is required}"
 : "${POSTGRES_RUNTIME_IMAGE:?POSTGRES_RUNTIME_IMAGE is required}"
+: "${REDIS_RUNTIME_IMAGE:?REDIS_RUNTIME_IMAGE is required}"
 
 for executable in curl docker openssl python3; do
   command -v "$executable" >/dev/null
@@ -13,12 +14,13 @@ done
 run_suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${RANDOM}"
 network_name="fmr-runtime-smoke-${run_suffix}"
 database_container="fmr-runtime-db-${run_suffix}"
+redis_container="fmr-runtime-redis-${run_suffix}"
 server_container="fmr-runtime-server-${run_suffix}"
 web_container="fmr-runtime-web-${run_suffix}"
 temporary_directory="$(mktemp -d)"
 
 cleanup() {
-  docker rm --force "$web_container" "$server_container" "$database_container" \
+  docker rm --force "$web_container" "$server_container" "$redis_container" "$database_container" \
     >/dev/null 2>&1 || true
   docker network rm "$network_name" >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
@@ -38,6 +40,12 @@ docker run --detach \
   --env "POSTGRES_PASSWORD=${database_password}" \
   "$POSTGRES_RUNTIME_IMAGE" >/dev/null
 
+docker run --detach \
+  --name "$redis_container" \
+  --network "$network_name" \
+  --network-alias redis \
+  "$REDIS_RUNTIME_IMAGE" >/dev/null
+
 database_ready=false
 for _ in $(seq 1 60); do
   if docker exec "$database_container" pg_isready \
@@ -56,6 +64,23 @@ if [[ "$database_ready" != true ]]; then
   exit 1
 fi
 
+redis_ready=false
+for _ in $(seq 1 60); do
+  if docker exec "$redis_container" redis-cli ping 2>/dev/null | grep -qx PONG; then
+    redis_ready=true
+    break
+  fi
+  if ! docker inspect --format '{{.State.Running}}' "$redis_container" 2>/dev/null | grep -qx true; then
+    break
+  fi
+  sleep 1
+done
+if [[ "$redis_ready" != true ]]; then
+  docker logs "$redis_container"
+  echo "Redis runtime smoke dependency did not become ready." >&2
+  exit 1
+fi
+
 docker run --detach \
   --name "$server_container" \
   --network "$network_name" \
@@ -66,6 +91,7 @@ docker run --detach \
   --env "FMR_DATABASE_URL=postgresql+psycopg://feelmyrythm:${database_password}@postgres:5432/feelmyrythm" \
   --env FMR_AUTO_CREATE_SCHEMA=false \
   --env "FMR_JWT_SECRET=${jwt_secret}" \
+  --env FMR_REDIS_URL=redis://redis:6379/0 \
   --env FMR_STORAGE_BACKEND=s3 \
   --env FMR_S3_BUCKET=fmr-runtime-smoke \
   --env FMR_S3_REGION=us-east-1 \

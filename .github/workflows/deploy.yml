@@ -21,6 +21,7 @@ env:
   SERVER_IMAGE: ghcr.io/facio313/feelmyrythm-server
   WEB_IMAGE: ghcr.io/facio313/feelmyrythm-web
   POSTGRES_RUNTIME_IMAGE: postgres:17.11-alpine@sha256:5d61573b31c206ae538c85893edeb6e320e1a9ffd838c0f9dca927fb6f765fa4
+  REDIS_RUNTIME_IMAGE: redis:8.2.7-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
 
 jobs:
   publish:
@@ -113,6 +114,7 @@ jobs:
           SERVER_RUNTIME_IMAGE: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
           WEB_RUNTIME_IMAGE: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
           POSTGRES_RUNTIME_IMAGE: ${{ env.POSTGRES_RUNTIME_IMAGE }}
+          REDIS_RUNTIME_IMAGE: ${{ env.REDIS_RUNTIME_IMAGE }}
         run: bash .github/scripts/smoke-runtime-images.sh
 
       - name: Publish the smoke-tested immutable images
