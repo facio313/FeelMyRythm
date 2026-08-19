@@ -16,8 +16,243 @@ down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+LEGACY_SCHEMA = "fmr_legacy"
+LEGACY_TABLES = (
+    "annotations",
+    "device_calibrations",
+    "group_members",
+    "groups",
+    "practice_logs",
+    "projects",
+    "repertoire_items",
+    "scores",
+    "tempo_maps",
+    "todos",
+    "users",
+)
+
+
+def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    return {str(column["name"]) for column in inspector.get_columns(table_name)}
+
+
+def _stage_legacy_schema() -> bool:
+    """Move the pre-Alembic production schema aside for transactional conversion."""
+
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    existing = set(inspector.get_table_names()) - {"alembic_version"}
+    if not existing:
+        return False
+
+    expected = set(LEGACY_TABLES)
+    legacy_signatures_match = (
+        existing == expected
+        and "owner_id" in _column_names(inspector, "groups")
+        and "google_subject" not in _column_names(inspector, "users")
+        and {"stored_name", "measure_map"} <= _column_names(inspector, "scores")
+        and "storage_key" not in _column_names(inspector, "scores")
+    )
+    if not legacy_signatures_match:
+        raise RuntimeError(
+            "database contains an unversioned schema that does not match the supported "
+            "pre-Alembic FeelMyRythm layout"
+        )
+    if connection.dialect.name != "postgresql":
+        raise RuntimeError("pre-Alembic schema conversion is supported only on PostgreSQL")
+
+    op.execute(sa.text(f'CREATE SCHEMA "{LEGACY_SCHEMA}"'))
+    for table_name in LEGACY_TABLES:
+        op.execute(
+            sa.text(
+                f'ALTER TABLE "{table_name}" SET SCHEMA "{LEGACY_SCHEMA}"'  # noqa: S608
+            )
+        )
+    return True
+
+
+def _copy_legacy_data() -> None:
+    """Copy the known deployed v0 schema into the revisioned schema without losing rows."""
+
+    statements = (
+        """
+        INSERT INTO users (
+            id, email, display_name, password_hash, google_subject,
+            is_active, created_at, updated_at
+        )
+        SELECT
+            id, email, display_name, password_hash, NULL,
+            TRUE, created_at, created_at
+        FROM fmr_legacy.users
+        """,
+        """
+        INSERT INTO groups (id, name, description, created_at, updated_at)
+        SELECT id, name, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM fmr_legacy.groups
+        """,
+        """
+        WITH memberships AS (
+            SELECT group_id, user_id, role
+            FROM fmr_legacy.group_members
+            UNION ALL
+            SELECT id, owner_id, 'owner'
+            FROM fmr_legacy.groups
+        ), normalized AS (
+            SELECT
+                group_id,
+                user_id,
+                CASE
+                    WHEN BOOL_OR(role = 'owner') THEN 'owner'
+                    WHEN BOOL_OR(role = 'leader') THEN 'leader'
+                    ELSE 'member'
+                END AS role
+            FROM memberships
+            GROUP BY group_id, user_id
+        )
+        INSERT INTO group_members (id, group_id, user_id, role, joined_at)
+        SELECT MD5(group_id || ':' || user_id), group_id, user_id, role, CURRENT_TIMESTAMP
+        FROM normalized
+        """,
+        """
+        INSERT INTO projects (
+            id, group_id, name, description, created_at, updated_at
+        )
+        SELECT id, group_id, name, description, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM fmr_legacy.projects
+        """,
+        """
+        INSERT INTO repertoire_items (
+            id, project_id, title, composer, notes, created_at, updated_at
+        )
+        SELECT id, project_id, title, composer, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM fmr_legacy.repertoire_items
+        """,
+        """
+        INSERT INTO tempo_map_revisions (
+            id, repertoire_id, revision, data, created_by_id, created_at
+        )
+        SELECT
+            tempo.id,
+            tempo.repertoire_id,
+            tempo.revision,
+            tempo.data,
+            legacy_group.owner_id,
+            tempo.updated_at
+        FROM fmr_legacy.tempo_maps AS tempo
+        JOIN fmr_legacy.repertoire_items AS repertoire
+            ON repertoire.id = tempo.repertoire_id
+        JOIN fmr_legacy.projects AS project
+            ON project.id = repertoire.project_id
+        JOIN fmr_legacy.groups AS legacy_group
+            ON legacy_group.id = project.group_id
+        """,
+        """
+        INSERT INTO scores (
+            id, repertoire_id, kind, instrument, filename, content_type,
+            storage_key, size_bytes, upload_status, created_by_id, created_at, updated_at
+        )
+        SELECT
+            score.id,
+            score.repertoire_id,
+            score.kind,
+            score.instrument,
+            score.filename,
+            score.content_type,
+            score.stored_name,
+            NULL,
+            'ready',
+            legacy_group.owner_id,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM fmr_legacy.scores AS score
+        JOIN fmr_legacy.repertoire_items AS repertoire
+            ON repertoire.id = score.repertoire_id
+        JOIN fmr_legacy.projects AS project
+            ON project.id = repertoire.project_id
+        JOIN fmr_legacy.groups AS legacy_group
+            ON legacy_group.id = project.group_id
+        """,
+        """
+        INSERT INTO measure_maps (
+            id, score_id, revision, regions, measure_number_offset,
+            updated_by_id, created_at, updated_at
+        )
+        SELECT
+            MD5(score.id || CHR(58) || 'measure-map'),
+            score.id,
+            1,
+            score.measure_map,
+            score.measure_number_offset,
+            legacy_group.owner_id,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM fmr_legacy.scores AS score
+        JOIN fmr_legacy.repertoire_items AS repertoire
+            ON repertoire.id = score.repertoire_id
+        JOIN fmr_legacy.projects AS project
+            ON project.id = repertoire.project_id
+        JOIN fmr_legacy.groups AS legacy_group
+            ON legacy_group.id = project.group_id
+        WHERE score.measure_map IS NOT NULL
+        """,
+        """
+        INSERT INTO annotations (
+            id, score_id, author_id, scope, revision, data, created_at, updated_at
+        )
+        SELECT
+            id, score_id, user_id, scope, 1, data, updated_at, updated_at
+        FROM fmr_legacy.annotations
+        """,
+        """
+        INSERT INTO practice_logs (
+            id, repertoire_id, author_id, content, anchors, created_at, updated_at
+        )
+        SELECT
+            id, repertoire_id, user_id, content, anchors, created_at, created_at
+        FROM fmr_legacy.practice_logs
+        """,
+        """
+        INSERT INTO todos (
+            id, repertoire_id, practice_log_id, content, assignee_id,
+            due_date, done, created_by_id, created_at, updated_at
+        )
+        SELECT
+            todo.id,
+            todo.repertoire_id,
+            NULL,
+            todo.content,
+            NULL,
+            NULL,
+            todo.done,
+            legacy_group.owner_id,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM fmr_legacy.todos AS todo
+        JOIN fmr_legacy.repertoire_items AS repertoire
+            ON repertoire.id = todo.repertoire_id
+        JOIN fmr_legacy.projects AS project
+            ON project.id = repertoire.project_id
+        JOIN fmr_legacy.groups AS legacy_group
+            ON legacy_group.id = project.group_id
+        """,
+        """
+        INSERT INTO device_calibrations (
+            id, user_id, device_fingerprint, output_label,
+            offset_ms, created_at, updated_at
+        )
+        SELECT
+            id, user_id, device_label, output_label,
+            offset_ms, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM fmr_legacy.device_calibrations
+        """,
+    )
+    for statement in statements:
+        op.execute(sa.text(statement))
+    op.execute(sa.text(f'DROP SCHEMA "{LEGACY_SCHEMA}" CASCADE'))
+
 
 def upgrade() -> None:
+    legacy_schema_staged = _stage_legacy_schema()
     # ### commands auto generated by Alembic - please adjust! ###
     op.create_table(
         "groups",
@@ -233,6 +468,8 @@ def upgrade() -> None:
     op.create_index(op.f("ix_todos_practice_log_id"), "todos", ["practice_log_id"], unique=False)
     op.create_index(op.f("ix_todos_repertoire_id"), "todos", ["repertoire_id"], unique=False)
     # ### end Alembic commands ###
+    if legacy_schema_staged:
+        _copy_legacy_data()
 
 
 def downgrade() -> None:

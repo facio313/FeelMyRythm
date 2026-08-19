@@ -224,5 +224,6 @@ anthropic ──┘
 
 - 운영 publish/deploy는 `Validate` workflow가 성공한 정확한 commit SHA에 대해서만 시작한다. publish job은 `packages:write`, RPi deploy job은 `packages:read` 최소 권한으로 분리한다.
 - Validate에는 JS/Python 전체 check, protocol 생성 일치, 일반 Playwright와 전용 PWA upgrade E2E, PostgreSQL Alembic smoke가 포함되어야 한다.
+- Alembic 도입 전 운영 DB는 `b881b6589baa`가 알려진 legacy table signature를 확인한 뒤 같은 PostgreSQL transaction에서 기존 table을 격리 schema로 이동하고 새 schema로 row를 변환한다. 알 수 없는 unversioned schema는 추측해 stamp하거나 덮어쓰지 않고 배포를 거부하며, CI는 실제 legacy row 보존 upgrade를 별도 PostgreSQL DB에서 검증한다.
 - 운영 승인 전 `production:preflight`로 PostgreSQL Alembic head, Redis, SMTP TLS/auth, S3 CORS/staging lifecycle, public health와 mobile association identity를 fail-closed 검증한다. S3 canary와 test mail은 명시적 opt-in에서만 외부 상태를 바꾼다.
 - server/web Dockerfile의 Python·Node·nginx·uv base와 CI/deploy PostgreSQL은 version tag와 image digest를 함께 고정한다. 운영 server는 read-only root filesystem과 `/tmp` 전용 tmpfs로 실행한다. ARM64 runtime image를 registry에 push하기 전 그 정확한 tag를 같은 read-only 경계로 실행해 server default CMD의 Alembic migration·health·non-root 상태와 nginx SPA·header·API proxy `no-store`를 통합 smoke한다.

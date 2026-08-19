@@ -88,6 +88,8 @@ association 파일을 아직 게시하기 전의 인프라 점검에서만 `--sk
 5. 핵심 row count, 최근 Score object key 표본, 로그인·악보 목록 read-only smoke를 확인한다.
 6. 목표 복구 시간과 실패 지점을 기록하고 backup 보존·암호화 정책을 확인한다.
 
+Alembic 도입 전 운영판이 만든 DB에는 `alembic_version`이 없다. 이 경우 root migration은 알려진 legacy signature만 한 transaction에서 revision schema로 변환한다. 기존 악보 DB row의 `stored_name`은 새 `storage_key`로 그대로 유지되므로, 배포 전에 기존 upload volume의 각 객체를 운영 S3 bucket의 같은 key로 복사하고 size·hash 표본을 대조한다. 알 수 없는 unversioned schema, legacy 객체 누락, 예상과 다른 row count가 하나라도 있으면 운영 DB를 stamp하거나 table을 수동 삭제하지 말고 backup에서 staging rehearsal을 다시 수행한다.
+
 운영 DB에 `alembic downgrade`를 즉흥 실행하지 않는다. schema rollback이 필요한 release는 이전 호환 app image와 명시적 forward-fix migration을 우선하며, 복구가 필요한 경우 위에서 검증한 backup을 새 instance에 restore한 뒤 전환한다.
 
 ## 5. 메일·OAuth·abuse 경계
@@ -121,7 +123,7 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지, health 실패 시 이전 SHA로 복귀하는지, `cksDB` container/network/data에 변화가 없는지도 확인한다. 서버 장애는 앞 단계의 네이티브 compile·association 생성·provider preflight 구현을 생략하는 근거가 아니다.
 
-Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고정 Microsoft Playwright 이미지에서 실행하며, runner마다 `playwright install --with-deps`를 다시 수행하지 않는다. server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. 저장소 루트의 `.env.example`·`docker-compose.prod.yml`을 읽는 `repository_contract` 테스트는 전체 checkout을 가진 server job에서 반드시 실행한다. `apps/server`만 컨텍스트로 받는 ARM64 서버 이미지의 test target은 이 두 저장소 계약만 제외하고 나머지 서버 suite를 다시 실행한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. Android job은 Gradle/Capacitor의 source level과 일치하는 Temurin JDK 21 및 고정 Android platform·NDK·CMake를 사용한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
+Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고정 Microsoft Playwright 이미지에서 실행하며, runner마다 `playwright install --with-deps`를 다시 수행하지 않는다. server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. 저장소 루트의 `.env.example`·`docker-compose.prod.yml`을 읽는 `repository_contract` 테스트는 전체 checkout을 가진 server job에서 반드시 실행한다. PostgreSQL migration gate는 fresh DB뿐 아니라 별도 임시 DB에 재현한 Alembic 이전 운영 schema의 row 보존 upgrade도 실행한다. `apps/server`만 컨텍스트로 받는 ARM64 서버 이미지의 test target은 이 두 저장소 계약만 제외하고 나머지 서버 suite를 다시 실행한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. Android job은 Gradle/Capacitor의 source level과 일치하는 Temurin JDK 21 및 고정 Android platform·NDK·CMake를 사용한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
 
 배포 완료 판정에는 다음 세 증거가 모두 필요하다.
 

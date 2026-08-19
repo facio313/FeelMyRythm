@@ -501,10 +501,13 @@ flowchart TD
 b881b6589baa  initial schema
   → 72d06f7d91c4  email verification + auth generation
     → b44b9e7c2d10  secure auth completion/reset/delete attempts
-      → c7f2a9d4e6b1  staging upload + durable storage deletion outbox (head)
+      → c7f2a9d4e6b1  staging upload + durable storage deletion outbox
+        → e3a1f6c9b2d4  persistent OMR draft jobs (head)
 ```
 
 [`alembic/env.py`](../apps/server/alembic/env.py)는 `Settings.database_url`로 Alembic URL을 덮어쓴다. 운영은 `AUTO_CREATE_SCHEMA=false`와 Alembic을 강제하고, 개발의 `create_all`은 fresh SQLite 편의를 위한 별도 경로다.
+
+초기 운영판이 `Base.metadata.create_all()`로 만든 PostgreSQL DB에는 `alembic_version`이 없다. root revision은 이 상태에서 정확한 legacy table·column signature를 먼저 검사하고, 일치할 때만 기존 table을 `fmr_legacy` schema로 옮긴 뒤 새 revision schema를 만들고 사용자·그룹·곡·템포맵·악보 metadata·measure map·주석·연습 기록·할 일·calibration row를 같은 migration transaction에서 복사한다. 기존 `stored_name`은 S3 이관 시 같은 object key로 유지한다. 변환이 끝나면 임시 schema를 제거하며, signature가 다르면 임의 stamp나 부분 변환 없이 실패한다. 실제 PostgreSQL 회귀 테스트는 별도 임시 DB에서 이 upgrade와 row 보존을 검증한다.
 
 ## 11. 인증·오프라인·캐시 경계
 
