@@ -54,7 +54,10 @@ jobs:
           node-version: 22.23.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @feelmyrythm/mobile sync:android
+      - name: Build workspace libraries required by the mobile web bundle
+        run: pnpm build:workspace-libs
+      - name: Sync Android project from a clean checkout
+        run: pnpm --filter @feelmyrythm/mobile sync:android
       - name: Install pinned Android native toolchain
         run: sdkmanager 'platforms;android-36' 'ndk;27.3.13750724' 'cmake;3.22.1'
       - name: Compile Android native debug shell
@@ -76,7 +79,10 @@ jobs:
           node-version: 22.23.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @feelmyrythm/mobile sync:ios
+      - name: Build workspace libraries required by the mobile web bundle
+        run: pnpm build:workspace-libs
+      - name: Sync iOS project from a clean checkout
+        run: pnpm --filter @feelmyrythm/mobile sync:ios
       - name: Compile iOS simulator shell without signing
         run: >-
           xcodebuild
@@ -121,8 +127,10 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
-          version: 0.11.9
+          version: 0.12.5
           python-version: 3.13.15
+      - name: Install the exact Python runtime used by the server image
+        run: uv python install 3.13.15
       - run: uv sync --project apps/server --frozen --all-groups
       - run: uv run --project apps/server ruff format --check apps/server
       - run: uv run --project apps/server ruff check apps/server
@@ -155,9 +163,11 @@ jobs:
           cache: pnpm
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: 0.11.9
+          version: 0.12.5
           python-version: 3.13.15
       - run: pnpm install --frozen-lockfile
+      - name: Install the exact Python runtime used by the server image
+        run: uv python install 3.13.15
       - run: uv sync --project apps/server --frozen
       - run: pnpm protocol:generate
       - run: git diff --exit-code -- apps/server/openapi.json packages/protocol/src/openapi.ts

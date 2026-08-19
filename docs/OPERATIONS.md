@@ -120,3 +120,11 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 ## 7. RPi 복구 후 마지막 단계
 
 RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish하고, forced command가 임의 명령을 거부하는지, health 실패 시 이전 SHA로 복귀하는지, `cksDB` container/network/data에 변화가 없는지 확인한다. 서버 장애는 앞 단계의 네이티브 compile·association 생성·provider preflight 구현을 생략하는 근거가 아니다.
+
+Validate의 server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
+
+배포 완료 판정에는 다음 세 증거가 모두 필요하다.
+
+1. main의 `Validate`가 정확한 대상 SHA로 성공한다.
+2. 같은 SHA의 `Build and deploy to RPi5`에서 publish와 restricted deployment job이 모두 성공한다.
+3. 공개 health와 HTML/asset 응답이 새 배포 이후 값으로 바뀌고, 핵심 경로 smoke가 통과한다.
