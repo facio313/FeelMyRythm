@@ -34,7 +34,7 @@ adb shell am start -W -a android.intent.action.VIEW -d 'https://bonifacio.work/f
 
 - iOS `NativeAudioEngine`은 사용자 재생 제스처에서만 `AVAudioSession.Category.playback`과 `AVAudioEngine`을 활성화해 무음 스위치와 독립적으로 재생하고, `UIBackgroundModes/audio`에서 native queue를 계속 소비한다.
 - iOS와 Android 모두 튜너용 마이크 권한을 선언한다. 권한은 WebView가 실제로 마이크를 요청할 때 사용자에게 표시된다.
-- Android `NativeAudioEngine`은 Oboe 1.10.0 low-latency float stream으로 전체 타임라인을 재생한다. `mediaPlayback` foreground service는 audio focus, MediaStyle 정지 action, 자연 종료를 관리하며 하드웨어 볼륨 키는 music stream을 제어한다.
+- Android `NativeAudioEngine`은 Gradle Prefab이 CMake에 제공하는 Oboe 1.10.0 low-latency float stream으로 전체 타임라인을 재생한다. `mediaPlayback` foreground service는 audio focus, MediaStyle 정지 action, 자연 종료를 관리하며 하드웨어 볼륨 키는 music stream을 제어한다.
 - `@capacitor-community/keep-awake`는 재생 중 화면 꺼짐을 막고 정지 시 다시 허용한다. Android 구현은 `FLAG_KEEP_SCREEN_ON`을 사용하므로 별도 `WAKE_LOCK` 권한이 필요하지 않다.
 - 브라우저는 Web Audio 120ms lookahead를 유지한다. Capacitor에서는 공용 TS 스케줄러가 결정론적 전체 클릭 목록을 native batch로 넘기므로 WebView Worker가 suspend되어도 재생이 지속된다. 템포맵 교체와 stop은 `cancelScheduledFrom`으로 native queue를 원자적으로 자른다.
 
