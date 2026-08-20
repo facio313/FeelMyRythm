@@ -149,7 +149,15 @@ def run_preflight(args: argparse.Namespace) -> list[CheckResult]:
     if settings is None:
         return results
 
-    results.append(_capture("postgresql", lambda: _check_database(settings)))
+    results.append(
+        _capture(
+            "postgresql",
+            lambda: _check_database(
+                settings,
+                allow_database_behind=args.allow_database_behind,
+            ),
+        )
+    )
     results.append(_capture("redis", lambda: _check_redis(settings)))
     results.append(
         _capture(
@@ -189,7 +197,37 @@ def _capture(name: str, check: Callable[[], str]) -> CheckResult:
         return CheckResult(name, "failed", f"{type(exc).__name__}: {detail[:240]}")
 
 
-def _check_database(settings: Settings) -> str:
+def validate_database_revision_state(
+    script: ScriptDirectory,
+    *,
+    current: set[str],
+    expected: set[str],
+    allow_database_behind: bool,
+) -> int:
+    """Return the known pending migration count or reject an unsafe revision state."""
+
+    if not expected:
+        raise RuntimeError("repository has no Alembic head")
+    if not current:
+        raise RuntimeError("database has no recorded Alembic head")
+    if current == expected:
+        return 0
+    if not allow_database_behind:
+        raise RuntimeError("database is not at the repository Alembic head")
+    if len(current) != 1 or len(expected) != 1:
+        raise RuntimeError("pre-migration mode requires a single recorded and target head")
+    current_revision = next(iter(current))
+    target_revision = next(iter(expected))
+    target_path = {revision.revision for revision in script.walk_revisions(base="base", head=target_revision)}
+    if current_revision not in target_path:
+        raise RuntimeError("database revision is not on the target upgrade path")
+    pending = tuple(script.iterate_revisions(target_revision, current_revision))
+    if not pending:
+        raise RuntimeError("database revision is not behind the target head")
+    return len(pending)
+
+
+def _check_database(settings: Settings, *, allow_database_behind: bool = False) -> str:
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
@@ -198,9 +236,16 @@ def _check_database(settings: Settings) -> str:
             current = set(context.get_current_heads())
         alembic_config = Config(str(SERVER_ROOT / "alembic.ini"))
         alembic_config.set_main_option("script_location", str(SERVER_ROOT / "alembic"))
-        expected = set(ScriptDirectory.from_config(alembic_config).get_heads())
-        if current != expected:
-            raise RuntimeError("database is not at the repository Alembic head")
+        script = ScriptDirectory.from_config(alembic_config)
+        expected = set(script.get_heads())
+        pending = validate_database_revision_state(
+            script,
+            current=current,
+            expected=expected,
+            allow_database_behind=allow_database_behind,
+        )
+        if pending:
+            return f"reachable; {len(current)} recorded Alembic head(s); {pending} known migration(s) pending"
         return f"reachable; {len(current)} Alembic head(s) current"
     finally:
         engine.dispose()
@@ -341,6 +386,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ios-team-id", default=None)
     parser.add_argument("--android-cert-sha256", default=None)
     parser.add_argument("--skip-association", action="store_true")
+    parser.add_argument(
+        "--allow-database-behind",
+        action="store_true",
+        help=(
+            "pre-migration check only; does not run migrations: allow a recorded "
+            "Alembic head that is a known ancestor of the target head"
+        ),
+    )
     parser.add_argument(
         "--exercise-s3",
         action="store_true",

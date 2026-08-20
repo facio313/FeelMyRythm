@@ -1,13 +1,41 @@
 # App services only. The shared PostgreSQL service/network/data are managed outside this stack.
 # Required values are loaded from the server's untracked .env file.
 services:
+  fmrRedis:
+    image: redis:8.2.7-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+    platform: linux/arm64
+    container_name: fmrRedis
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - fmr_redis_data:/data
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    networks:
+      - feelmyrythm-backend
+    restart: always
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
   fmrServer:
     image: ghcr.io/facio313/feelmyrythm-server:${FMR_IMAGE_TAG:?set a 40-character commit SHA}
     platform: linux/arm64
     container_name: fmrServer
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      fmrRedis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -28,7 +56,7 @@ services:
       FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS: ${FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS:-5}
       FMR_PASSWORD_VERIFY_CONCURRENCY: ${FMR_PASSWORD_VERIFY_CONCURRENCY:-4}
       FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}
-      FMR_REDIS_URL: ${FMR_REDIS_URL:?set the shared Redis URL}
+      FMR_REDIS_URL: redis://fmrRedis:6379/0
       FMR_REDIS_KEY_PREFIX: ${FMR_REDIS_KEY_PREFIX:-fmr}
       FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}
       FMR_ROOM_LOCK_SECONDS: ${FMR_ROOM_LOCK_SECONDS:-5}
@@ -37,7 +65,7 @@ services:
       FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}
       FMR_S3_REGION: ${FMR_S3_REGION:?set the production score bucket region}
       FMR_S3_ENDPOINT_URL: ${FMR_S3_ENDPOINT_URL:-}
-      FMR_STORAGE_WORKER_ENABLED: ${FMR_STORAGE_WORKER_ENABLED:-true}
+      FMR_STORAGE_WORKER_ENABLED: 'true'
       FMR_STORAGE_WORKER_INTERVAL_SECONDS: ${FMR_STORAGE_WORKER_INTERVAL_SECONDS:-30}
       FMR_STORAGE_DELETE_BATCH_SIZE: ${FMR_STORAGE_DELETE_BATCH_SIZE:-100}
       FMR_STORAGE_DELETE_LEASE_SECONDS: ${FMR_STORAGE_DELETE_LEASE_SECONDS:-300}
@@ -48,7 +76,7 @@ services:
       FMR_LATE_UPLOAD_GUARD_SECONDS: ${FMR_LATE_UPLOAD_GUARD_SECONDS:-86400}
       FMR_STAGING_REDELETE_INTERVAL_SECONDS: ${FMR_STAGING_REDELETE_INTERVAL_SECONDS:-900}
       FMR_LOCAL_UPLOAD_TEMP_TTL_SECONDS: ${FMR_LOCAL_UPLOAD_TEMP_TTL_SECONDS:-3600}
-      FMR_OMR_ENABLED: ${FMR_OMR_ENABLED:-false}
+      FMR_OMR_ENABLED: 'false'
       FMR_OMR_AUDIVERIS_COMMAND: ${FMR_OMR_AUDIVERIS_COMMAND:-audiveris}
       FMR_OMR_WORKER_COUNT: ${FMR_OMR_WORKER_COUNT:-1}
       FMR_OMR_TIMEOUT_SECONDS: ${FMR_OMR_TIMEOUT_SECONDS:-300}
@@ -56,6 +84,7 @@ services:
       - '127.0.0.1:9175:8000'
     networks:
       - feelmyrythm
+      - feelmyrythm-backend
       - cksDB
     restart: always
     healthcheck:
@@ -92,6 +121,14 @@ networks:
   feelmyrythm:
     name: feelmyrythm
     driver: bridge
+  feelmyrythm-backend:
+    name: feelmyrythm-backend
+    driver: bridge
+    internal: true
   cksDB:
     external: true
     name: cksDB
+
+volumes:
+  fmr_redis_data:
+    name: feelmyrythm-fmr-redis-data

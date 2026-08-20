@@ -46,6 +46,8 @@ IAM 주체에는 전용 bucket/prefix의 presign, head, copy, get, put, delete�
 
 기본 preflight는 외부 상태를 변경하지 않는다. production `.env`를 검증한 다음 아래를 확인한다.
 
+`bonifacio.work`의 제한 배포 Compose는 host port가 없는 전용 `fmrRedis`를 내부 network에 만들고 Redis URL을 고정한다. 이 host에서는 다른 앱의 Redis를 재사용하거나 `.env`로 Redis 주소를 덮어쓰지 않는다. 일반적인 별도 배포에서만 `.env`의 `FMR_REDIS_URL`을 명시한다.
+
 - PostgreSQL 연결 및 현재 Alembic head
 - Redis 인증 `PING`
 - SMTP TLS/인증과 `NOOP`
@@ -76,6 +78,8 @@ pnpm production:preflight -- --env-file /absolute/path/to/production.env \
 ```
 
 association 파일을 아직 게시하기 전의 인프라 점검에서만 `--skip-association`을 쓸 수 있다. release 승인용 최종 결과에서는 skip을 허용하지 않는다.
+
+RPi 제한 배포의 첫 target-image preflight는 migration을 실행하기 전에만 `--allow-database-behind`를 함께 사용한다. 이 flag는 현재 Alembic revision이 target head의 정확한 알려진 조상인 단일-head DB만 허용한다. 비어 있거나 unversioned인 DB, unknown/divergent revision, multi-head mismatch는 계속 실패한다. canary가 migration phase에 들어간 뒤의 preflight에는 이 flag를 절대 사용하지 않고 strict target-head 일치를 요구한다. RPi의 Redis DNS는 private Compose network 안에서만 해석되므로 이 검사는 host-side `pnpm`이 아니라 target `fmrServer` one-shot container에서 실행한다.
 
 ## 4. 공용 `cksDB` backup/restore rehearsal
 
@@ -121,7 +125,19 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 ## 7. RPi 복구 후 마지막 단계
 
-RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지, health 실패 시 이전 SHA로 복귀하는지, `cksDB` container/network/data에 변화가 없는지도 확인한다. 서버 장애는 앞 단계의 네이티브 compile·association 생성·provider preflight 구현을 생략하는 근거가 아니다.
+RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
+
+1. target server/web와 pinned Redis image를 준비하고 전용 Redis를 healthy로 만든다. Redis AOF rewrite를 위해 host의 `vm.overcommit_memory=1`을 지속 설정하며, named volume을 삭제하지 않는다.
+2. FMR 이외의 모든 container name·ID를 snapshot한다.
+3. target `fmrServer` one-shot container에서 `--allow-database-behind` pre-migration provider/revision preflight를 실행한다.
+4. 전용 DB를 custom-format으로 backup하고 checksum을 기록한다.
+5. 기존 서비스는 유지한 채 같은 env/network/default command의 target server canary를 `127.0.0.1:19175`에 기동한다. cleanup trap은 성공·실패 모두 canary를 제거한다.
+6. canary health 후 strict target-head preflight를 실행하고 target server, target web 순서로 승격한다. 두 container의 실제 image ID를 요청 image와 각각 비교한다.
+7. 내부·공개 health와 strict provider preflight를 다시 확인하고 비대상 container snapshot이 동일할 때만 revision을 기록한다.
+
+제한 배포기는 web/API infrastructure 복구를 위해 세 번의 target preflight에서 association만 명시적으로 skip한다. 따라서 배포 성공 자체는 mobile release 승인이 아니다. mobile release 전에는 실제 iOS Team ID와 Android signing certificate fingerprint로 두 association JSON을 공개한 뒤, promoted target container에서 `--skip-association` 없이 별도 preflight를 통과해야 한다.
+
+migration phase가 시작된 뒤 server health가 실패하면 이전 server image만 자동 복귀시키지 않는다. schema 호환 forward-fix가 원칙이며, DB restore는 별도 staging에서 검증한 backup과 명시적 outage·data-loss 검토가 있을 때만 수행한다. web 실패는 server를 유지한 채 web image만 이전 버전으로 복귀할 수 있다. 서버 장애는 앞 단계의 네이티브 compile·association 생성·provider preflight 구현을 생략하는 근거가 아니다.
 
 Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고정 Microsoft Playwright 이미지에서 실행하며, runner마다 `playwright install --with-deps`를 다시 수행하지 않는다. server·protocol job은 runtime image와 같은 Python patch를 먼저 설치하고 그 patch를 지원하는 동일한 uv 버전으로 lockfile을 동기화한다. 저장소 루트의 `.env.example`·`docker-compose.prod.yml`을 읽는 `repository_contract` 테스트는 전체 checkout을 가진 server job에서 반드시 실행한다. PostgreSQL migration gate는 fresh DB뿐 아니라 별도 임시 DB에 재현한 Alembic 이전 운영 schema의 row 보존 upgrade도 실행한다. `apps/server`만 컨텍스트로 받는 ARM64 서버 이미지의 test target은 이 두 저장소 계약만 제외하고 나머지 서버 suite를 다시 실행한다. Android·iOS job은 각 runner의 clean checkout에서 `pnpm build:workspace-libs`를 선행한 뒤 Capacitor sync와 native compile을 수행한다. Android job은 Gradle/Capacitor의 source level과 일치하는 Temurin JDK 21 및 고정 Android platform·NDK·CMake를 사용한다. main Validate가 실패하면 후속 `Build and deploy to RPi5` 실행이 `skipped`되는 것이 정상이며, 이 경우 운영 반영으로 보고하지 않는다.
 

@@ -100,7 +100,9 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 - 브라우저의 REST/WS 경로는 각각 `/feelmyrythm/api/*`, `/feelmyrythm/ws/*`이다. 이미지 내부 nginx가 prefix를 제거해 FastAPI의 기존 `/api/*`, `/ws/*`로 전달한다.
 - 운영 이미지는 `ghcr.io/facio313/feelmyrythm-server:<commit-sha>`와 `ghcr.io/facio313/feelmyrythm-web:<commit-sha>`이다. RPi에서 소스를 빌드하지 않는다.
 - 운영 Compose는 별도 DB를 생성하지 않는다. `fmrServer`를 외부 `cksDB` Docker 네트워크에 연결하고, `.env`의 `FMR_DATABASE_URL`로 공용 `cksDB` 안의 전용 DB/계정에 접속한다.
+- `bonifacio.work` RPi 배포는 host port가 없는 전용 `fmrRedis`를 내부 backend network에 두고 `FMR_REDIS_URL=redis://fmrRedis:6379/0`을 Compose에서 고정한다. 다른 앱의 Redis를 공유하거나 public network에 노출하지 않는다.
 - 배포 요청은 forced-command SSH 키를 통해 `deploy feelmyrythm <40-character-sha>`만 허용한다. 배포 과정에서 전역 image prune, stack-wide `down`, DB/volume 삭제를 실행하지 않는다.
+- 배포기는 target image에서 설정·provider와 현재 Alembic revision이 target의 정확한 알려진 조상인지 pre-migration 검증하고 DB backup을 완료한 뒤 loopback canary를 먼저 기동한다. canary migration 뒤에는 strict target-head preflight를 다시 통과해야 한다. migration이 실행된 뒤 server health가 실패해도 schema와 맞지 않을 수 있는 이전 server image로 자동 복귀하지 않고 forward-fix를 요구한다. 독립적인 web image만 이전 web image로 복귀할 수 있다.
 
 ---
 
@@ -158,6 +160,7 @@ anthropic ──┘
 - **`.env` 커밋 금지**. `FMR_*` / DB 자격증명 / `DEPLOY_*` 하드코딩 금지.
 - **배포 시크릿** — GitHub Repository Secret `DEPLOY_KEY`만 사용한다. 호스트·포트·사용자·서버 공개 host key는 워크플로에 고정되어 있다.
 - **공용 DB 보호** — 앱 배포에서 `cksDB` 컨테이너·네트워크·데이터를 생성, 재시작, 삭제하지 않는다.
+- **스키마 배포 복구** — migration 이후 server image-only rollback을 금지한다. schema 변경은 expand/contract 호환성을 유지하고, 실패하면 forward-fix를 우선한다. DB restore는 검증된 backup과 명시적 outage 절차가 있을 때만 수행한다.
 - **운영 객체 저장소** — production은 `FMR_STORAGE_BACKEND=s3`, 비어 있지 않은 bucket/region, 활성화된 storage lifecycle worker 없이는 시작하지 않는다. 컨테이너 로컬 업로드는 development/test에서만 허용한다.
 - **악보 객체 생명주기** — Score·Repertoire·Project·Group 삭제는 DB transaction에서 하위 Score를 논리 삭제하고 객체 키를 durable outbox에 함께 기록한다. 204는 이 transaction의 commit을 뜻하며, lease worker가 모든 키를 멱등 삭제하고 실패를 포기 없이 backoff 재시도한다.
 - **계정 삭제 생명주기** — password 계정은 현재 비밀번호를, Google-only 계정은 브라우저의 새 Google ID credential 또는 native에서도 열 수 있는 만료·1회용 확인 메일을 검증한다. 탈퇴 transaction은 소유 그룹의 모든 Score 객체 키를 같은 durable outbox에 기록하고 다른 그룹의 개인 데이터·멤버십을 제거하며, RESTRICT 감사 참조는 비활성 비식별 tombstone User로 보존한다.
@@ -226,4 +229,5 @@ anthropic ──┘
 - Validate에는 JS/Python 전체 check, protocol 생성 일치, 일반 Playwright와 전용 PWA upgrade E2E, PostgreSQL Alembic smoke가 포함되어야 한다.
 - Alembic 도입 전 운영 DB는 `b881b6589baa`가 알려진 legacy table signature를 확인한 뒤 같은 PostgreSQL transaction에서 기존 table을 격리 schema로 이동하고 새 schema로 row를 변환한다. 알 수 없는 unversioned schema는 추측해 stamp하거나 덮어쓰지 않고 배포를 거부하며, CI는 실제 legacy row 보존 upgrade를 별도 PostgreSQL DB에서 검증한다.
 - 운영 승인 전 `production:preflight`로 PostgreSQL Alembic head, Redis, SMTP TLS/auth, S3 CORS/staging lifecycle, public health와 mobile association identity를 fail-closed 검증한다. S3 canary와 test mail은 명시적 opt-in에서만 외부 상태를 바꾼다.
+- 제한 배포기의 첫 target preflight만 `--allow-database-behind`를 사용한다. 이 모드는 비어 있거나 unversioned인 DB, unknown/divergent revision, multi-head mismatch를 거부하고 단일 current revision이 단일 target head의 정확한 조상일 때만 pending migration을 허용한다. canary가 migration phase에 진입한 뒤 수행하는 모든 preflight는 이 flag 없이 strict head 일치를 요구한다. 제한 배포기의 `--skip-association`은 web/API infrastructure bring-up만 승인하며 mobile release 승인이 아니다. mobile release 전에는 실제 signing identity의 association JSON을 공개하고 별도 non-skip preflight를 통과한다.
 - server/web Dockerfile의 Python·Node·nginx·uv base와 CI/deploy PostgreSQL은 version tag와 image digest를 함께 고정한다. 운영 server는 read-only root filesystem과 `/tmp` 전용 tmpfs로 실행한다. ARM64 runtime image를 registry에 push하기 전 그 정확한 tag를 같은 read-only 경계로 실행해 server default CMD의 Alembic migration·health·non-root 상태와 nginx SPA·header·API proxy `no-store`를 통합 smoke한다.

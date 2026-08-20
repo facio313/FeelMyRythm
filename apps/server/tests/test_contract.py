@@ -165,7 +165,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     assert settings.omr_audiveris_command == "audiveris"
     assert settings.omr_worker_count == 1
     assert settings.omr_timeout_seconds == 300
-    assert settings.redis_url == "redis://USER:PASSWORD@redis:6379/0"
+    assert settings.redis_url == "redis://fmrRedis:6379/0"
     assert settings.room_presence_ttl_seconds == 45
     assert settings.room_lock_seconds == 5
     assert settings.room_lock_wait_seconds == 2
@@ -175,10 +175,15 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
 def test_production_compose_passes_required_runtime_settings() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     compose = (repository_root / "docker-compose.prod.yml").read_text()
+    redis_service = compose.split("  fmrRedis:\n", 1)[1].split("\n  fmrServer:\n", 1)[0]
+    server_service = compose.split("  fmrServer:\n", 1)[1].split("\n  fmrWeb:\n", 1)[0]
+    networks = compose.split("\nnetworks:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    backend_network = networks.split("  feelmyrythm-backend:\n", 1)[1].split("\n  cksDB:\n", 1)[0]
+    volumes = compose.split("\nvolumes:\n", 1)[1]
 
     required_lines = {
         "FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}",
-        "FMR_REDIS_URL: ${FMR_REDIS_URL:?set the shared Redis URL}",
+        "FMR_REDIS_URL: redis://fmrRedis:6379/0",
         "FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}",
         "FMR_STORAGE_BACKEND: s3",
         "FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}",
@@ -187,16 +192,31 @@ def test_production_compose_passes_required_runtime_settings() -> None:
         "FMR_MAIL_QUEUE_CAPACITY: ${FMR_MAIL_QUEUE_CAPACITY:-128}",
         "FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS: ${FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS:-5}",
         "FMR_PASSWORD_VERIFY_CONCURRENCY: ${FMR_PASSWORD_VERIFY_CONCURRENCY:-4}",
-        "FMR_STORAGE_WORKER_ENABLED: ${FMR_STORAGE_WORKER_ENABLED:-true}",
+        "FMR_STORAGE_WORKER_ENABLED: 'true'",
         "FMR_STORAGE_DELETE_LEASE_SECONDS: ${FMR_STORAGE_DELETE_LEASE_SECONDS:-300}",
         "FMR_STORAGE_DELETE_RETRY_MAX_SECONDS: ${FMR_STORAGE_DELETE_RETRY_MAX_SECONDS:-3600}",
         "FMR_PENDING_UPLOAD_GRACE_SECONDS: ${FMR_PENDING_UPLOAD_GRACE_SECONDS:-900}",
         "FMR_LATE_UPLOAD_GUARD_SECONDS: ${FMR_LATE_UPLOAD_GUARD_SECONDS:-86400}",
         "FMR_STAGING_REDELETE_INTERVAL_SECONDS: ${FMR_STAGING_REDELETE_INTERVAL_SECONDS:-900}",
-        "FMR_OMR_ENABLED: ${FMR_OMR_ENABLED:-false}",
+        "FMR_OMR_ENABLED: 'false'",
         "FMR_OMR_AUDIVERIS_COMMAND: ${FMR_OMR_AUDIVERIS_COMMAND:-audiveris}",
     }
-    assert all(line in compose for line in required_lines)
+    assert all(line in server_service for line in required_lines)
+    assert (
+        "redis:8.2.7-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd"
+    ) in redis_service
+    assert "ports:" not in redis_service
+    assert "read_only: true" in redis_service
+    assert "['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']" in redis_service
+    assert "['CMD', 'redis-cli', 'ping']" in redis_service
+    assert "fmr_redis_data:/data" in redis_service
+    assert "feelmyrythm-backend" in redis_service
+    assert "depends_on:\n      fmrRedis:\n        condition: service_healthy" in server_service
+    assert "feelmyrythm-backend" in server_service
+    assert "no-new-privileges:true" in server_service
+    assert "cap_drop:\n      - ALL" in server_service
+    assert "internal: true" in backend_network
+    assert "fmr_redis_data:" in volumes
 
 
 @pytest.mark.parametrize("unsafe_secret", sorted(UNSAFE_PRODUCTION_JWT_SECRETS))
