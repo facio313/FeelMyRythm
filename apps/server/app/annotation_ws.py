@@ -11,6 +11,7 @@ from .schemas import (
     JoinAnnotationsMessage,
 )
 from .security import authenticate_access_token
+from .sso import require_matching_sso_subject, trusted_sso_subject
 
 router = APIRouter(tags=["annotations"])
 client_message_adapter: TypeAdapter[AnnotationWsClientMessage] = TypeAdapter(AnnotationWsClientMessage)
@@ -54,6 +55,8 @@ async def annotation_socket(websocket: WebSocket, repertoire_id: str) -> None:
                     websocket.app.state.settings,
                     first.payload.access_token,
                 )
+                request_subject = trusted_sso_subject(websocket, websocket.app.state.settings)
+                require_matching_sso_subject(user.sso_subject, request_subject)
                 require_repertoire(db, user, repertoire_id)
                 user_id = user.id
             subscriber = await websocket.app.state.annotation_sync.join(

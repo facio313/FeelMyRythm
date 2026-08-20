@@ -64,6 +64,7 @@ from ..security import (
     verify_password,
 )
 from ..serializers import user_out
+from ..sso import trusted_sso_subject
 from .storage_cleanup import enqueue_score_cleanup
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -82,6 +83,7 @@ PUBLIC_ENROLLMENT_DISABLED = "Public account enrollment is temporarily unavailab
 LOCAL_AUTH_DISABLED = "Local account authentication is disabled; use portfolio single sign-on."
 SSO_IDENTITY_INVALID = "Single sign-on identity is missing or invalid."
 SSO_IDENTITY_NOT_PROVISIONED = "Single sign-on identity is not provisioned for this application."
+SSO_IDENTITY_CONFLICT = "Single sign-on identity conflicts with an existing application account."
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
@@ -94,7 +96,7 @@ def _require_public_email_workflows(settings: AppSettings) -> None:
 
 
 def _require_public_enrollment(settings: AppSettings) -> None:
-    if settings.deployment_profile == "single_user_local":
+    if settings.deployment_profile == "managed_local_sso":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=PUBLIC_ENROLLMENT_DISABLED,
@@ -487,14 +489,28 @@ def google_login(body: GoogleLoginIn, request: Request, db: DbSession, settings:
     return _token_response(db, settings, user)
 
 
-@router.post("/sso", response_model=TokenPairOut)
+@router.post(
+    "/sso",
+    response_model=TokenPairOut,
+    summary="Exchange a trusted portfolio SSO identity",
+    description=(
+        "Edge-only exchange. The portfolio proxy injects a stable subject, verified email, "
+        "and an application-specific edge secret; browser clients must not construct these headers."
+    ),
+    responses={
+        401: {"description": "Trusted edge identity is missing or invalid."},
+        403: {"description": "The matched application account is inactive or not provisioned."},
+        409: {"description": "The stable subject and email resolve to conflicting accounts."},
+    },
+)
 def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPairOut:
     if not settings.sso_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
-    remote_user = request.headers.get("Remote-User", "").strip()
+    remote_user = trusted_sso_subject(request, settings)
+    assert remote_user is not None
     remote_email = request.headers.get("Remote-Email", "").strip()
-    if not remote_user or not remote_email:
+    if not remote_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SSO_IDENTITY_INVALID)
     try:
         email = normalize_email(str(EMAIL_ADAPTER.validate_python(remote_email)))
@@ -503,8 +519,65 @@ def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPa
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=SSO_IDENTITY_INVALID,
         ) from exc
-    user = db.scalar(select(User).where(User.email == email).with_for_update())
-    if user is None or not user.is_active:
+    remote_name = request.headers.get("Remote-Name", "").strip()
+    display_name = (
+        remote_name
+        if remote_name
+        and len(remote_name) <= 120
+        and not any(ord(character) < 32 or ord(character) == 127 for character in remote_name)
+        else remote_user[:120]
+    )
+
+    subject_user = db.scalar(select(User).where(User.sso_subject == remote_user).with_for_update())
+    email_user = db.scalar(select(User).where(User.email == email).with_for_update())
+    if subject_user is not None:
+        if email_user is not None and email_user.id != subject_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SSO_IDENTITY_CONFLICT,
+            )
+        if not subject_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=SSO_IDENTITY_NOT_PROVISIONED,
+            )
+        user = subject_user
+        # The stable subject is authoritative. A central email/name update is
+        # safe only while the new email is not owned by another local identity.
+        user.email = email
+        user.display_name = display_name
+    elif email_user is not None:
+        if email_user.sso_subject is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SSO_IDENTITY_CONFLICT,
+            )
+        if not email_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=SSO_IDENTITY_NOT_PROVISIONED,
+            )
+        # One-time legacy-owner link. Email is unique in the database and both
+        # rows are locked, so an ambiguous or racing link fails at commit.
+        user = email_user
+        user.sso_subject = remote_user
+        user.password_hash = None
+        user.google_subject = None
+        user.auth_generation += 1
+        db.execute(delete(RefreshSession).where(RefreshSession.user_id == user.id))
+        user.display_name = display_name
+    elif settings.deployment_profile == "managed_local_sso":
+        user = User(
+            email=email,
+            display_name=display_name,
+            password_hash=None,
+            google_subject=None,
+            sso_subject=remote_user,
+            email_verified_at=utcnow(),
+            is_active=True,
+        )
+        db.add(user)
+    else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=SSO_IDENTITY_NOT_PROVISIONED,
@@ -512,14 +585,32 @@ def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPa
     if user.email_verified_at is None:
         user.email_verified_at = utcnow()
         user.email_verification_sent_at = None
+    try:
         db.commit()
-        db.refresh(user)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=SSO_IDENTITY_CONFLICT,
+        ) from exc
+    db.refresh(user)
     return _token_response(db, settings, user)
 
 
 @router.post("/refresh", response_model=TokenPairOut)
-def refresh(body: RefreshIn, db: DbSession, settings: AppSettings) -> TokenPairOut:
-    user, access, refresh_token, expires_in = rotate_refresh_token(db, settings, body.refresh_token)
+def refresh(
+    body: RefreshIn,
+    request: Request,
+    db: DbSession,
+    settings: AppSettings,
+) -> TokenPairOut:
+    request_subject = trusted_sso_subject(request, settings)
+    user, access, refresh_token, expires_in = rotate_refresh_token(
+        db,
+        settings,
+        body.refresh_token,
+        expected_sso_subject=request_subject,
+    )
     return TokenPairOut(
         access_token=access,
         refresh_token=refresh_token,
@@ -529,8 +620,19 @@ def refresh(body: RefreshIn, db: DbSession, settings: AppSettings) -> TokenPairO
 
 
 @router.post("/logout", response_model=MessageOut)
-def logout(body: RefreshIn, db: DbSession, settings: AppSettings) -> MessageOut:
-    revoke_refresh_token(db, settings, body.refresh_token)
+def logout(
+    body: RefreshIn,
+    request: Request,
+    db: DbSession,
+    settings: AppSettings,
+) -> MessageOut:
+    request_subject = trusted_sso_subject(request, settings)
+    revoke_refresh_token(
+        db,
+        settings,
+        body.refresh_token,
+        expected_sso_subject=request_subject,
+    )
     return MessageOut(message="logged out")
 
 

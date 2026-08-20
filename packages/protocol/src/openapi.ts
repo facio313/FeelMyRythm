@@ -168,7 +168,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Sso Login */
+        /**
+         * Exchange a trusted portfolio SSO identity
+         * @description Edge-only exchange. The portfolio proxy injects a stable subject, verified email, and an application-specific edge secret; browser clients must not construct these headers.
+         */
         post: operations["sso_login_api_auth_sso_post"];
         delete?: never;
         options?: never;
@@ -2812,6 +2815,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TokenPairOut"];
                 };
+            };
+            /** @description Trusted edge identity is missing or invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The matched application account is inactive or not provisioned. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The stable subject and email resolve to conflicting accounts. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -1,5 +1,5 @@
-export function temporarySingleUserModeEnabled(): boolean {
-  return import.meta.env.VITE_FMR_TEMPORARY_SINGLE_USER === 'true';
+export function managedLocalSsoModeEnabled(): boolean {
+  return import.meta.env.VITE_FMR_MANAGED_LOCAL_SSO === 'true';
 }
 
 export function portfolioSsoEnabled(): boolean {

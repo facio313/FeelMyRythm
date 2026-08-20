@@ -4669,6 +4669,7 @@
     },
     "/api/auth/sso": {
       "post": {
+        "description": "Edge-only exchange. The portfolio proxy injects a stable subject, verified email, and an application-specific edge secret; browser clients must not construct these headers.",
         "operationId": "sso_login_api_auth_sso_post",
         "responses": {
           "200": {
@@ -4680,9 +4681,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Trusted edge identity is missing or invalid."
+          },
+          "403": {
+            "description": "The matched application account is inactive or not provisioned."
+          },
+          "409": {
+            "description": "The stable subject and email resolve to conflicting accounts."
           }
         },
-        "summary": "Sso Login",
+        "summary": "Exchange a trusted portfolio SSO identity",
         "tags": [
           "auth"
         ]

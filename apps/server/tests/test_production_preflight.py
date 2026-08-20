@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,18 +50,36 @@ def test_preflight_does_not_echo_invalid_secret_inputs(tmp_path: Path) -> None:
     assert secret not in results[0].detail
 
 
-def test_single_user_preflight_skips_external_providers_and_checks_local_storage(
+def test_managed_local_sso_preflight_skips_external_providers_and_checks_local_storage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     uploads = tmp_path / "uploads"
     uploads.mkdir()
+    edge_secret_file = tmp_path / "fmr-edge-secret"
+    edge_secret_file.write_text(
+        "test-fmr-edge-secret-with-at-least-32-characters",
+        encoding="ascii",
+    )
+    edge_secret_file.chmod(0o640)
+    real_fstat = os.fstat
+
+    def container_fstat(file_descriptor: int) -> os.stat_result:
+        metadata = list(real_fstat(file_descriptor))
+        metadata[4] = 0
+        metadata[5] = 0
+        return os.stat_result(metadata)
+
+    monkeypatch.setattr("app.config.os.fstat", container_fstat)
+    monkeypatch.setattr("app.config.os.getegid", lambda: 0)
     env_file = tmp_path / "production.env"
     env_file.write_text(
         "\n".join(
             [
                 "FMR_ENVIRONMENT=production",
-                "FMR_DEPLOYMENT_PROFILE=single_user_local",
+                "FMR_DEPLOYMENT_PROFILE=managed_local_sso",
+                "FMR_SSO_ENABLED=true",
+                f"FMR_SSO_EDGE_SECRET_FILE={edge_secret_file}",
                 "FMR_DATABASE_URL=postgresql+psycopg://user:password@db/feelmyrythm",
                 "FMR_AUTO_CREATE_SCHEMA=false",
                 "FMR_JWT_SECRET=runtime-secret-with-at-least-32-characters",
@@ -119,7 +138,7 @@ def test_database_preflight_only_allows_known_upgrade_ancestors() -> None:
             expected=expected,
             allow_database_behind=True,
         )
-        == 2
+        == 3
     )
     assert (
         validate_database_revision_state(
@@ -128,7 +147,7 @@ def test_database_preflight_only_allows_known_upgrade_ancestors() -> None:
             expected=expected,
             allow_database_behind=True,
         )
-        == 1
+        == 2
     )
 
     with pytest.raises(RuntimeError, match="not at the repository Alembic head"):

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .models import RefreshSession, User, utcnow
+from .sso import require_matching_sso_subject
 
 
 class TokenError(ValueError):
@@ -155,7 +156,13 @@ def authenticate_access_token(db: Session, settings: Settings, token: str) -> Us
     return user
 
 
-def rotate_refresh_token(db: Session, settings: Settings, token: str) -> tuple[User, str, str, int]:
+def rotate_refresh_token(
+    db: Session,
+    settings: Settings,
+    token: str,
+    *,
+    expected_sso_subject: str | None = None,
+) -> tuple[User, str, str, int]:
     try:
         payload = decode_token(settings, token, "refresh")
     except TokenError as exc:
@@ -174,6 +181,7 @@ def rotate_refresh_token(db: Session, settings: Settings, token: str) -> tuple[U
     user = db.get(User, record.user_id)
     if user is None or not user.is_active or user.email_verified_at is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="inactive or missing user")
+    require_matching_sso_subject(user.sso_subject, expected_sso_subject)
     if payload.get("gen") != user.auth_generation:
         record.revoked_at = utcnow()
         db.commit()
@@ -184,7 +192,13 @@ def rotate_refresh_token(db: Session, settings: Settings, token: str) -> tuple[U
     return user, access, refresh, expires_in
 
 
-def revoke_refresh_token(db: Session, settings: Settings, token: str) -> None:
+def revoke_refresh_token(
+    db: Session,
+    settings: Settings,
+    token: str,
+    *,
+    expected_sso_subject: str | None = None,
+) -> None:
     try:
         payload = decode_token(settings, token, "refresh")
     except TokenError:
@@ -193,9 +207,18 @@ def revoke_refresh_token(db: Session, settings: Settings, token: str) -> None:
     record = db.scalar(
         select(RefreshSession).where(RefreshSession.token_hash == token_hash).with_for_update()
     )
-    if record is not None and record.revoked_at is None:
-        record.revoked_at = utcnow()
-        db.commit()
+    if record is not None:
+        if expected_sso_subject is not None:
+            user = db.get(User, record.user_id)
+            if user is None or not user.is_active or user.email_verified_at is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="inactive or missing user",
+                )
+            require_matching_sso_subject(user.sso_subject, expected_sso_subject)
+        if record.revoked_at is None:
+            record.revoked_at = utcnow()
+            db.commit()
 
 
 def create_email_verification_token(settings: Settings, user: User) -> str:

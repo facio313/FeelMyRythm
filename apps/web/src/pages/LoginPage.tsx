@@ -10,7 +10,7 @@ import {
 } from '../lib/accountDeletionChallenge';
 import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { portfolioSsoEnabled, temporarySingleUserModeEnabled } from '../lib/runtimeMode';
+import { managedLocalSsoModeEnabled, portfolioSsoEnabled } from '../lib/runtimeMode';
 
 interface AuthFieldErrors {
   displayName?: string;
@@ -151,7 +151,7 @@ export function LoginPage() {
   const passwordConfirmationRef = useRef<HTMLInputElement>(null);
   const processedCompletionTokenRef = useRef<string | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
-  const temporarySingleUserMode = temporarySingleUserModeEnabled();
+  const managedLocalSsoMode = managedLocalSsoModeEnabled();
   const ssoMode = portfolioSsoEnabled();
 
   useEffect(() => {
@@ -404,8 +404,8 @@ export function LoginPage() {
           <LogIn className="auth-card__icon" size={40} aria-hidden />
           <h1>통합 로그인 연결이 필요합니다</h1>
           <p className="subtle" role="alert">
-            중앙 로그인은 확인됐지만 FeelMyRythm 소유자 계정과 연결하지 못했습니다. 페이지를 다시
-            열어 보거나 운영 설정을 확인해 주세요.
+            중앙 로그인은 확인됐지만 FeelMyRythm 계정을 안전하게 연결하지 못했습니다. 페이지를 다시
+            열어 보거나 중앙 계정의 아이디·이메일 충돌 여부를 관리자에게 확인해 주세요.
           </p>
           <Button variant="primary" onClick={() => window.location.reload()}>
             다시 연결
@@ -697,10 +697,10 @@ export function LoginPage() {
         <p className="subtle">
           솔로 메트로놈은 로그인 없이 쓸 수 있습니다. 그룹 공유와 동기 세션에는 계정이 필요합니다.
         </p>
-        {temporarySingleUserMode ? (
+        {managedLocalSsoMode ? (
           <p className="auth-card__google-note" role="status">
-            현재는 서버에서 발급한 단일 계정만 로그인할 수 있습니다. 회원가입과 이메일 재설정은 SMTP
-            설정 후 다시 열립니다.
+            중앙 관리자가 만든 통합 로그인 계정으로 접속합니다. 앱의 별도 회원가입·비밀번호·이메일
+            재설정은 사용하지 않습니다.
           </p>
         ) : null}
         {accountDeletionRequested ? (
@@ -719,16 +719,16 @@ export function LoginPage() {
             링크는 새로고침 후 복원하지 않습니다. 받은 메일의 링크를 다시 열어 주세요.
           </p>
         ) : null}
-        {!temporarySingleUserMode && googleClientId && !nativeBridge.native ? (
+        {!managedLocalSsoMode && googleClientId && !nativeBridge.native ? (
           <GoogleSignInButton clientId={googleClientId} onCredential={submitGoogleCredential} />
-        ) : temporarySingleUserMode ? null : (
+        ) : managedLocalSsoMode ? null : (
           <p className="auth-card__google-note" role="status">
             {nativeBridge.native
               ? '모바일 앱에서는 이메일 가입과 로그인만 지원합니다.'
               : '현재 배포에서는 Google 로그인이 설정되지 않았습니다. 아래 이메일 로그인을 이용해 주세요.'}
           </p>
         )}
-        {!temporarySingleUserMode && googleClientId && !nativeBridge.native ? (
+        {!managedLocalSsoMode && googleClientId && !nativeBridge.native ? (
           <div className="auth-card__divider" aria-hidden>
             <span>또는</span>
           </div>
@@ -809,7 +809,7 @@ export function LoginPage() {
             {submitting ? '처리 중…' : mode === 'login' ? '로그인' : '계정 만들기'}
           </Button>
           {mode === 'login' ? (
-            temporarySingleUserMode ? null : (
+            managedLocalSsoMode ? null : (
               <>
                 <Button
                   type="button"
@@ -836,7 +836,7 @@ export function LoginPage() {
             </p>
           ) : null}
         </form>
-        {temporarySingleUserMode ? null : (
+        {managedLocalSsoMode ? null : (
           <button
             className="auth-card__mode"
             type="button"

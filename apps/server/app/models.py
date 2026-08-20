@@ -19,8 +19,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm.base import LoaderCallableStatus
 
 from .db import Base
 
@@ -46,12 +48,27 @@ class User(TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str | None] = mapped_column(String(255))
     google_subject: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # Set only by the trusted SSO exchange. Once non-null, this stable central
+    # subject is never reassigned, even when the central email address changes.
+    sso_subject: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     email_verification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_reset_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     account_delete_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     auth_generation: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+@event.listens_for(User.sso_subject, "set", retval=True, active_history=True)
+def _keep_sso_subject_immutable(
+    _target: User,
+    value: str | None,
+    previous: object,
+    _initiator: object,
+) -> str | None:
+    if previous not in (None, LoaderCallableStatus.NO_VALUE) and value != previous:
+        raise ValueError("sso_subject is immutable once linked")
+    return value
 
 
 class RefreshSession(Base):

@@ -1,4 +1,4 @@
-"""Create or reset the sole password account for single-user local production."""
+"""Seed or reset the legacy owner before its first managed-local SSO link."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ def bootstrap_single_user(
     display_name: str,
     password: str,
 ) -> BootstrapResult:
-    if settings.environment != "production" or settings.deployment_profile != "single_user_local":
-        raise BootstrapError("bootstrap is restricted to production single_user_local deployments")
+    if settings.environment != "production" or settings.deployment_profile != "managed_local_sso":
+        raise BootstrapError("bootstrap is restricted to production managed_local_sso deployments")
 
     try:
         normalized_email = normalize_email(str(EMAIL_ADAPTER.validate_python(email)))
@@ -59,7 +59,7 @@ def bootstrap_single_user(
         with database.session_factory.begin() as session:
             if settings.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
                 session.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtext('feelmyrythm-single-user-bootstrap'))")
+                    text("SELECT pg_advisory_xact_lock(hashtext('feelmyrythm-managed-owner-bootstrap'))")
                 )
             active_users = list(
                 session.scalars(select(User).where(User.is_active.is_(True)).with_for_update())
@@ -76,6 +76,8 @@ def bootstrap_single_user(
                 )
                 session.add(user)
                 created = True
+            elif user.sso_subject is not None:
+                raise BootstrapError("owner is already linked to managed SSO")
 
             user.display_name = normalized_name
             user.password_hash = hash_password(validated_password)
@@ -151,7 +153,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             credentials_fd = None
             _write_credentials(reserved_fd, email=result.email, password=password)
         action = "created" if result.created else "reset"
-        print(f"single-user account {action}; credentials were not printed")
+        print(f"legacy owner account {action}; credentials were not printed")
         if credentials_path is not None:
             print(f"credentials file: {credentials_path}")
         return 0

@@ -18,6 +18,7 @@ redis_container="fmr-runtime-redis-${run_suffix}"
 server_container="fmr-runtime-server-${run_suffix}"
 web_container="fmr-runtime-web-${run_suffix}"
 local_upload_volume="fmr-runtime-uploads-${run_suffix}"
+edge_secret_volume="fmr-runtime-edge-secret-${run_suffix}"
 temporary_directory="$(mktemp -d)"
 
 cleanup() {
@@ -25,12 +26,14 @@ cleanup() {
     >/dev/null 2>&1 || true
   docker network rm "$network_name" >/dev/null 2>&1 || true
   docker volume rm "$local_upload_volume" >/dev/null 2>&1 || true
+  docker volume rm "$edge_secret_volume" >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
 }
 trap cleanup EXIT
 
 database_password="$(openssl rand -hex 24)"
 jwt_secret="$(openssl rand -hex 48)"
+edge_secret="$(openssl rand -hex 48)"
 
 docker network create "$network_name" >/dev/null
 docker run --detach \
@@ -132,13 +135,24 @@ docker exec "$server_container" sh -c \
   >/dev/null
 
 docker volume create "$local_upload_volume" >/dev/null
+docker volume create "$edge_secret_volume" >/dev/null
+printf '%s' "$edge_secret" | docker run --rm --interactive \
+  --user 0:0 \
+  --volume "${edge_secret_volume}:/run/secrets" \
+  --entrypoint sh \
+  "$SERVER_RUNTIME_IMAGE" \
+  -c 'umask 027; head -c 4096 > /run/secrets/fmr_sso_edge_secret; chown 0:0 /run/secrets/fmr_sso_edge_secret; chmod 0640 /run/secrets/fmr_sso_edge_secret'
 docker run --rm \
+  --user 10001:0 \
   --network "$network_name" \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
   --volume "${local_upload_volume}:/data/uploads" \
+  --volume "${edge_secret_volume}:/run/secrets:ro" \
   --env FMR_ENVIRONMENT=production \
-  --env FMR_DEPLOYMENT_PROFILE=single_user_local \
+  --env FMR_DEPLOYMENT_PROFILE=managed_local_sso \
+  --env FMR_SSO_ENABLED=true \
+  --env FMR_SSO_EDGE_SECRET_FILE=/run/secrets/fmr_sso_edge_secret \
   --env "FMR_DATABASE_URL=postgresql+psycopg://feelmyrythm:${database_password}@postgres:5432/feelmyrythm" \
   --env FMR_AUTO_CREATE_SCHEMA=false \
   --env "FMR_JWT_SECRET=${jwt_secret}" \
@@ -149,7 +163,7 @@ docker run --rm \
   --env FMR_PUBLIC_API_BASE_URL=https://example.com/feelmyrythm \
   --entrypoint python \
   "$SERVER_RUNTIME_IMAGE" \
-  -c 'from app.config import Settings; from app.storage import LocalObjectStorage; storage = LocalObjectStorage(Settings()); candidate = storage.create_temporary_upload_path(); candidate.write_bytes(b"runtime-smoke"); candidate.unlink()'
+  -c 'import os, stat; from app.config import Settings; from app.storage import LocalObjectStorage; settings = Settings(); metadata = os.stat(settings.sso_edge_secret_file); assert os.geteuid() == 10001 and os.getegid() == 0; assert metadata.st_uid == 0 and metadata.st_gid == 0 and stat.S_IMODE(metadata.st_mode) == 0o640; storage = LocalObjectStorage(settings); candidate = storage.create_temporary_upload_path(); candidate.write_bytes(b"runtime-smoke"); candidate.unlink()'
 
 docker run --detach \
   --name "$web_container" \

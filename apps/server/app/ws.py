@@ -29,6 +29,7 @@ from .schemas import (
     WsClientMessage,
 )
 from .security import authenticate_access_token
+from .sso import require_matching_sso_subject, trusted_sso_subject
 
 router = APIRouter(tags=["synchronization"])
 client_message_adapter: TypeAdapter[WsClientMessage] = TypeAdapter(WsClientMessage)
@@ -103,6 +104,8 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                     websocket.app.state.settings,
                     first.payload.access_token,
                 )
+                request_subject = trusted_sso_subject(websocket, websocket.app.state.settings)
+                require_matching_sso_subject(user.sso_subject, request_subject)
                 _, membership = require_repertoire(db, user, room.repertoire_id)
             except HTTPException:
                 await _error(websocket, "authentication or room membership failed", "UNAUTHORIZED")

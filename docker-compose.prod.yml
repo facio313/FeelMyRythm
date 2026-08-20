@@ -26,6 +26,7 @@ services:
     image: ghcr.io/facio313/feelmyrythm-server:${FMR_IMAGE_TAG:?set a 40-character commit SHA}
     platform: linux/arm64
     container_name: fmrServer
+    user: '10001:0'
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
@@ -40,8 +41,9 @@ services:
       - .env
     environment:
       FMR_ENVIRONMENT: production
-      FMR_DEPLOYMENT_PROFILE: single_user_local
+      FMR_DEPLOYMENT_PROFILE: managed_local_sso
       FMR_SSO_ENABLED: 'true'
+      FMR_SSO_EDGE_SECRET_FILE: /run/secrets/fmr_sso_edge_secret
       FMR_DATABASE_URL: ${FMR_DATABASE_URL:?set the dedicated cksDB database URL}
       FMR_AUTO_CREATE_SCHEMA: 'false'
       FMR_JWT_SECRET: ${FMR_JWT_SECRET:?set a production JWT secret}
@@ -75,6 +77,7 @@ services:
       FMR_OMR_TIMEOUT_SECONDS: ${FMR_OMR_TIMEOUT_SECONDS:-300}
     volumes:
       - fmr_uploads:/data/uploads
+      - ${FMR_SSO_EDGE_SECRET_FILE:?set the cks-owned mode-0640 host secret path}:/run/secrets/fmr_sso_edge_secret:ro
     ports:
       - '127.0.0.1:9175:8000'
     networks:

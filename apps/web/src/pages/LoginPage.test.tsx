@@ -129,8 +129,8 @@ describe('LoginPage accessibility and secure email flows', () => {
     expect(auth.login).not.toHaveBeenCalled();
   });
 
-  it('offers only the server-provisioned login in temporary single-user builds', () => {
-    vi.stubEnv('VITE_FMR_TEMPORARY_SINGLE_USER', 'true');
+  it('offers only central login in managed-local SSO builds', () => {
+    vi.stubEnv('VITE_FMR_MANAGED_LOCAL_SSO', 'true');
     vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'configured-but-disabled-client');
     render(
       <MemoryRouter>
@@ -138,7 +138,7 @@ describe('LoginPage accessibility and secure email flows', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/서버에서 발급한 단일 계정만 로그인/)).toBeVisible();
+    expect(screen.getByText(/중앙 관리자가 만든 통합 로그인 계정/)).toBeVisible();
     expect(
       screen.queryByRole('button', { name: '처음인가요? 계정 만들기' }),
     ).not.toBeInTheDocument();

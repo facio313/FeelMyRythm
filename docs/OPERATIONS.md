@@ -1,17 +1,19 @@
 # FeelMyRythm 운영 준비 및 검증
 
-## 현재 임시 단일 사용자 운영
+## 현재 임시 중앙 계정·로컬 저장 운영
 
-S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `FMR_DEPLOYMENT_PROFILE=single_user_local`을 명시한다. development fallback을 사용하지 않는다.
+S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `FMR_DEPLOYMENT_PROFILE=managed_local_sso`를 명시한다. development fallback을 사용하지 않는다.
 
 - `FMR_STORAGE_BACKEND=local`, `FMR_LOCAL_UPLOADS_DIR=/data/uploads`와 전용 named volume `feelmyrythm-fmr-uploads`를 사용한다. runtime image가 UID/GID 10001 소유의 mount point를 제공하며 volume·DB·Redis에 `down -v`를 실행하지 않는다.
 - 공개 register, verification resend, password reset, mail 기반 account-delete challenge는 닫는다. SMTP sender 대신 signed URL을 출력하지 않는 disabled sender를 사용한다.
-- `scripts/bootstrap_single_user.py`는 이 profile에서만 active password account 하나를 생성하거나 같은 계정의 password를 reset한다. 다른 active identity가 있으면 거부한다. `--generate-credentials-file`은 stdout에 password를 출력하지 않고 새 mode-0600 file만 만든다.
-- `bonifacio.work` browser 배포는 `FMR_SSO_ENABLED=true`와 `VITE_FMR_SSO_ENABLED=true`를 함께 고정한다. edge Authelia가 인증 header를 덮어쓰고 loopback origin으로 전달하며, `/api/auth/sso`는 같은 이메일의 기존 active owner만 앱 토큰으로 교환한다. 계정을 자동 생성하지 않고 local login·Google·email recovery·account deletion을 403으로 닫으며 logout은 중앙 SSO session도 끝낸다.
+- `scripts/bootstrap_single_user.py`는 기존 owner를 첫 SSO 연결 전에만 seed/reset하는 migration 도구다. 다른 active identity가 있거나 owner에 `sso_subject`가 이미 연결됐으면 거부한다. `--generate-credentials-file`은 stdout에 password를 출력하지 않고 새 mode-0600 file만 만든다. 중앙 연결 뒤에는 이 도구 대신 Bonifacio 관리자 화면에서 사용자를 만든다.
+- `bonifacio.work` browser 배포는 `FMR_SSO_ENABLED=true`, `VITE_FMR_SSO_ENABLED=true`, `VITE_FMR_MANAGED_LOCAL_SSO=true`를 함께 고정한다. `/api/auth/sso`는 stable `Remote-User` subject를 먼저 찾고, 미연결 unique email owner를 한 번 link하거나 새 중앙 identity를 verified active 앱 user로 provision한다. subject와 email이 서로 다른 row를 가리키면 409로 실패한다. local login·Google·email recovery·account deletion은 403으로 닫고 logout은 중앙 SSO session도 끝낸다.
+- 앱 전용 edge secret은 `openssl rand -hex 48` 같은 CSPRNG로 생성해 secret 본문에 trailing newline 없이 저장한다. rootless host 파일은 작은 regular file, `cks:cks`, mode 0640으로 만들고 경로만 Compose interpolation용 `FMR_SSO_EDGE_SECRET_FILE`에 둔다. Compose는 서버를 비-root UID 10001, GID 0으로 실행하며 read-only bind는 container의 `/run/secrets/fmr_sso_edge_secret`에서 `root:root` mode 0640으로 보여야 한다. 서버는 owner/group/mode와 effective GID 0을 시작 시 검증한다. secret 본문을 Compose·`.env`·nginx access log·CI output에 넣지 않는다. 환경변수 `FMR_SSO_EDGE_SECRET`은 개발/격리 테스트 fallback일 뿐 운영 기본이 아니다.
+- outer trusted proxy는 client가 보낸 `Remote-*`와 `X-Portfolio-Edge-Secret`을 제거·덮어쓰고, auth_request 결과의 subject/email/name과 위 파일의 앱 전용 secret을 loopback fmrWeb에 전달한다. 내부 nginx는 API와 WebSocket upstream 모두에 이 header를 명시 전달한다. 서버는 SSO exchange, 모든 bearer HTTP API, refresh, logout과 room·annotation WebSocket의 first-frame token 인증에서 secret과 `Remote-User == User.sso_subject`를 함께 검사한다. `/api/health`와 명시적 public HTTP 경로만 예외다.
 - target preflight는 SMTP를 명시적으로 skipped로 기록하고 S3 대신 local upload root의 runtime 접근성을 확인한다. 이 결과는 provider 준비나 object backup 완료를 뜻하지 않는다.
-- web release는 `VITE_FMR_TEMPORARY_SINGLE_USER=true`로 빌드한다. 첫 진입 dialog와 topbar 경고 버튼은 적용 중인 임시 조치와 S3 이관, SMTP, local backup, association, OMR 후속 작업을 계속 표시한다.
+- web release는 `VITE_FMR_MANAGED_LOCAL_SSO=true`로 빌드한다. 첫 진입 dialog와 topbar 경고 버튼은 적용 중인 임시 조치와 S3 이관, SMTP, local backup, association, OMR 후속 작업을 계속 표시한다.
 
-운영 계정 생성은 target image가 승격된 뒤 별도 mode-0700 operator directory를 만들고 one-shot container로 실행한다. credentials file을 안전한 password manager로 옮긴 뒤 서버 사본의 보존 여부를 결정한다. 계정의 실제 email과 display name은 운영자가 선택하며 비밀번호를 채팅·CI log·shell argument로 넘기지 않는다.
+기존 owner bootstrap이 필요한 경우에만 target image 승격 뒤 별도 mode-0700 operator directory와 one-shot container를 사용한다. credentials file을 안전한 password manager로 옮긴 뒤 서버 사본의 보존 여부를 결정한다. 새 운영 계정은 중앙 관리자 화면에서 만들고, 비밀번호나 edge secret을 채팅·CI log·shell argument로 넘기지 않는다.
 
 standard 전환 순서는 local volume backup → S3 bucket/CORS/lifecycle/credential 준비 → local object key·size 이관 검증 → SMTP domain/TLS/auth와 실제 수신 시험 → `FMR_DEPLOYMENT_PROFILE=standard` 및 S3 설정 전환 → non-skip provider preflight → public email workflow 시험 → temporary web build flag/dialog 제거다.
 
@@ -151,7 +153,7 @@ GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최
 5. 기존 서비스는 유지한 채 같은 env/network/default command의 target server canary를 `127.0.0.1:19175`에 기동한다. cleanup trap은 성공·실패 모두 canary를 제거한다.
 6. canary health 후 strict target-head preflight를 실행하고 target server, target web 순서로 승격한다. 두 container의 실제 image ID를 요청 image와 각각 비교한다.
 7. 내부·공개 health와 strict provider preflight를 다시 확인하고 비대상 container snapshot이 동일할 때만 revision을 기록한다.
-8. edge SSO cookie로 `/api/auth/sso`를 교환해 `/api/users/me`가 sole owner를 반환하는지 확인하고, local password login과 account deletion이 403인지 확인한다. client가 임의로 넣은 `Remote-*` header는 edge가 덮어쓰므로 SSO cookie 없이 origin data에 도달해서는 안 된다.
+8. edge SSO cookie로 `/api/auth/sso`를 교환해 기존 owner의 one-time subject link와 새 중앙 사용자의 auto-provision을 각각 확인한다. `/api/users/me`, refresh, logout과 room·annotation WebSocket join은 올바른 edge subject+secret에서만 성공하고 누락·오류 secret, 다른 subject, subject/email 충돌은 401/409 또는 WS `4401`로 fail-closed여야 한다. local password login과 account deletion은 403이며, client가 임의로 넣은 `Remote-*`/edge-secret header는 proxy가 덮어쓰므로 SSO cookie 없이 origin data에 도달해서는 안 된다.
 
 제한 배포기는 web/API infrastructure 복구를 위해 세 번의 target preflight에서 association만 명시적으로 skip한다. 따라서 배포 성공 자체는 mobile release 승인이 아니다. mobile release 전에는 실제 iOS Team ID와 Android signing certificate fingerprint로 두 association JSON을 공개한 뒤, promoted target container에서 `--skip-association` 없이 별도 preflight를 통과해야 한다.
 

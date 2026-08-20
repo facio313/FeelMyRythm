@@ -160,12 +160,12 @@ def run_preflight(args: argparse.Namespace) -> list[CheckResult]:
         )
     )
     results.append(_capture("redis", lambda: _check_redis(settings)))
-    if settings.deployment_profile == "single_user_local":
+    if settings.deployment_profile == "managed_local_sso":
         results.append(
             CheckResult(
                 "smtp",
                 "skipped",
-                "single-user local profile disables public email workflows",
+                "managed-local SSO profile disables public email workflows",
             )
         )
         results.append(_capture("local-storage", lambda: _check_local_storage(settings)))

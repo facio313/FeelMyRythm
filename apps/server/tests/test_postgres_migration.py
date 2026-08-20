@@ -9,6 +9,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine, delete, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from alembic import command
 from app.config import Settings
@@ -329,6 +330,22 @@ def test_pre_alembic_production_schema_is_migrated_without_losing_rows(
                     "legacy-device"
                 )
                 assert connection.scalar(text("SELECT password_hash FROM users")) is None
+                assert connection.scalar(text("SELECT sso_subject FROM users")) is None
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE users SET sso_subject = 'central-legacy' "
+                        "WHERE id = 'uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu'"
+                    )
+                )
+            with pytest.raises(DBAPIError, match="sso_subject is immutable"):
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "UPDATE users SET sso_subject = 'central-reassigned' "
+                            "WHERE id = 'uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu'"
+                        )
+                    )
         finally:
             engine.dispose()
     finally:

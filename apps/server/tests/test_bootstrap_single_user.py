@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import select
 
 from app.config import Settings
@@ -19,7 +20,9 @@ def single_user_settings(tmp_path: Path) -> Settings:
     database.dispose()
     return Settings(
         environment="test",
-        deployment_profile="single_user_local",
+        deployment_profile="managed_local_sso",
+        sso_enabled=True,
+        sso_edge_secret=SecretStr("test-fmr-edge-secret-with-at-least-32-characters"),
         database_url=database_url,
         jwt_secret="test-secret-generated-for-bootstrap-tests-123456789",
         local_uploads_dir=tmp_path / "uploads",
@@ -76,3 +79,28 @@ def test_bootstrap_refuses_a_second_active_identity(tmp_path: Path) -> None:
             display_name="Other",
             password="other-temporary-password",
         )
+
+
+def test_bootstrap_refuses_to_reintroduce_a_password_after_sso_link(tmp_path: Path) -> None:
+    settings = single_user_settings(tmp_path)
+    bootstrap_single_user(
+        settings,
+        email="owner@example.com",
+        display_name="Owner",
+        password="initial-owner-password",
+    )
+    database = Database(settings.database_url)
+    try:
+        with database.session_factory.begin() as session:
+            owner = session.scalar(select(User).where(User.email == "owner@example.com"))
+            assert owner is not None
+            owner.sso_subject = "central-owner"
+        with pytest.raises(BootstrapError, match="already linked"):
+            bootstrap_single_user(
+                settings,
+                email="owner@example.com",
+                display_name="Owner",
+                password="replacement-owner-password",
+            )
+    finally:
+        database.dispose()

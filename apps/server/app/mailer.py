@@ -337,7 +337,7 @@ class SmtpMailSender:
 
 
 def make_mail_sender(settings: Settings) -> MailSender:
-    if settings.deployment_profile == "single_user_local":
+    if settings.deployment_profile == "managed_local_sso":
         return DisabledMailSender()
     if settings.smtp_host and settings.smtp_host.strip():
         return SmtpMailSender(settings)

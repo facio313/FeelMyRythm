@@ -1,7 +1,7 @@
 import { Button, Modal, StatusBadge } from '@feelmyrythm/ui';
 import { CircleAlert } from 'lucide-react';
 import { useState } from 'react';
-import { temporarySingleUserModeEnabled } from '../lib/runtimeMode';
+import { managedLocalSsoModeEnabled } from '../lib/runtimeMode';
 
 export const temporaryOperationsTasks = [
   {
@@ -11,8 +11,8 @@ export const temporaryOperationsTasks = [
   },
   {
     status: '적용 중',
-    title: '중앙 통합 로그인으로 기존 단일 계정 연결',
-    detail: '앱의 회원가입, 로컬 로그인, 인증 메일, 비밀번호 재설정은 닫혀 있습니다.',
+    title: '중앙 통합 로그인 계정을 자동 연결',
+    detail: '중앙 관리자가 만든 계정은 고유 아이디로 연결되며 로컬 비밀번호 기능은 닫혀 있습니다.',
   },
   {
     status: '해야 함',
@@ -37,7 +37,7 @@ export const temporaryOperationsTasks = [
 ] as const;
 
 export function TemporaryOperationsNotice({
-  enabled = temporarySingleUserModeEnabled(),
+  enabled = managedLocalSsoModeEnabled(),
 }: {
   enabled?: boolean;
 }) {
@@ -65,7 +65,8 @@ export function TemporaryOperationsNotice({
       >
         <div className="temporary-operations">
           <p role="status">
-            현재는 한 명이 둘러보기 위한 제한 운영입니다. 아래 항목은 자동으로 완료되지 않습니다.
+            현재는 중앙 계정 관리와 서버 로컬 저장소를 사용하는 임시 운영입니다. 아래 후속 항목은
+            자동으로 완료되지 않습니다.
           </p>
           <ul className="temporary-operations__list">
             {temporaryOperationsTasks.map((task) => (

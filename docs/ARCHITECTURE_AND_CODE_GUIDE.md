@@ -254,6 +254,7 @@ stateDiagram-v2
 | 인증 메일 재전송 | `resendVerification` | `POST /api/auth/resend-verification`: cooldown과 새 generation으로 이전 link 무효화 |
 | 이메일 로그인 | `login` | `POST /api/auth/login`: active·verified·password 계정, dummy hash를 포함한 일정한 검증 경로 |
 | Google 로그인 | `loginWithGoogle` | `POST /api/auth/google`: Google audience·subject·verified email 검사, preclaim password 제거, 충돌 409 |
+| Portfolio SSO | `AuthProvider` 초기 exchange | `POST /api/auth/sso`: edge secret 검증, immutable subject 우선 조회, unique email legacy link 또는 managed-local verified user provision, 충돌 409 |
 | access 갱신 | `ApiClient.refresh` | `POST /api/auth/refresh`: refresh row lock/revoke/rotate. 권위 있는 401만 client session 삭제 |
 | 로그아웃 | `logout` | `POST /api/auth/logout` best effort 후 client session 즉시 제거 |
 | reset 요청 | `requestPasswordReset` | `POST /api/auth/request-password-reset`: 계정 존재를 숨기는 동일 응답과 cooldown |
@@ -271,8 +272,8 @@ stateDiagram-v2
 | refresh race | `ApiClient`는 동일 session generation의 refresh를 single-flight로 공유하고 늦은 옛 session 응답이 새 로그인을 덮지 못하게 한다. network/5xx는 기존 token을 지우지 않는다. |
 | 웹 저장 | access·refresh·user를 `fmr.auth.session.v1` 하나로 localStorage에 저장한다. HttpOnly cookie 모델이 아니므로 XSS 방어와 CSP가 중요하다. |
 | 네이티브 저장 | 플랫폼 adapter가 iOS Keychain의 ThisDeviceOnly 계열과 Android Keystore AES-GCM을 사용한다. Android cloud·device-transfer backup은 차단한다. |
-| REST 인증 | `Authorization: Bearer` → [`dependencies.py`](../apps/server/app/dependencies.py)의 `CurrentUser` → active·verified·현재 generation 확인. |
-| WS 인증 | query/cookie가 아니라 첫 `JOIN_ROOM` frame의 access token을 검증하고 membership을 확인한다. transport 명령마다 현재 role을 다시 읽는다. |
+| REST 인증 | `Authorization: Bearer` → [`dependencies.py`](../apps/server/app/dependencies.py)의 `CurrentUser` → active·verified·현재 generation 확인. SSO mode에서는 앱별 edge secret과 현재 `Remote-User == User.sso_subject`도 모든 bearer HTTP 요청에서 검사한다. |
+| WS 인증 | query/cookie가 아니라 첫 `JOIN_ROOM`/`JOIN_ANNOTATIONS` frame의 access token을 검증하고 membership을 확인한다. SSO mode에서는 같은 handshake의 trusted edge secret과 `Remote-User == User.sso_subject`도 요구하며, transport 명령마다 현재 role을 다시 읽는다. |
 | 역할 | `member < leader < owner`. owner는 그룹·멤버, leader 이상은 프로젝트·레퍼토리·템포맵·악보·방 transport를 관리한다. annotation은 작성자 또는 leader 이상의 별도 규칙을 적용한다. |
 
 앱 내부에는 IP 기반 rate limiter, CAPTCHA, trusted proxy IP parser가 없다. email별 cooldown과 bcrypt semaphore는 애플리케이션 보호층이고, 대규모 abuse 제한은 신뢰 가능한 nginx/CDN·메일 provider에서 별도로 구성해야 한다.
@@ -281,7 +282,7 @@ stateDiagram-v2
 
 | 위치 | 적용 내용 | 주의점 |
 | --- | --- | --- |
-| [`main.py`](../apps/server/app/main.py) CORS | 설정된 origin, credentials, GET/POST/PUT/PATCH/DELETE/OPTIONS, Authorization/Content-Type만 허용 | WebSocket에는 CORSMiddleware가 적용되지 않는다. WS의 실질 경계는 first-frame bearer+membership이다. |
+| [`main.py`](../apps/server/app/main.py) CORS | 설정된 origin, credentials, GET/POST/PUT/PATCH/DELETE/OPTIONS, Authorization/Content-Type만 허용 | WebSocket에는 CORSMiddleware가 적용되지 않는다. WS의 실질 경계는 first-frame bearer+membership이며 SSO mode에서는 edge subject+secret까지 포함한다. |
 | [`nginx.conf`](../nginx/nginx.conf) | `nosniff`, frame deny, base/object/frame CSP, strict referrer, HSTS, API `no-store`, index no-cache, hash asset immutable | direct Uvicorn/Vite 개발 경로에는 같은 nginx header가 없다. 현재 CSP는 완전한 `script-src` allowlist가 아니다. |
 | [`vite.config.ts`](../apps/web/vite.config.ts) PWA | `/api`를 navigation/runtime cache에서 제외하고 공개 image/font와 renderer만 cache | 인증 API를 Workbox Cache Storage에 넣지 않는다. |
 | [`pwaCache.ts`](../apps/web/src/lib/pwaCache.ts) | 구형 `fmr-api` cache 삭제 → 안전 generation worker 제어권 → legacy worker 종료 → 재삭제 | 어느 단계든 증명할 수 없으면 `main.tsx`가 앱 mount를 거부한다. |
@@ -305,6 +306,7 @@ Celery, RQ, APScheduler, Kubernetes CronJob이나 OS cron은 없다. API process
 | 설정군 | 주요 변수 | 기본·검증 의미 |
 | --- | --- | --- |
 | 환경·DB | `FMR_ENVIRONMENT`, `FMR_DATABASE_URL`, `FMR_AUTO_CREATE_SCHEMA` | 개발 기본 SQLite/auto-create. 운영은 PostgreSQL과 `false`를 강제하고 Alembic만 사용 |
+| Portfolio SSO | `FMR_DEPLOYMENT_PROFILE`, `FMR_SSO_ENABLED`, `FMR_SSO_EDGE_SECRET_FILE` (`FMR_SSO_EDGE_SECRET` fallback) | `managed_local_sso`는 SSO와 32–4096 printable byte 앱 전용 edge secret, 절대 local upload path를 강제하고 SMTP를 금지한다. rootless host는 `cks:cks` mode-0640 file을 read-only bind하고 Compose는 UID 10001/GID 0을 사용한다. 서버는 container `root:root` mode 0640과 effective GID 0을 검증하며 secret은 outer proxy와 server에만 둔다. |
 | JWT | `FMR_JWT_SECRET`, `FMR_JWT_ISSUER`, `FMR_ACCESS_TOKEN_MINUTES`, `FMR_REFRESH_TOKEN_DAYS` | 운영 secret 32자 이상·알려진 placeholder 거부. 개발에서 생략하면 process-random이라 재시작 시 기존 token 만료 |
 | Google | `FMR_GOOGLE_CLIENT_ID` | server ID-token audience. web build의 `VITE_GOOGLE_CLIENT_ID`와 같은 OAuth web client ID 사용 |
 | link | `FMR_WEB_APP_BASE_URL`, verification/reset/delete 만료·재요청 초 | 운영 HTTPS·query/fragment 없음. 기본 link 만료 verification/reset 30분, delete 15분 |
@@ -514,6 +516,7 @@ b881b6589baa  initial schema
 ### 인증
 
 - 브라우저 인증 상태는 하나의 `fmr.auth.session.v1` envelope로 저장한다: [`auth.tsx`](../apps/web/src/lib/auth.tsx).
+- managed-local browser SSO는 stable central subject로 앱 계정을 자동 연결·생성한다. access/refresh token만으로는 충분하지 않으며 동일 요청의 trusted edge secret과 현재 subject가 token 사용자에 묶여야 한다: [`sso.py`](../apps/server/app/sso.py).
 - access token 401은 refresh를 single-flight로 회전한다. 세대가 바뀐 늦은 응답은 새 로그인 세션을 덮지 못한다: [`api.ts`](../apps/web/src/lib/api.ts).
 - refresh endpoint의 확정 401만 세션을 제거한다. 네트워크 오류와 5xx는 기존 신원을 유지하고 재시도 가능한 오류로 전달한다.
 - 네이티브 refresh token은 Keychain/Keystore에 두며 브라우저 저장소와 섞지 않는다.

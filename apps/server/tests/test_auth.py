@@ -7,6 +7,7 @@ from threading import Event, Thread
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from app.config import Settings
@@ -26,12 +27,39 @@ from app.security import (
 
 from .conftest import FakeGoogleVerifier, FakeMailSender, auth, register
 
+SSO_EDGE_SECRET = "test-fmr-edge-secret-with-at-least-32-characters"
 
-def test_single_user_profile_disables_public_email_account_workflows(
+
+def sso_headers(
+    subject: str,
+    email: str,
+    *,
+    display_name: str = "Portfolio user",
+    edge_secret: str = SSO_EDGE_SECRET,
+) -> dict[str, str]:
+    return {
+        "Remote-User": subject,
+        "Remote-Email": email,
+        "Remote-Name": display_name,
+        "X-Portfolio-Edge-Secret": edge_secret,
+    }
+
+
+def managed_sso_settings(settings: Settings) -> Settings:
+    return settings.model_copy(
+        update={
+            "deployment_profile": "managed_local_sso",
+            "sso_enabled": True,
+            "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
+        }
+    )
+
+
+def test_managed_local_sso_profile_disables_local_account_workflows(
     settings: Settings,
     mail_sender: FakeMailSender,
 ) -> None:
-    limited = settings.model_copy(update={"deployment_profile": "single_user_local"})
+    limited = managed_sso_settings(settings)
     with TestClient(
         create_app(
             limited,
@@ -57,13 +85,8 @@ def test_single_user_profile_disables_public_email_account_workflows(
                 json={"idToken": "valid-google-token"},
             ),
         )
-        assert all(response.status_code == 503 for response in requests)
-        assert requests[0].json()["detail"] == "Public account enrollment is temporarily unavailable."
-        assert all(
-            response.json()["detail"] == "Email account workflows are temporarily unavailable."
-            for response in requests[1:3]
-        )
-        assert requests[3].json()["detail"] == "Public account enrollment is temporarily unavailable."
+        assert all(response.status_code == 403 for response in requests)
+        assert all(response.json()["detail"] == LOCAL_AUTH_DISABLED for response in requests)
         with limited_client.app.state.database.session_factory() as session:
             assert session.scalar(select(func.count()).select_from(User)) == 0
 
@@ -71,13 +94,11 @@ def test_single_user_profile_disables_public_email_account_workflows(
     assert mail_sender.password_reset_messages == []
 
 
-def test_sso_exchanges_only_an_existing_matching_active_identity(
+def test_sso_links_an_existing_owner_once_and_removes_local_credentials(
     settings: Settings,
     mail_sender: FakeMailSender,
 ) -> None:
-    sso_settings = settings.model_copy(
-        update={"deployment_profile": "single_user_local", "sso_enabled": True}
-    )
+    sso_settings = managed_sso_settings(settings)
     with TestClient(
         create_app(
             sso_settings,
@@ -99,30 +120,44 @@ def test_sso_exchanges_only_an_existing_matching_active_identity(
         assert (
             sso_client.post(
                 "/api/auth/sso",
-                headers={
-                    "Remote-User": "unknown@example.com",
-                    "Remote-Email": "unknown@example.com",
-                },
+                headers={"Remote-User": "owner", "Remote-Email": "owner@example.com"},
             ).status_code
-            == 403
+            == 401
         )
 
         exchanged = sso_client.post(
             "/api/auth/sso",
-            headers={
-                "Remote-User": "owner",
-                "Remote-Email": "OWNER@example.com",
-            },
+            headers=sso_headers("owner", "OWNER@example.com", display_name="Central owner"),
         )
         assert exchanged.status_code == 200, exchanged.text
         payload = exchanged.json()
         assert payload["user"]["email"] == "owner@example.com"
+        assert payload["user"]["displayName"] == "Central owner"
         assert payload["user"]["emailVerifiedAt"] is not None
-        assert sso_client.get("/api/users/me", headers=auth(payload["accessToken"])).status_code == 200
+        protected_headers = {
+            **auth(payload["accessToken"]),
+            **sso_headers("owner", "owner@example.com"),
+        }
+        assert sso_client.get("/api/users/me", headers=protected_headers).status_code == 200
+        with sso_client.app.state.database.session_factory() as session:
+            linked_owner = session.scalar(select(User).where(User.email == "owner@example.com"))
+            assert linked_owner is not None
+            assert linked_owner.sso_subject == "owner"
+            assert linked_owner.password_hash is None
+            assert linked_owner.email_verified_at is not None
+            with pytest.raises(ValueError, match="immutable"):
+                linked_owner.sso_subject = "reassigned-owner"
+            session.rollback()
+
+        conflicting_relink = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("different-owner", "owner@example.com"),
+        )
+        assert conflicting_relink.status_code == 409
         assert (
             sso_client.post(
                 "/api/users/me/delete-challenge",
-                headers=auth(payload["accessToken"]),
+                headers=protected_headers,
             ).status_code
             == 403
         )
@@ -130,7 +165,7 @@ def test_sso_exchanges_only_an_existing_matching_active_identity(
             sso_client.request(
                 "DELETE",
                 "/api/users/me",
-                headers=auth(payload["accessToken"]),
+                headers=protected_headers,
                 json={"email": "owner@example.com", "currentPassword": "legacy-password"},
             ).status_code
             == 403
@@ -141,7 +176,12 @@ def test_sso_mode_disables_local_credential_routes(
     settings: Settings,
     mail_sender: FakeMailSender,
 ) -> None:
-    sso_settings = settings.model_copy(update={"sso_enabled": True})
+    sso_settings = settings.model_copy(
+        update={
+            "sso_enabled": True,
+            "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
+        }
+    )
     with TestClient(
         create_app(
             sso_settings,
@@ -174,6 +214,156 @@ def test_sso_endpoint_is_not_available_when_disabled(client: TestClient) -> None
         headers={"Remote-User": "owner@example.com", "Remote-Email": "owner@example.com"},
     )
     assert response.status_code == 404
+
+
+def test_managed_sso_provisions_subject_first_and_fails_closed_on_collisions(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    with TestClient(
+        create_app(
+            managed_sso_settings(settings),
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=mail_sender,
+        )
+    ) as sso_client:
+        alpha = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-alpha", "alpha@example.com", display_name="Alpha"),
+        )
+        beta = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-beta", "beta@example.com", display_name="Beta"),
+        )
+        assert alpha.status_code == 200, alpha.text
+        assert beta.status_code == 200, beta.text
+        assert alpha.json()["user"]["emailVerifiedAt"] is not None
+
+        changed_email = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-alpha", "alpha-renamed@example.com"),
+        )
+        assert changed_email.status_code == 200, changed_email.text
+        assert changed_email.json()["user"]["id"] == alpha.json()["user"]["id"]
+        assert changed_email.json()["user"]["email"] == "alpha-renamed@example.com"
+
+        subject_email_collision = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-alpha", "beta@example.com"),
+        )
+        email_subject_collision = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-gamma", "beta@example.com"),
+        )
+        assert subject_email_collision.status_code == 409
+        assert email_subject_collision.status_code == 409
+        with sso_client.app.state.database.session_factory() as session:
+            users = session.scalars(select(User).order_by(User.email)).all()
+            assert len(users) == 2
+            assert {user.sso_subject for user in users} == {"central-alpha", "central-beta"}
+            assert all(user.is_active and user.email_verified_at is not None for user in users)
+            assert all(user.password_hash is None and user.google_subject is None for user in users)
+
+
+def test_standard_sso_does_not_implicitly_provision_unknown_users(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    standard_sso = settings.model_copy(
+        update={
+            "sso_enabled": True,
+            "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
+        }
+    )
+    with TestClient(create_app(standard_sso, mail_sender=mail_sender)) as sso_client:
+        response = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("unknown", "unknown@example.com"),
+        )
+    assert response.status_code == 403
+
+
+def test_sso_bearer_refresh_and_logout_require_matching_edge_identity(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    with TestClient(create_app(managed_sso_settings(settings), mail_sender=mail_sender)) as sso_client:
+        exchange = sso_client.post(
+            "/api/auth/sso",
+            headers=sso_headers("central-owner", "owner@example.com"),
+        )
+        assert exchange.status_code == 200, exchange.text
+        tokens = exchange.json()
+        bearer = auth(tokens["accessToken"])
+
+        assert sso_client.get("/api/health").status_code == 200
+        assert sso_client.get("/api/users/me", headers=bearer).status_code == 401
+        wrong_secret = sso_client.get(
+            "/api/users/me",
+            headers={
+                **bearer,
+                **sso_headers("central-owner", "owner@example.com", edge_secret="wrong"),
+            },
+        )
+        assert wrong_secret.status_code == 401
+        assert SSO_EDGE_SECRET not in wrong_secret.text
+        assert (
+            sso_client.get(
+                "/api/users/me",
+                headers={**bearer, **sso_headers("another-subject", "owner@example.com")},
+            ).status_code
+            == 401
+        )
+        assert (
+            sso_client.get(
+                "/api/users/me",
+                headers={**bearer, **sso_headers("central-owner", "owner@example.com")},
+            ).status_code
+            == 200
+        )
+
+        refresh_body = {"refreshToken": tokens["refreshToken"]}
+        assert sso_client.post("/api/auth/refresh", json=refresh_body).status_code == 401
+        assert (
+            sso_client.post(
+                "/api/auth/refresh",
+                headers=sso_headers("another-subject", "owner@example.com"),
+                json=refresh_body,
+            ).status_code
+            == 401
+        )
+        rotated = sso_client.post(
+            "/api/auth/refresh",
+            headers=sso_headers("central-owner", "owner@example.com"),
+            json=refresh_body,
+        )
+        assert rotated.status_code == 200, rotated.text
+
+        logout_body = {"refreshToken": rotated.json()["refreshToken"]}
+        assert (
+            sso_client.post(
+                "/api/auth/logout",
+                headers=sso_headers("another-subject", "owner@example.com"),
+                json=logout_body,
+            ).status_code
+            == 401
+        )
+        assert (
+            sso_client.post(
+                "/api/auth/logout",
+                headers=sso_headers("central-owner", "owner@example.com"),
+                json=logout_body,
+            ).status_code
+            == 200
+        )
+        assert (
+            sso_client.post(
+                "/api/auth/refresh",
+                headers=sso_headers("central-owner", "owner@example.com"),
+                json=logout_body,
+            ).status_code
+            == 401
+        )
 
 
 def test_health_email_auth_refresh_rotation_and_logout(client: TestClient) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -9,6 +10,7 @@ from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from alembic import command
 from app.config import UNSAFE_PRODUCTION_JWT_SECRETS, Settings
@@ -115,10 +117,12 @@ def test_production_email_verification_configuration_fails_closed() -> None:
         )
 
 
-def test_single_user_local_production_is_explicit_and_fail_closed() -> None:
+def test_managed_local_sso_production_is_explicit_and_fail_closed() -> None:
     base = {
         "environment": "production",
-        "deployment_profile": "single_user_local",
+        "deployment_profile": "managed_local_sso",
+        "sso_enabled": True,
+        "sso_edge_secret": "test-fmr-edge-secret-with-at-least-32-characters",
         "jwt_secret": "runtime-secret-with-at-least-32-characters",
         "database_url": "postgresql+psycopg://user:password@db/feelmyrythm",
         "auto_create_schema": False,
@@ -130,7 +134,8 @@ def test_single_user_local_production_is_explicit_and_fail_closed() -> None:
     }
     settings = Settings(**base)
     assert settings.public_email_workflows_enabled is False
-    assert settings.sso_enabled is False
+    assert settings.sso_enabled is True
+    assert settings.sso_edge_secret is not None
     assert settings.local_uploads_dir == Path("/data/uploads")
 
     with pytest.raises(ValidationError, match="FMR_STORAGE_BACKEND=local"):
@@ -143,6 +148,76 @@ def test_single_user_local_production_is_explicit_and_fail_closed() -> None:
             smtp_host="smtp.example.test",
             smtp_from_email="noreply@example.com",
         )
+    with pytest.raises(ValidationError, match="FMR_SSO_ENABLED=true"):
+        Settings(**{**base, "sso_enabled": False})
+    with pytest.raises(ValidationError, match="32 to 4096 printable characters"):
+        Settings(**{**base, "sso_edge_secret": "too-short"})
+
+
+def test_managed_local_sso_prefers_a_bounded_private_secret_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_file = tmp_path / "fmr-edge-secret"
+    file_secret = "file-backed-edge-secret-with-at-least-32-characters"
+    secret_file.write_text(file_secret, encoding="ascii")
+    secret_file.chmod(0o640)
+    real_fstat = os.fstat
+    effective_gid = {"value": 0}
+    container_ownership = {"uid": 0, "gid": 0}
+
+    def container_fstat(file_descriptor: int) -> os.stat_result:
+        metadata = list(real_fstat(file_descriptor))
+        metadata[4] = container_ownership["uid"]
+        metadata[5] = container_ownership["gid"]
+        return os.stat_result(metadata)
+
+    monkeypatch.setattr("app.config.os.fstat", container_fstat)
+    monkeypatch.setattr("app.config.os.getegid", lambda: effective_gid["value"])
+    base = {
+        "environment": "production",
+        "deployment_profile": "managed_local_sso",
+        "sso_enabled": True,
+        "sso_edge_secret": "different-fallback-secret-with-at-least-32-characters",
+        "sso_edge_secret_file": secret_file,
+        "jwt_secret": "runtime-secret-with-at-least-32-characters",
+        "database_url": "postgresql+psycopg://user:password@db/feelmyrythm",
+        "auto_create_schema": False,
+        "storage_backend": "local",
+        "local_uploads_dir": "/data/uploads",
+        "web_app_base_url": "https://bonifacio.work/feelmyrythm",
+        "public_api_base_url": "https://bonifacio.work/feelmyrythm",
+        "redis_url": "redis://fmrRedis:6379/0",
+    }
+    settings = Settings(**base)
+    assert settings.resolved_sso_edge_secret == file_secret
+
+    secret_file.chmod(0o600)
+    with pytest.raises(ValidationError, match="container mode 0640"):
+        Settings(**base)
+
+    secret_file.chmod(0o640)
+    container_ownership["uid"] = 10001
+    with pytest.raises(ValidationError, match="container root:root"):
+        Settings(**base)
+    container_ownership["uid"] = 0
+
+    effective_gid["value"] = 10001
+    with pytest.raises(ValidationError, match="effective GID 0"):
+        Settings(**base)
+    effective_gid["value"] = 0
+
+    secret_file.write_text("short", encoding="ascii")
+    with pytest.raises(ValidationError, match="32 to 4096 bytes") as error:
+        Settings(**base)
+    assert file_secret not in str(error.value)
+
+    secret_file.write_text("x" * 4097, encoding="ascii")
+    with pytest.raises(ValidationError, match="32 to 4096 bytes"):
+        Settings(**base)
+
+    with pytest.raises(ValidationError, match="regular file"):
+        Settings(**{**base, "sso_edge_secret_file": tmp_path})
 
 
 @pytest.mark.repository_contract
@@ -166,6 +241,8 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     assert settings.environment == "production"
     assert settings.deployment_profile == "standard"
     assert settings.sso_enabled is False
+    assert settings.sso_edge_secret is not None
+    assert settings.sso_edge_secret.get_secret_value() == ""
     assert settings.web_app_base_url == "https://bonifacio.work/feelmyrythm"
     assert settings.smtp_host == "smtp.example.com"
     assert str(settings.smtp_from_email) == "noreply@example.com"
@@ -207,15 +284,18 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
 def test_production_compose_passes_required_runtime_settings() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     compose = (repository_root / "docker-compose.prod.yml").read_text()
+    nginx = (repository_root / "nginx/nginx.conf").read_text()
     redis_service = compose.split("  fmrRedis:\n", 1)[1].split("\n  fmrServer:\n", 1)[0]
     server_service = compose.split("  fmrServer:\n", 1)[1].split("\n  fmrWeb:\n", 1)[0]
+    websocket_proxy = nginx.split("    location /feelmyrythm/ws/ {\n", 1)[1].split("\n    }", 1)[0]
     networks = compose.split("\nnetworks:\n", 1)[1].split("\nvolumes:\n", 1)[0]
     backend_network = networks.split("  feelmyrythm-backend:\n", 1)[1].split("\n  cksDB:\n", 1)[0]
     volumes = compose.split("\nvolumes:\n", 1)[1]
 
     required_lines = {
-        "FMR_DEPLOYMENT_PROFILE: single_user_local",
+        "FMR_DEPLOYMENT_PROFILE: managed_local_sso",
         "FMR_SSO_ENABLED: 'true'",
+        "FMR_SSO_EDGE_SECRET_FILE: /run/secrets/fmr_sso_edge_secret",
         "FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}",
         "FMR_REDIS_URL: redis://fmrRedis:6379/0",
         "FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}",
@@ -251,10 +331,24 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     assert "internal: true" in backend_network
     assert "fmr_redis_data:" in volumes
     assert "fmr_uploads:/data/uploads" in server_service
+    assert (
+        "${FMR_SSO_EDGE_SECRET_FILE:?set the cks-owned mode-0640 host secret path}:"
+        "/run/secrets/fmr_sso_edge_secret:ro" in server_service
+    )
+    assert "user: '10001:0'" in server_service
     assert "fmr_uploads:" in volumes
     assert "name: feelmyrythm-fmr-uploads" in volumes
     assert "FMR_SMTP_HOST:" not in server_service
     assert "FMR_S3_BUCKET:" not in server_service
+    assert "proxy_set_header X-Portfolio-Edge-Secret $http_x_portfolio_edge_secret;" in nginx
+    for trusted_header in (
+        "Remote-User",
+        "Remote-Email",
+        "Remote-Name",
+        "Remote-Groups",
+        "X-Portfolio-Edge-Secret",
+    ):
+        assert f"proxy_set_header {trusted_header} " in websocket_proxy
 
 
 @pytest.mark.repository_contract
@@ -265,15 +359,15 @@ def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
     server_dockerfile = (repository_root / "apps/server/Dockerfile").read_text()
     notice = (repository_root / "apps/web/src/components/TemporaryOperationsNotice.tsx").read_text()
 
-    assert "VITE_FMR_TEMPORARY_SINGLE_USER=true" in workflow
+    assert "VITE_FMR_MANAGED_LOCAL_SSO=true" in workflow
     assert "VITE_FMR_SSO_ENABLED=true" in workflow
-    assert "ARG VITE_FMR_TEMPORARY_SINGLE_USER=false" in web_dockerfile
+    assert "ARG VITE_FMR_MANAGED_LOCAL_SSO=false" in web_dockerfile
     assert "ARG VITE_FMR_SSO_ENABLED=false" in web_dockerfile
-    assert "ENV VITE_FMR_TEMPORARY_SINGLE_USER=${VITE_FMR_TEMPORARY_SINGLE_USER}" in web_dockerfile
+    assert "ENV VITE_FMR_MANAGED_LOCAL_SSO=${VITE_FMR_MANAGED_LOCAL_SSO}" in web_dockerfile
     assert "install -d -o 10001 -g 10001 -m 0750 /data/uploads" in server_dockerfile
     for task in (
         "악보 파일을 서버 전용 영구 볼륨에 저장",
-        "중앙 통합 로그인으로 기존 단일 계정 연결",
+        "중앙 통합 로그인 계정을 자동 연결",
         "AWS S3를 준비하고 로컬 악보 파일 이관",
         "SMTP 발송 도메인과 키 설정",
         "로컬 파일 백업과 복구 절차 확정",
@@ -407,7 +501,35 @@ def test_alembic_initial_migration_round_trip(tmp_path: Path, monkeypatch: pytes
     from sqlalchemy import create_engine
 
     engine = create_engine(f"sqlite:///{database_path}")
-    assert set(Base.metadata.tables) <= set(inspect(engine).get_table_names())
+    database_inspector = inspect(engine)
+    assert set(Base.metadata.tables) <= set(database_inspector.get_table_names())
+    assert any(column["name"] == "sso_subject" for column in database_inspector.get_columns("users"))
+    sso_indexes = [
+        index for index in database_inspector.get_indexes("users") if index["name"] == "ix_users_sso_subject"
+    ]
+    assert len(sso_indexes) == 1
+    assert sso_indexes[0]["unique"] == 1
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (
+                    id, email, display_name, password_hash, google_subject, sso_subject,
+                    email_verified_at, email_verification_sent_at, password_reset_sent_at,
+                    account_delete_sent_at, auth_generation, is_active, created_at, updated_at
+                ) VALUES (
+                    'sso-immutable-user', 'immutable@example.com', 'Immutable', NULL, NULL,
+                    'central-immutable', CURRENT_TIMESTAMP, NULL, NULL, NULL, 0, TRUE,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    with pytest.raises(IntegrityError, match="sso_subject is immutable"):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE users SET sso_subject = 'central-reassigned' WHERE id = 'sso-immutable-user'")
+            )
     command.downgrade(configuration, "base")
     assert inspect(engine).get_table_names() == ["alembic_version"]
     engine.dispose()

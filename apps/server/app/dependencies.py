@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .models import User
 from .security import authenticate_access_token
+from .sso import require_matching_sso_subject, trusted_sso_subject
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -27,13 +28,17 @@ AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
 def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     db: DbSession,
     settings: AppSettings,
 ) -> User:
     if credentials is None or credentials.scheme.casefold() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required")
-    return authenticate_access_token(db, settings, credentials.credentials)
+    user = authenticate_access_token(db, settings, credentials.credentials)
+    request_subject = trusted_sso_subject(request, settings)
+    require_matching_sso_subject(user.sso_subject, request_subject)
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

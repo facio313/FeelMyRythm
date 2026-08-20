@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import secrets
+import stat
 from functools import cached_property
 from pathlib import Path
 from typing import Literal
@@ -26,8 +28,10 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["development", "test", "production"] = "development"
-    deployment_profile: Literal["standard", "single_user_local"] = "standard"
+    deployment_profile: Literal["standard", "managed_local_sso"] = "standard"
     sso_enabled: bool = False
+    sso_edge_secret: SecretStr | None = None
+    sso_edge_secret_file: Path | None = None
     database_url: str = "sqlite:///./dev.db"
     auto_create_schema: bool = True
 
@@ -97,6 +101,10 @@ class Settings(BaseSettings):
     def validate_environment(self) -> Settings:
         smtp_host_configured = bool(self.smtp_host and self.smtp_host.strip())
         smtp_from_configured = self.smtp_from_email is not None
+        if self.sso_enabled:
+            _ = self.resolved_sso_edge_secret
+        elif self.deployment_profile == "managed_local_sso":
+            raise ValueError("managed-local SSO profile requires FMR_SSO_ENABLED=true")
         if self.environment == "production":
             if self.jwt_secret is None:
                 raise ValueError("FMR_JWT_SECRET is required in production")
@@ -122,14 +130,14 @@ class Settings(BaseSettings):
                     )
             else:
                 if self.storage_backend != "local":
-                    raise ValueError("single-user local production requires FMR_STORAGE_BACKEND=local")
+                    raise ValueError("managed-local SSO production requires FMR_STORAGE_BACKEND=local")
                 if not self.local_uploads_dir.is_absolute():
                     raise ValueError(
-                        "single-user local production requires an absolute FMR_LOCAL_UPLOADS_DIR"
+                        "managed-local SSO production requires an absolute FMR_LOCAL_UPLOADS_DIR"
                     )
                 if smtp_host_configured or smtp_from_configured:
                     raise ValueError(
-                        "single-user local production keeps SMTP disabled; use the standard "
+                        "managed-local SSO production keeps SMTP disabled; use the standard "
                         "profile after configuring email"
                     )
             web_app_url = urlsplit(self.web_app_base_url)
@@ -177,6 +185,69 @@ class Settings(BaseSettings):
     @property
     def public_email_workflows_enabled(self) -> bool:
         return self.deployment_profile == "standard"
+
+    @cached_property
+    def resolved_sso_edge_secret(self) -> str:
+        if self.sso_edge_secret_file is not None:
+            secret_path = self.sso_edge_secret_file
+            if self.environment == "production" and not secret_path.is_absolute():
+                raise ValueError("FMR_SSO_EDGE_SECRET_FILE must be absolute in production")
+            open_flags = os.O_RDONLY
+            if hasattr(os, "O_CLOEXEC"):
+                open_flags |= os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                open_flags |= os.O_NOFOLLOW
+            try:
+                file_descriptor = os.open(secret_path, open_flags)
+            except OSError as exc:
+                raise ValueError("FMR_SSO_EDGE_SECRET_FILE is not readable") from exc
+            try:
+                metadata = os.fstat(file_descriptor)
+                mode = stat.S_IMODE(metadata.st_mode)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError("FMR_SSO_EDGE_SECRET_FILE must be a regular file")
+                if self.environment == "production":
+                    if os.getegid() != 0:
+                        raise ValueError("production FMR_SSO_EDGE_SECRET_FILE requires effective GID 0")
+                    if metadata.st_uid != 0 or metadata.st_gid != 0:
+                        raise ValueError(
+                            "production FMR_SSO_EDGE_SECRET_FILE must be owned by container root:root"
+                        )
+                    if mode != 0o640:
+                        raise ValueError("production FMR_SSO_EDGE_SECRET_FILE must use container mode 0640")
+                elif mode & 0o177 or not mode & 0o400:
+                    raise ValueError("FMR_SSO_EDGE_SECRET_FILE must be owner-readable mode 0600 or 0400")
+                if metadata.st_size < 32 or metadata.st_size > 4096:
+                    raise ValueError("FMR_SSO_EDGE_SECRET_FILE must contain 32 to 4096 bytes")
+                raw_secret = os.read(file_descriptor, 4097)
+            except OSError as exc:
+                raise ValueError("FMR_SSO_EDGE_SECRET_FILE is not readable") from exc
+            finally:
+                os.close(file_descriptor)
+            secret_bytes = raw_secret.rstrip(b"\r\n")
+            if (
+                len(secret_bytes) < 32
+                or len(secret_bytes) > 4096
+                or any(byte < 33 or byte > 126 for byte in secret_bytes)
+            ):
+                raise ValueError("FMR_SSO_EDGE_SECRET_FILE must contain a 32 to 4096 byte printable secret")
+            return secret_bytes.decode("ascii")
+        if self.sso_edge_secret is None:
+            raise ValueError(
+                "FMR_SSO_EDGE_SECRET_FILE or FMR_SSO_EDGE_SECRET is required when SSO is enabled"
+            )
+        secret = self.sso_edge_secret.get_secret_value()
+        try:
+            secret_bytes = secret.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError("FMR_SSO_EDGE_SECRET must be printable ASCII") from exc
+        if (
+            len(secret_bytes) < 32
+            or len(secret_bytes) > 4096
+            or any(byte < 33 or byte > 126 for byte in secret_bytes)
+        ):
+            raise ValueError("FMR_SSO_EDGE_SECRET must contain 32 to 4096 printable characters")
+        return secret
 
     @cached_property
     def signing_secret(self) -> str:
