@@ -130,7 +130,8 @@ jobs:
     name: Request restricted server deployment
     needs: publish
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The host serializes portfolio deploys with a lock that may wait up to 20 minutes.
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: read

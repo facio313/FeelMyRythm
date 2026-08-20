@@ -127,6 +127,8 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
 
+GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최대 20분 대기할 수 있으므로 timeout을 40분으로 유지한다. 이 직렬화는 다른 Compose project가 동시에 변경되어 snapshot 검증이 무의미해지는 것을 막는다.
+
 1. target server/web와 pinned Redis image를 준비하고 전용 Redis를 healthy로 만든다. Redis AOF rewrite를 위해 host의 `vm.overcommit_memory=1`을 지속 설정하며, named volume을 삭제하지 않는다.
 2. FMR 이외의 모든 container name·ID를 snapshot한다.
 3. target `fmrServer` one-shot container에서 `--allow-database-behind` pre-migration provider/revision preflight를 실행한다.

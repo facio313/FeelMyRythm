@@ -102,6 +102,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 - 운영 Compose는 별도 DB를 생성하지 않는다. `fmrServer`를 외부 `cksDB` Docker 네트워크에 연결하고, `.env`의 `FMR_DATABASE_URL`로 공용 `cksDB` 안의 전용 DB/계정에 접속한다.
 - `bonifacio.work` RPi 배포는 host port가 없는 전용 `fmrRedis`를 내부 backend network에 두고 `FMR_REDIS_URL=redis://fmrRedis:6379/0`을 Compose에서 고정한다. 다른 앱의 Redis를 공유하거나 public network에 노출하지 않는다.
 - 배포 요청은 forced-command SSH 키를 통해 `deploy feelmyrythm <40-character-sha>`만 허용한다. 배포 과정에서 전역 image prune, stack-wide `down`, DB/volume 삭제를 실행하지 않는다.
+- GitHub deploy job timeout은 host의 최대 20분 전역 배포 lock 대기와 target 검증 시간을 모두 포함해야 하며 현재 40분보다 짧게 줄이지 않는다.
 - 배포기는 target image에서 설정·provider와 현재 Alembic revision이 target의 정확한 알려진 조상인지 pre-migration 검증하고 DB backup을 완료한 뒤 loopback canary를 먼저 기동한다. canary migration 뒤에는 strict target-head preflight를 다시 통과해야 한다. migration이 실행된 뒤 server health가 실패해도 schema와 맞지 않을 수 있는 이전 server image로 자동 복귀하지 않고 forward-fix를 요구한다. 독립적인 web image만 이전 web image로 복귀할 수 있다.
 
 ---
