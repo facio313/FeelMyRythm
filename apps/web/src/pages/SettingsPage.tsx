@@ -12,6 +12,7 @@ import {
 } from '../lib/accountDeletionChallenge';
 import { useAuth } from '../lib/auth';
 import { storageEstimate } from '../lib/localDb';
+import { portfolioSsoEnabled } from '../lib/runtimeMode';
 import { applyTheme, readStoredTheme, type AppTheme } from '../lib/theme';
 import {
   parseVisualOffsetMs,
@@ -55,6 +56,7 @@ export function SettingsPage() {
   const themeRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const processedAccountDeleteTokenRef = useRef<string | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+  const ssoMode = portfolioSsoEnabled();
   const visualOffsetMs = parseVisualOffsetMs(visualOffsetInput);
   const visualOffsetError =
     visualOffsetInput.trim() === ''
@@ -444,16 +446,18 @@ export function SettingsPage() {
               >
                 <LogOut size={18} aria-hidden /> 로그아웃
               </Button>
-              <Button variant="danger" onClick={openDeleteDialog}>
-                <Trash2 size={18} aria-hidden /> 계정 삭제
-              </Button>
+              {ssoMode ? null : (
+                <Button variant="danger" onClick={openDeleteDialog}>
+                  <Trash2 size={18} aria-hidden /> 계정 삭제
+                </Button>
+              )}
             </div>
           </Card>
         ) : null}
       </div>
 
       <Modal
-        open={Boolean(user && deleteOpen)}
+        open={Boolean(user && !ssoMode && deleteOpen)}
         onOpenChange={(open) => {
           if (!open) closeDeleteDialog();
         }}

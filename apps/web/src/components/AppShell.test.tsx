@@ -25,7 +25,10 @@ describe('AppShell', () => {
     authState.user = null;
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
 
   it('keeps five primary mobile destinations and exposes the rest in a focus-trapped dialog', () => {
     render(
@@ -93,6 +96,27 @@ describe('AppShell', () => {
       expect(link).toHaveAttribute('aria-current', 'page');
     }
     expect(screen.getByRole('button', { name: '더보기' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('removes app-local account deletion navigation in portfolio SSO mode', () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="settings" element={<PageHeader title="설정" description="테스트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('link', { name: '계정 삭제' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '더보기' }));
+    expect(
+      within(screen.getByRole('dialog', { name: '더보기' })).queryByRole('link', {
+        name: '계정 삭제',
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('sends signed-in users to the project repertoire picker instead of local practice', () => {

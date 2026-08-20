@@ -41,6 +41,7 @@ services:
     environment:
       FMR_ENVIRONMENT: production
       FMR_DEPLOYMENT_PROFILE: single_user_local
+      FMR_SSO_ENABLED: 'true'
       FMR_DATABASE_URL: ${FMR_DATABASE_URL:?set the dedicated cksDB database URL}
       FMR_AUTO_CREATE_SCHEMA: 'false'
       FMR_JWT_SECRET: ${FMR_JWT_SECRET:?set a production JWT secret}

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -78,6 +79,10 @@ PASSWORD_RESET_MESSAGE = "If a password account exists, a reset email has been s
 ACCOUNT_DELETE_MESSAGE = "If eligible, an account deletion confirmation email has been sent."
 EMAIL_WORKFLOWS_DISABLED = "Email account workflows are temporarily unavailable."
 PUBLIC_ENROLLMENT_DISABLED = "Public account enrollment is temporarily unavailable."
+LOCAL_AUTH_DISABLED = "Local account authentication is disabled; use portfolio single sign-on."
+SSO_IDENTITY_INVALID = "Single sign-on identity is missing or invalid."
+SSO_IDENTITY_NOT_PROVISIONED = "Single sign-on identity is not provisioned for this application."
+EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
 def _require_public_email_workflows(settings: AppSettings) -> None:
@@ -93,6 +98,14 @@ def _require_public_enrollment(settings: AppSettings) -> None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=PUBLIC_ENROLLMENT_DISABLED,
+        )
+
+
+def _require_local_account_authentication(settings: AppSettings) -> None:
+    if settings.sso_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=LOCAL_AUTH_DISABLED,
         )
 
 
@@ -234,6 +247,7 @@ def register(
     db: DbSession,
     settings: AppSettings,
 ) -> EmailVerificationPendingOut:
+    _require_local_account_authentication(settings)
     _require_public_enrollment(settings)
     _require_public_email_workflows(settings)
     email = normalize_email(str(body.email))
@@ -272,6 +286,7 @@ def verify_email(
     db: DbSession,
     settings: AppSettings,
 ) -> TokenPairOut:
+    _require_local_account_authentication(settings)
     try:
         user_id, token_email, token_generation = decode_email_verification_token(
             settings,
@@ -313,6 +328,7 @@ def resend_verification(
     db: DbSession,
     settings: AppSettings,
 ) -> MessageOut:
+    _require_local_account_authentication(settings)
     _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.email_verification_resend_seconds)
     email = normalize_email(str(body.email))
@@ -340,6 +356,7 @@ def request_password_reset(
     db: DbSession,
     settings: AppSettings,
 ) -> MessageOut:
+    _require_local_account_authentication(settings)
     _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.password_reset_request_seconds)
     user = db.scalar(select(User).where(User.email == normalize_email(str(body.email))).with_for_update())
@@ -364,6 +381,7 @@ def reset_password(
     db: DbSession,
     settings: AppSettings,
 ) -> MessageOut:
+    _require_local_account_authentication(settings)
     try:
         user_id, token_email, token_generation = decode_password_reset_token(settings, body.token)
     except TokenError as exc:
@@ -393,6 +411,7 @@ def login(
     db: DbSession,
     settings: AppSettings,
 ) -> TokenPairOut:
+    _require_local_account_authentication(settings)
     user = db.scalar(select(User).where(User.email == normalize_email(str(body.email))))
     password_verifier: PasswordVerifier = request.app.state.password_verifier
     comparable_hash = (
@@ -419,6 +438,7 @@ def login(
 
 @router.post("/google", response_model=TokenPairOut)
 def google_login(body: GoogleLoginIn, request: Request, db: DbSession, settings: AppSettings) -> TokenPairOut:
+    _require_local_account_authentication(settings)
     _require_public_enrollment(settings)
     if not settings.google_client_id:
         raise HTTPException(status_code=503, detail="Google OAuth is not configured")
@@ -467,6 +487,40 @@ def google_login(body: GoogleLoginIn, request: Request, db: DbSession, settings:
     return _token_response(db, settings, user)
 
 
+@router.post("/sso", response_model=TokenPairOut)
+def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPairOut:
+    if not settings.sso_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    remote_user = request.headers.get("Remote-User", "").strip()
+    remote_email = request.headers.get("Remote-Email", "").strip()
+    if not remote_user or not remote_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SSO_IDENTITY_INVALID)
+    try:
+        email = normalize_email(str(EMAIL_ADAPTER.validate_python(remote_email)))
+        username = normalize_email(str(EMAIL_ADAPTER.validate_python(remote_user)))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=SSO_IDENTITY_INVALID,
+        ) from exc
+    if username != email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SSO_IDENTITY_INVALID)
+
+    user = db.scalar(select(User).where(User.email == email).with_for_update())
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=SSO_IDENTITY_NOT_PROVISIONED,
+        )
+    if user.email_verified_at is None:
+        user.email_verified_at = utcnow()
+        user.email_verification_sent_at = None
+        db.commit()
+        db.refresh(user)
+    return _token_response(db, settings, user)
+
+
 @router.post("/refresh", response_model=TokenPairOut)
 def refresh(body: RefreshIn, db: DbSession, settings: AppSettings) -> TokenPairOut:
     user, access, refresh_token, expires_in = rotate_refresh_token(db, settings, body.refresh_token)
@@ -509,6 +563,7 @@ def request_account_delete_challenge(
     settings: AppSettings,
     user: CurrentUser,
 ) -> MessageOut:
+    _require_local_account_authentication(settings)
     _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.account_delete_request_seconds)
     account = db.scalar(select(User).where(User.id == user.id).with_for_update())
@@ -536,6 +591,7 @@ def delete_me(
     settings: AppSettings,
     user: CurrentUser,
 ) -> Response:
+    _require_local_account_authentication(settings)
     account = db.scalar(select(User).where(User.id == user.id).with_for_update())
     if account is None or not account.is_active:
         raise HTTPException(status_code=401, detail="inactive or missing user")

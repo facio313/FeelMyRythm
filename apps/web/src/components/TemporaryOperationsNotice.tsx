@@ -11,8 +11,8 @@ export const temporaryOperationsTasks = [
   },
   {
     status: '적용 중',
-    title: '서버에서 만든 단일 계정만 로그인',
-    detail: '공개 회원가입, 인증 메일, 비밀번호 재설정은 잠시 닫혀 있습니다.',
+    title: '중앙 통합 로그인으로 기존 단일 계정 연결',
+    detail: '앱의 회원가입, 로컬 로그인, 인증 메일, 비밀번호 재설정은 닫혀 있습니다.',
   },
   {
     status: '해야 함',

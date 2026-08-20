@@ -5,8 +5,9 @@
 S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `FMR_DEPLOYMENT_PROFILE=single_user_local`을 명시한다. development fallback을 사용하지 않는다.
 
 - `FMR_STORAGE_BACKEND=local`, `FMR_LOCAL_UPLOADS_DIR=/data/uploads`와 전용 named volume `feelmyrythm-fmr-uploads`를 사용한다. runtime image가 UID/GID 10001 소유의 mount point를 제공하며 volume·DB·Redis에 `down -v`를 실행하지 않는다.
-- 공개 register, verification resend, password reset, mail 기반 account-delete challenge는 503으로 닫는다. SMTP sender 대신 signed URL을 출력하지 않는 disabled sender를 사용한다.
+- 공개 register, verification resend, password reset, mail 기반 account-delete challenge는 닫는다. SMTP sender 대신 signed URL을 출력하지 않는 disabled sender를 사용한다.
 - `scripts/bootstrap_single_user.py`는 이 profile에서만 active password account 하나를 생성하거나 같은 계정의 password를 reset한다. 다른 active identity가 있으면 거부한다. `--generate-credentials-file`은 stdout에 password를 출력하지 않고 새 mode-0600 file만 만든다.
+- `bonifacio.work` browser 배포는 `FMR_SSO_ENABLED=true`와 `VITE_FMR_SSO_ENABLED=true`를 함께 고정한다. edge Authelia가 인증 header를 덮어쓰고 loopback origin으로 전달하며, `/api/auth/sso`는 같은 이메일의 기존 active owner만 앱 토큰으로 교환한다. 계정을 자동 생성하지 않고 local login·Google·email recovery·account deletion을 403으로 닫으며 logout은 중앙 SSO session도 끝낸다.
 - target preflight는 SMTP를 명시적으로 skipped로 기록하고 S3 대신 local upload root의 runtime 접근성을 확인한다. 이 결과는 provider 준비나 object backup 완료를 뜻하지 않는다.
 - web release는 `VITE_FMR_TEMPORARY_SINGLE_USER=true`로 빌드한다. 첫 진입 dialog와 topbar 경고 버튼은 적용 중인 임시 조치와 S3 이관, SMTP, local backup, association, OMR 후속 작업을 계속 표시한다.
 
@@ -150,6 +151,7 @@ GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최
 5. 기존 서비스는 유지한 채 같은 env/network/default command의 target server canary를 `127.0.0.1:19175`에 기동한다. cleanup trap은 성공·실패 모두 canary를 제거한다.
 6. canary health 후 strict target-head preflight를 실행하고 target server, target web 순서로 승격한다. 두 container의 실제 image ID를 요청 image와 각각 비교한다.
 7. 내부·공개 health와 strict provider preflight를 다시 확인하고 비대상 container snapshot이 동일할 때만 revision을 기록한다.
+8. edge SSO cookie로 `/api/auth/sso`를 교환해 `/api/users/me`가 sole owner를 반환하는지 확인하고, local password login과 account deletion이 403인지 확인한다. client가 임의로 넣은 `Remote-*` header는 edge가 덮어쓰므로 SSO cookie 없이 origin data에 도달해서는 안 된다.
 
 제한 배포기는 web/API infrastructure 복구를 위해 세 번의 target preflight에서 association만 명시적으로 skip한다. 따라서 배포 성공 자체는 mobile release 승인이 아니다. mobile release 전에는 실제 iOS Team ID와 Android signing certificate fingerprint로 두 association JSON을 공개한 뒤, promoted target container에서 `--skip-association` 없이 별도 preflight를 통과해야 한다.
 

@@ -107,6 +107,7 @@ jobs:
           build-args: |
             VITE_GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
             VITE_FMR_TEMPORARY_SINGLE_USER=true
+            VITE_FMR_SSO_ENABLED=true
           cache-from: type=gha,scope=feelmyrythm-web
           cache-to: type=gha,mode=max,scope=feelmyrythm-web
 

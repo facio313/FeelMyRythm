@@ -13,6 +13,7 @@ from app.config import Settings
 from app.mailer import EmailVerificationMessage, MailDeliveryError, MailDeliveryManager
 from app.main import create_app
 from app.models import RefreshSession, User, utcnow
+from app.routers.auth import LOCAL_AUTH_DISABLED
 from app.security import (
     DUMMY_PASSWORD_HASH,
     GoogleIdentity,
@@ -68,6 +69,121 @@ def test_single_user_profile_disables_public_email_account_workflows(
 
     assert mail_sender.messages == []
     assert mail_sender.password_reset_messages == []
+
+
+def test_sso_exchanges_only_an_existing_matching_active_identity(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    sso_settings = settings.model_copy(
+        update={"deployment_profile": "single_user_local", "sso_enabled": True}
+    )
+    with TestClient(
+        create_app(
+            sso_settings,
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=mail_sender,
+        )
+    ) as sso_client:
+        with sso_client.app.state.database.session_factory() as session:
+            owner = User(
+                email="owner@example.com",
+                display_name="Owner",
+                password_hash=hash_password("legacy-password"),
+                email_verified_at=None,
+            )
+            session.add(owner)
+            session.commit()
+
+        assert sso_client.post("/api/auth/sso").status_code == 401
+        assert (
+            sso_client.post(
+                "/api/auth/sso",
+                headers={
+                    "Remote-User": "other@example.com",
+                    "Remote-Email": "owner@example.com",
+                },
+            ).status_code
+            == 401
+        )
+        assert (
+            sso_client.post(
+                "/api/auth/sso",
+                headers={
+                    "Remote-User": "unknown@example.com",
+                    "Remote-Email": "unknown@example.com",
+                },
+            ).status_code
+            == 403
+        )
+
+        exchanged = sso_client.post(
+            "/api/auth/sso",
+            headers={
+                "Remote-User": "OWNER@example.com",
+                "Remote-Email": "OWNER@example.com",
+            },
+        )
+        assert exchanged.status_code == 200, exchanged.text
+        payload = exchanged.json()
+        assert payload["user"]["email"] == "owner@example.com"
+        assert payload["user"]["emailVerifiedAt"] is not None
+        assert sso_client.get("/api/users/me", headers=auth(payload["accessToken"])).status_code == 200
+        assert (
+            sso_client.post(
+                "/api/users/me/delete-challenge",
+                headers=auth(payload["accessToken"]),
+            ).status_code
+            == 403
+        )
+        assert (
+            sso_client.request(
+                "DELETE",
+                "/api/users/me",
+                headers=auth(payload["accessToken"]),
+                json={"email": "owner@example.com", "currentPassword": "legacy-password"},
+            ).status_code
+            == 403
+        )
+
+
+def test_sso_mode_disables_local_credential_routes(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    sso_settings = settings.model_copy(update={"sso_enabled": True})
+    with TestClient(
+        create_app(
+            sso_settings,
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=mail_sender,
+        )
+    ) as sso_client:
+        responses = (
+            sso_client.post(
+                "/api/auth/register",
+                json={"email": "owner@example.com", "displayName": "Owner"},
+            ),
+            sso_client.post(
+                "/api/auth/login",
+                json={"email": "owner@example.com", "password": "legacy-password"},
+            ),
+            sso_client.post("/api/auth/google", json={"idToken": "valid-google-token"}),
+            sso_client.post(
+                "/api/auth/request-password-reset",
+                json={"email": "owner@example.com"},
+            ),
+        )
+        assert all(response.status_code == 403 for response in responses)
+        assert all(response.json()["detail"] == LOCAL_AUTH_DISABLED for response in responses)
+
+
+def test_sso_endpoint_is_not_available_when_disabled(client: TestClient) -> None:
+    response = client.post(
+        "/api/auth/sso",
+        headers={"Remote-User": "owner@example.com", "Remote-Email": "owner@example.com"},
+    )
+    assert response.status_code == 404
 
 
 def test_health_email_auth_refresh_rotation_and_logout(client: TestClient) -> None:

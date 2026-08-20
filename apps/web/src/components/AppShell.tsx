@@ -23,6 +23,7 @@ import {
 } from 'react-router-dom';
 import { cn, Modal } from '@feelmyrythm/ui';
 import { useAuth } from '../lib/auth';
+import { portfolioSsoEnabled } from '../lib/runtimeMode';
 import { TemporaryOperationsNotice } from './TemporaryOperationsNotice';
 
 const navigation = [
@@ -72,12 +73,15 @@ export function AppShell() {
   const navigationType = useNavigationType();
   const { pathname } = location;
   const [moreOpen, setMoreOpen] = useState(false);
+  const visibleLegalNavigation = portfolioSsoEnabled()
+    ? legalNavigation.filter(({ to }) => to !== '/delete-account')
+    : legalNavigation;
   const scrollPositionsRef = useRef(new Map<string, { left: number; top: number }>());
   const activeLocationKeyRef = useRef<string | null>(null);
   const moreActive =
     pathname.startsWith('/login') ||
     mobileMore.some(({ to }) => isNavigationPathActive(pathname, to)) ||
-    legalNavigation.some(({ to }) => isNavigationPathActive(pathname, to));
+    visibleLegalNavigation.some(({ to }) => isNavigationPathActive(pathname, to));
 
   useEffect(() => {
     const closeTransientNavigation = () => setMoreOpen(false);
@@ -166,7 +170,7 @@ export function AppShell() {
           })}
         </nav>
         <nav className="sidebar__legal" aria-label="개인정보와 계정">
-          {legalNavigation.map(({ to, label }) => (
+          {visibleLegalNavigation.map(({ to, label }) => (
             <Link key={to} to={to} aria-current={pathname === to ? 'page' : undefined}>
               {label}
             </Link>
@@ -238,7 +242,7 @@ export function AppShell() {
             <UserRound size={22} aria-hidden />
             <span>{user ? `${user.displayName} 계정` : '로그인'}</span>
           </NavLink>
-          {legalNavigation.map(({ to, label }) => (
+          {visibleLegalNavigation.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}

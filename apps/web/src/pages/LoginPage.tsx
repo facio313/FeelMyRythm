@@ -10,7 +10,7 @@ import {
 } from '../lib/accountDeletionChallenge';
 import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { temporarySingleUserModeEnabled } from '../lib/runtimeMode';
+import { portfolioSsoEnabled, temporarySingleUserModeEnabled } from '../lib/runtimeMode';
 
 interface AuthFieldErrors {
   displayName?: string;
@@ -152,6 +152,7 @@ export function LoginPage() {
   const processedCompletionTokenRef = useRef<string | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
   const temporarySingleUserMode = temporarySingleUserModeEnabled();
+  const ssoMode = portfolioSsoEnabled();
 
   useEffect(() => {
     document.title = '로그인 · FeelMyRythm';
@@ -394,6 +395,24 @@ export function LoginPage() {
     } finally {
       setResending(false);
     }
+  }
+
+  if (ssoMode && !user) {
+    return (
+      <div className="page page--narrow auth-page">
+        <Card className="auth-card">
+          <LogIn className="auth-card__icon" size={40} aria-hidden />
+          <h1>통합 로그인 연결이 필요합니다</h1>
+          <p className="subtle" role="alert">
+            중앙 로그인은 확인됐지만 FeelMyRythm 소유자 계정과 연결하지 못했습니다. 페이지를 다시
+            열어 보거나 운영 설정을 확인해 주세요.
+          </p>
+          <Button variant="primary" onClick={() => window.location.reload()}>
+            다시 연결
+          </Button>
+        </Card>
+      </div>
+    );
   }
 
   if (passwordCompletion) {

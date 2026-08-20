@@ -175,10 +175,45 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 describe('AuthProvider native storage', () => {
+  it('exchanges the trusted portfolio identity before exposing the SSO session', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Portfolio Owner' };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      if (url.endsWith('/auth/sso')) {
+        return new Response(JSON.stringify({ ...tokens, user: ssoUser }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Portfolio Owner')).toBeInTheDocument();
+    expect(screen.getByText(tokens.accessToken)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/auth\/sso$/),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens,
+      user: ssoUser,
+    });
+  });
+
   it('migrates a complete legacy pair into one atomic envelope and removes it on logout', async () => {
     secureStorage.values.set('fmr.auth.tokens.v1', JSON.stringify(tokens));
     secureStorage.values.set('fmr.auth.user.v1', JSON.stringify(user));

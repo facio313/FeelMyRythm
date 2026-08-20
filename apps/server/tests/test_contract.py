@@ -130,6 +130,7 @@ def test_single_user_local_production_is_explicit_and_fail_closed() -> None:
     }
     settings = Settings(**base)
     assert settings.public_email_workflows_enabled is False
+    assert settings.sso_enabled is False
     assert settings.local_uploads_dir == Path("/data/uploads")
 
     with pytest.raises(ValidationError, match="FMR_STORAGE_BACKEND=local"):
@@ -164,6 +165,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
 
     assert settings.environment == "production"
     assert settings.deployment_profile == "standard"
+    assert settings.sso_enabled is False
     assert settings.web_app_base_url == "https://bonifacio.work/feelmyrythm"
     assert settings.smtp_host == "smtp.example.com"
     assert str(settings.smtp_from_email) == "noreply@example.com"
@@ -213,6 +215,7 @@ def test_production_compose_passes_required_runtime_settings() -> None:
 
     required_lines = {
         "FMR_DEPLOYMENT_PROFILE: single_user_local",
+        "FMR_SSO_ENABLED: 'true'",
         "FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}",
         "FMR_REDIS_URL: redis://fmrRedis:6379/0",
         "FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}",
@@ -263,12 +266,14 @@ def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
     notice = (repository_root / "apps/web/src/components/TemporaryOperationsNotice.tsx").read_text()
 
     assert "VITE_FMR_TEMPORARY_SINGLE_USER=true" in workflow
+    assert "VITE_FMR_SSO_ENABLED=true" in workflow
     assert "ARG VITE_FMR_TEMPORARY_SINGLE_USER=false" in web_dockerfile
+    assert "ARG VITE_FMR_SSO_ENABLED=false" in web_dockerfile
     assert "ENV VITE_FMR_TEMPORARY_SINGLE_USER=${VITE_FMR_TEMPORARY_SINGLE_USER}" in web_dockerfile
     assert "install -d -o 10001 -g 10001 -m 0750 /data/uploads" in server_dockerfile
     for task in (
         "악보 파일을 서버 전용 영구 볼륨에 저장",
-        "서버에서 만든 단일 계정만 로그인",
+        "중앙 통합 로그인으로 기존 단일 계정 연결",
         "AWS S3를 준비하고 로컬 악보 파일 이관",
         "SMTP 발송 도메인과 키 설정",
         "로컬 파일 백업과 복구 절차 확정",
@@ -294,6 +299,7 @@ def test_openapi_exposes_http_and_websocket_source_schemas(client: TestClient) -
     assert "/api/scores/{score_id}/omr-drafts" in document["paths"]
     assert "/api/omr-drafts/{job_id}" in document["paths"]
     for auth_path in (
+        "/api/auth/sso",
         "/api/auth/register",
         "/api/auth/verify-email",
         "/api/auth/resend-verification",

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     deployment_profile: Literal["standard", "single_user_local"] = "standard"
+    sso_enabled: bool = False
     database_url: str = "sqlite:///./dev.db"
     auto_create_schema: bool = True
 

@@ -4667,6 +4667,27 @@
         ]
       }
     },
+    "/api/auth/sso": {
+      "post": {
+        "operationId": "sso_login_api_auth_sso_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sso Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/verify-email": {
       "post": {
         "operationId": "verify_email_api_auth_verify_email_post",

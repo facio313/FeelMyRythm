@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { ApiClient, type TokenPair } from './api';
 import { localDb } from './localDb';
+import { portfolioSsoEnabled } from './runtimeMode';
 
 const TOKEN_KEY = 'fmr.auth.tokens.v1';
 const USER_KEY = 'fmr.auth.user.v1';
@@ -75,6 +76,15 @@ function hasCurrentUserEnvelope(user: AuthUser | null): user is AuthUser {
   return Boolean(user && typeof user.hasPassword === 'boolean');
 }
 
+function tokenPairFromResponse(payload: AuthResponse): TokenPair {
+  return {
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    tokenType: payload.tokenType,
+    expiresIn: payload.expiresIn,
+  };
+}
+
 async function removePlatformAuth(): Promise<void> {
   await Promise.all(WEB_AUTH_KEYS.map((key) => platformStorage.removeItem(key)));
 }
@@ -135,6 +145,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let nextTokens = atomicSession?.tokens ?? parseJson<TokenPair>(legacyTokenValue);
       let nextUser = atomicSession?.user ?? parseJson<AuthUser>(legacyUserValue);
       let sessionNeedsUpgrade = !atomicSession;
+
+      if (portfolioSsoEnabled()) {
+        const ssoClient = new ApiClient(
+          () => null,
+          () => undefined,
+        );
+        const payload = await ssoClient.request<AuthResponse>(
+          '/auth/sso',
+          { method: 'POST' },
+          { authenticated: false, retryAuth: false },
+        );
+        nextTokens = tokenPairFromResponse(payload);
+        nextUser = payload.user;
+        sessionNeedsUpgrade = true;
+      }
 
       if (nextTokens && !hasCurrentUserEnvelope(nextUser)) {
         sessionNeedsUpgrade = true;
@@ -209,12 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const finishLogin = useCallback(
     async (payload: AuthResponse) => {
-      const nextTokens: TokenPair = {
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
-        tokenType: payload.tokenType,
-        expiresIn: payload.expiresIn,
-      };
+      const nextTokens = tokenPairFromResponse(payload);
       await enqueueStorage(() =>
         platformStorage.setItem(SESSION_KEY, storedSession(nextTokens, payload.user)),
       );
@@ -370,6 +390,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     writeTokens(null);
     authRuntime.setUser(null);
     setUser(null);
+    if (portfolioSsoEnabled()) {
+      const returnUrl = `${window.location.origin}/feelmyrythm/`;
+      window.location.assign(`/sso/logout?rd=${encodeURIComponent(returnUrl)}`);
+    }
   }, [client, writeTokens]);
 
   const value = useMemo(

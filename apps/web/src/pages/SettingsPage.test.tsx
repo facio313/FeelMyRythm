@@ -184,6 +184,14 @@ describe('SettingsPage visual offset', () => {
     expect(screen.getByText('연습 설정을 저장했습니다.')).toBeInTheDocument();
   });
 
+  it('keeps account deletion out of the app when portfolio SSO owns the identity', () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    renderSettings();
+
+    expect(screen.getByText('Settings Player · settings@example.test')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '계정 삭제' })).not.toBeInTheDocument();
+  });
+
   it('uses roving focus and arrow/Home/End keys for theme radios', () => {
     const themeColorMeta = document.createElement('meta');
     themeColorMeta.name = 'theme-color';
