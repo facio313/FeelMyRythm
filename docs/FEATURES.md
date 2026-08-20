@@ -194,12 +194,13 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | DB와 migration | SQLAlchemy 2 모델과 Alembic migration을 사용한다. 개발·test는 SQLite를 쓸 수 있고 운영·CI migration은 PostgreSQL을 대상으로 한다. | [models.py](../apps/server/app/models.py), [alembic](../apps/server/alembic), [test_postgres_migration.py](../apps/server/tests/test_postgres_migration.py) |
 | 권한 경계 | 그룹 역할과 객체 소유 관계를 공통 helper에서 검사하고 존재하지 않음과 접근 불가를 안전하게 처리한다. | [access.py](../apps/server/app/access.py), [test_permissions_revision.py](../apps/server/tests/test_permissions_revision.py) |
 | revision·원자성 | 템포맵, MeasureMap, annotation은 `expectedRevision`으로 낙관적 동시성을 적용한다. Score metadata+MeasureMap은 한 transaction으로 저장한다. | [repertoire.py](../apps/server/app/routers/repertoire.py), [scores.py](../apps/server/app/routers/scores.py) |
-| 로컬·S3 객체 저장 | 개발/test에서는 서명된 local upload URL, 운영에서는 S3 presigned staging upload와 download URL을 사용한다. | [storage.py](../apps/server/app/storage.py), [config.py](../apps/server/app/config.py) |
+| 로컬·S3 객체 저장 | 개발/test와 명시적 임시 single-user 운영에서는 서명된 local upload URL을 쓰고, standard 운영에서는 S3 presigned staging upload와 download URL을 사용한다. | [storage.py](../apps/server/app/storage.py), [config.py](../apps/server/app/config.py) |
 | durable 객체 삭제 | Score·레퍼토리·프로젝트·그룹·계정 삭제 transaction이 객체 키를 outbox에 기록하고 worker가 lease·멱등 삭제·지수 backoff로 계속 재시도한다. | [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py), [storage_cleanup.py](../apps/server/app/routers/storage_cleanup.py), [test_storage_lifecycle.py](../apps/server/tests/test_storage_lifecycle.py) |
 | 미완료 업로드 회수 | 만료 pending upload와 staging 객체를 reaper가 회수하며 late upload guard가 삭제 뒤 늦게 도착한 객체도 다시 제거한다. | [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py), [test_storage_lifecycle.py](../apps/server/tests/test_storage_lifecycle.py) |
 | 실시간 프로토콜 | 첫 frame의 access-token `JOIN_ROOM`, PING/PONG, READY, START/STOP/SEEK와 typed server envelope를 제공한다. | [ws.py](../apps/server/app/ws.py), [schemas.py](../apps/server/app/schemas.py), [test_websocket.py](../apps/server/tests/test_websocket.py) |
 | 서버 생명주기 | 앱 시작·종료 때 DB, bounded mail workers, storage lifecycle worker, room manager를 순서대로 시작하고 정리한다. | [main.py](../apps/server/app/main.py) |
-| 운영 fail-fast | production에서 S3 bucket/region, storage worker, JWT·웹 URL·SMTP 등 필수 설정이 없거나 안전하지 않으면 시작을 거부한다. | [config.py](../apps/server/app/config.py), [docker-compose.prod.yml](../docker-compose.prod.yml) |
+| 운영 fail-fast | standard production에서 S3 bucket/region, storage worker, JWT·웹 URL·SMTP 등 필수 설정이 없거나 안전하지 않으면 시작을 거부한다. | [config.py](../apps/server/app/config.py), [docker-compose.prod.yml](../docker-compose.prod.yml) |
+| 임시 단일 사용자 운영 | 명시적 `single_user_local` production만 persistent local volume과 서버 bootstrap 단일 계정을 허용하고 public email account workflow를 닫는다. 웹은 적용 중인 제한과 standard 전환 TODO를 자동 dialog와 topbar 버튼으로 보여 준다. | [bootstrap_single_user.py](../apps/server/scripts/bootstrap_single_user.py), [TemporaryOperationsNotice.tsx](../apps/web/src/components/TemporaryOperationsNotice.tsx) |
 
 ## 11. 빌드, 배포와 자동 검증
 

@@ -21,7 +21,7 @@ COPY app ./app
 COPY scripts ./scripts
 COPY tests ./tests
 RUN uv run ruff check app tests scripts alembic \
-    && uv run mypy app \
+    && uv run mypy app scripts/production_preflight.py scripts/bootstrap_single_user.py \
     && uv run pytest -m "not repository_contract"
 
 FROM base AS development
@@ -39,7 +39,8 @@ COPY alembic ./alembic
 COPY app ./app
 COPY scripts ./scripts
 RUN groupadd --system --gid 10001 feelmyrythm \
-    && useradd --system --uid 10001 --gid feelmyrythm --home-dir /nonexistent --shell /usr/sbin/nologin feelmyrythm
+    && useradd --system --uid 10001 --gid feelmyrythm --home-dir /nonexistent --shell /usr/sbin/nologin feelmyrythm \
+    && install -d -o 10001 -g 10001 -m 0750 /data/uploads
 USER 10001:10001
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

@@ -2,7 +2,9 @@ FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e
 WORKDIR /workspace
 
 ARG VITE_GOOGLE_CLIENT_ID
+ARG VITE_FMR_TEMPORARY_SINGLE_USER=false
 ENV VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+ENV VITE_FMR_TEMPORARY_SINGLE_USER=${VITE_FMR_TEMPORARY_SINGLE_USER}
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json

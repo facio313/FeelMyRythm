@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["development", "test", "production"] = "development"
+    deployment_profile: Literal["standard", "single_user_local"] = "standard"
     database_url: str = "sqlite:///./dev.db"
     auto_create_schema: bool = True
 
@@ -106,16 +107,30 @@ class Settings(BaseSettings):
                 raise ValueError("production requires a PostgreSQL FMR_DATABASE_URL")
             if self.auto_create_schema:
                 raise ValueError("production must use Alembic (FMR_AUTO_CREATE_SCHEMA=false)")
-            if self.storage_backend != "s3":
-                raise ValueError("production requires FMR_STORAGE_BACKEND=s3")
             if not self.storage_worker_enabled:
                 raise ValueError("production requires FMR_STORAGE_WORKER_ENABLED=true")
-            if not self.s3_region or not self.s3_region.strip():
-                raise ValueError("FMR_S3_REGION is required for production S3 storage")
-            if not smtp_host_configured or not smtp_from_configured:
-                raise ValueError(
-                    "production requires FMR_SMTP_HOST and FMR_SMTP_FROM_EMAIL for email verification"
-                )
+            if self.deployment_profile == "standard":
+                if self.storage_backend != "s3":
+                    raise ValueError("standard production requires FMR_STORAGE_BACKEND=s3")
+                if not self.s3_region or not self.s3_region.strip():
+                    raise ValueError("FMR_S3_REGION is required for production S3 storage")
+                if not smtp_host_configured or not smtp_from_configured:
+                    raise ValueError(
+                        "standard production requires FMR_SMTP_HOST and FMR_SMTP_FROM_EMAIL "
+                        "for email verification"
+                    )
+            else:
+                if self.storage_backend != "local":
+                    raise ValueError("single-user local production requires FMR_STORAGE_BACKEND=local")
+                if not self.local_uploads_dir.is_absolute():
+                    raise ValueError(
+                        "single-user local production requires an absolute FMR_LOCAL_UPLOADS_DIR"
+                    )
+                if smtp_host_configured or smtp_from_configured:
+                    raise ValueError(
+                        "single-user local production keeps SMTP disabled; use the standard "
+                        "profile after configuring email"
+                    )
             web_app_url = urlsplit(self.web_app_base_url)
             if web_app_url.scheme != "https" or not web_app_url.netloc:
                 raise ValueError("production FMR_WEB_APP_BASE_URL must be an absolute https URL")
@@ -157,6 +172,10 @@ class Settings(BaseSettings):
         ):
             raise ValueError("FMR_REDIS_KEY_PREFIX must be non-empty and contain no whitespace")
         return self
+
+    @property
+    def public_email_workflows_enabled(self) -> bool:
+        return self.deployment_profile == "standard"
 
     @cached_property
     def signing_secret(self) -> str:

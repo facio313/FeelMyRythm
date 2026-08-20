@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import smtplib
 import ssl
 import sys
@@ -159,18 +160,28 @@ def run_preflight(args: argparse.Namespace) -> list[CheckResult]:
         )
     )
     results.append(_capture("redis", lambda: _check_redis(settings)))
-    results.append(
-        _capture(
-            "smtp",
-            lambda: _check_smtp(settings, test_recipient=args.send_test_email),
+    if settings.deployment_profile == "single_user_local":
+        results.append(
+            CheckResult(
+                "smtp",
+                "skipped",
+                "single-user local profile disables public email workflows",
+            )
         )
-    )
-    results.append(
-        _capture(
-            "s3",
-            lambda: _check_s3(settings, exercise=args.exercise_s3),
+        results.append(_capture("local-storage", lambda: _check_local_storage(settings)))
+    else:
+        results.append(
+            _capture(
+                "smtp",
+                lambda: _check_smtp(settings, test_recipient=args.send_test_email),
+            )
         )
-    )
+        results.append(
+            _capture(
+                "s3",
+                lambda: _check_s3(settings, exercise=args.exercise_s3),
+            )
+        )
     results.append(_capture("public-health", lambda: _check_public_health(settings)))
     if args.skip_association:
         results.append(CheckResult("association-files", "skipped", "explicitly skipped"))
@@ -324,6 +335,15 @@ def _check_s3(settings: Settings, *, exercise: bool) -> str:
         f"{summary['stagingLifecycleRules']} staging lifecycle rule(s)"
         + ("; canary put/head/delete passed" if exercise else "")
     )
+
+
+def _check_local_storage(settings: Settings) -> str:
+    root = settings.local_uploads_dir.resolve()
+    if not root.is_dir():
+        raise ValueError("local upload root does not exist")
+    if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
+        raise ValueError("local upload root is not accessible to the runtime user")
+    return "persistent local upload root is accessible"
 
 
 def _check_public_health(settings: Settings) -> str:

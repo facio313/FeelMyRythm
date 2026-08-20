@@ -10,6 +10,7 @@ import {
 } from '../lib/accountDeletionChallenge';
 import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { temporarySingleUserModeEnabled } from '../lib/runtimeMode';
 
 interface AuthFieldErrors {
   displayName?: string;
@@ -150,6 +151,7 @@ export function LoginPage() {
   const passwordConfirmationRef = useRef<HTMLInputElement>(null);
   const processedCompletionTokenRef = useRef<string | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+  const temporarySingleUserMode = temporarySingleUserModeEnabled();
 
   useEffect(() => {
     document.title = '로그인 · FeelMyRythm';
@@ -676,6 +678,12 @@ export function LoginPage() {
         <p className="subtle">
           솔로 메트로놈은 로그인 없이 쓸 수 있습니다. 그룹 공유와 동기 세션에는 계정이 필요합니다.
         </p>
+        {temporarySingleUserMode ? (
+          <p className="auth-card__google-note" role="status">
+            현재는 서버에서 발급한 단일 계정만 로그인할 수 있습니다. 회원가입과 이메일 재설정은 SMTP
+            설정 후 다시 열립니다.
+          </p>
+        ) : null}
         {accountDeletionRequested ? (
           accountDeletionChallenge.kind === 'login-required' ? (
             <p role="status">탈퇴 확인 링크를 계속하려면 링크를 요청한 계정으로 로그인해 주세요.</p>
@@ -692,16 +700,16 @@ export function LoginPage() {
             링크는 새로고침 후 복원하지 않습니다. 받은 메일의 링크를 다시 열어 주세요.
           </p>
         ) : null}
-        {googleClientId && !nativeBridge.native ? (
+        {!temporarySingleUserMode && googleClientId && !nativeBridge.native ? (
           <GoogleSignInButton clientId={googleClientId} onCredential={submitGoogleCredential} />
-        ) : (
+        ) : temporarySingleUserMode ? null : (
           <p className="auth-card__google-note" role="status">
             {nativeBridge.native
               ? '모바일 앱에서는 이메일 가입과 로그인만 지원합니다.'
               : '현재 배포에서는 Google 로그인이 설정되지 않았습니다. 아래 이메일 로그인을 이용해 주세요.'}
           </p>
         )}
-        {googleClientId && !nativeBridge.native ? (
+        {!temporarySingleUserMode && googleClientId && !nativeBridge.native ? (
           <div className="auth-card__divider" aria-hidden>
             <span>또는</span>
           </div>
@@ -782,24 +790,26 @@ export function LoginPage() {
             {submitting ? '처리 중…' : mode === 'login' ? '로그인' : '계정 만들기'}
           </Button>
           {mode === 'login' ? (
-            <>
-              <Button
-                type="button"
-                onClick={() => {
-                  setResetRequestOpen(true);
-                  setResetRequestSent(false);
-                  setFieldErrors({});
-                  setSubmitError(undefined);
-                }}
-              >
-                <KeyRound size={18} aria-hidden />
-                비밀번호를 잊으셨나요?
-              </Button>
-              <Button type="button" disabled={resending} onClick={() => void resend()}>
-                <RotateCw size={18} aria-hidden />
-                {resending ? '전송 중…' : '인증 메일 다시 보내기'}
-              </Button>
-            </>
+            temporarySingleUserMode ? null : (
+              <>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setResetRequestOpen(true);
+                    setResetRequestSent(false);
+                    setFieldErrors({});
+                    setSubmitError(undefined);
+                  }}
+                >
+                  <KeyRound size={18} aria-hidden />
+                  비밀번호를 잊으셨나요?
+                </Button>
+                <Button type="button" disabled={resending} onClick={() => void resend()}>
+                  <RotateCw size={18} aria-hidden />
+                  {resending ? '전송 중…' : '인증 메일 다시 보내기'}
+                </Button>
+              </>
+            )
           ) : null}
           {submitError ? (
             <p id="auth-form-error" className="auth-form-error" role="alert">
@@ -807,18 +817,20 @@ export function LoginPage() {
             </p>
           ) : null}
         </form>
-        <button
-          className="auth-card__mode"
-          type="button"
-          onClick={() => {
-            setMode((current) => (current === 'login' ? 'register' : 'login'));
-            setPassword('');
-            setFieldErrors({});
-            setSubmitError(undefined);
-          }}
-        >
-          {mode === 'login' ? '처음인가요? 계정 만들기' : '이미 계정이 있나요? 로그인'}
-        </button>
+        {temporarySingleUserMode ? null : (
+          <button
+            className="auth-card__mode"
+            type="button"
+            onClick={() => {
+              setMode((current) => (current === 'login' ? 'register' : 'login'));
+              setPassword('');
+              setFieldErrors({});
+              setSubmitError(undefined);
+            }}
+          >
+            {mode === 'login' ? '처음인가요? 계정 만들기' : '이미 계정이 있나요? 로그인'}
+          </button>
+        )}
       </Card>
     </div>
   );

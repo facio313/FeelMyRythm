@@ -17,12 +17,14 @@ database_container="fmr-runtime-db-${run_suffix}"
 redis_container="fmr-runtime-redis-${run_suffix}"
 server_container="fmr-runtime-server-${run_suffix}"
 web_container="fmr-runtime-web-${run_suffix}"
+local_upload_volume="fmr-runtime-uploads-${run_suffix}"
 temporary_directory="$(mktemp -d)"
 
 cleanup() {
   docker rm --force "$web_container" "$server_container" "$redis_container" "$database_container" \
     >/dev/null 2>&1 || true
   docker network rm "$network_name" >/dev/null 2>&1 || true
+  docker volume rm "$local_upload_volume" >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
 }
 trap cleanup EXIT
@@ -88,6 +90,7 @@ docker run --detach \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
   --env FMR_ENVIRONMENT=production \
+  --env FMR_DEPLOYMENT_PROFILE=standard \
   --env "FMR_DATABASE_URL=postgresql+psycopg://feelmyrythm:${database_password}@postgres:5432/feelmyrythm" \
   --env FMR_AUTO_CREATE_SCHEMA=false \
   --env "FMR_JWT_SECRET=${jwt_secret}" \
@@ -128,6 +131,26 @@ docker exec "$server_container" sh -c \
   'command -v alembic >/dev/null && command -v uvicorn >/dev/null && test ! -w / && test ! -w /app && test -w /tmp' \
   >/dev/null
 
+docker volume create "$local_upload_volume" >/dev/null
+docker run --rm \
+  --network "$network_name" \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+  --volume "${local_upload_volume}:/data/uploads" \
+  --env FMR_ENVIRONMENT=production \
+  --env FMR_DEPLOYMENT_PROFILE=single_user_local \
+  --env "FMR_DATABASE_URL=postgresql+psycopg://feelmyrythm:${database_password}@postgres:5432/feelmyrythm" \
+  --env FMR_AUTO_CREATE_SCHEMA=false \
+  --env "FMR_JWT_SECRET=${jwt_secret}" \
+  --env FMR_REDIS_URL=redis://redis:6379/0 \
+  --env FMR_STORAGE_BACKEND=local \
+  --env FMR_LOCAL_UPLOADS_DIR=/data/uploads \
+  --env FMR_WEB_APP_BASE_URL=https://example.com/feelmyrythm \
+  --env FMR_PUBLIC_API_BASE_URL=https://example.com/feelmyrythm \
+  --entrypoint python \
+  "$SERVER_RUNTIME_IMAGE" \
+  -c 'from app.config import Settings; from app.storage import LocalObjectStorage; storage = LocalObjectStorage(Settings()); candidate = storage.create_temporary_upload_path(); candidate.write_bytes(b"runtime-smoke"); candidate.unlink()'
+
 docker run --detach \
   --name "$web_container" \
   --network "$network_name" \
@@ -164,6 +187,10 @@ grep -Eiq '^cache-control:.*no-cache' "$index_headers"
 grep -Eiq '^content-security-policy:' "$index_headers"
 grep -Eiq '^strict-transport-security:' "$index_headers"
 grep -Fq '<div id="root"></div>' "$index_body"
+docker exec "$web_container" grep -R -Fq '임시 운영 할 일' \
+  /usr/share/nginx/html/feelmyrythm/assets
+docker exec "$web_container" grep -R -Fq 'AWS S3를 준비하고 로컬 악보 파일 이관' \
+  /usr/share/nginx/html/feelmyrythm/assets
 
 spa_body="${temporary_directory}/spa.html"
 curl --fail --silent --show-error \

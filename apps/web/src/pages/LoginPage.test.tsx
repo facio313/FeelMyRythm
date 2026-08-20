@@ -129,6 +129,27 @@ describe('LoginPage accessibility and secure email flows', () => {
     expect(auth.login).not.toHaveBeenCalled();
   });
 
+  it('offers only the server-provisioned login in temporary single-user builds', () => {
+    vi.stubEnv('VITE_FMR_TEMPORARY_SINGLE_USER', 'true');
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'configured-but-disabled-client');
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/서버에서 발급한 단일 계정만 로그인/)).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: '처음인가요? 계정 만들기' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '비밀번호를 잊으셨나요?' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '인증 메일 다시 보내기' })).not.toBeInTheDocument();
+    expect(document.querySelector('.google-sign-in')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '로그인' })).toBeEnabled();
+  });
+
   it('does not request or validate a password during initial registration', async () => {
     render(
       <MemoryRouter>

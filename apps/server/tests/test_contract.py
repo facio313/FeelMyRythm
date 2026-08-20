@@ -115,6 +115,35 @@ def test_production_email_verification_configuration_fails_closed() -> None:
         )
 
 
+def test_single_user_local_production_is_explicit_and_fail_closed() -> None:
+    base = {
+        "environment": "production",
+        "deployment_profile": "single_user_local",
+        "jwt_secret": "runtime-secret-with-at-least-32-characters",
+        "database_url": "postgresql+psycopg://user:password@db/feelmyrythm",
+        "auto_create_schema": False,
+        "storage_backend": "local",
+        "local_uploads_dir": "/data/uploads",
+        "web_app_base_url": "https://bonifacio.work/feelmyrythm",
+        "public_api_base_url": "https://bonifacio.work/feelmyrythm",
+        "redis_url": "redis://fmrRedis:6379/0",
+    }
+    settings = Settings(**base)
+    assert settings.public_email_workflows_enabled is False
+    assert settings.local_uploads_dir == Path("/data/uploads")
+
+    with pytest.raises(ValidationError, match="FMR_STORAGE_BACKEND=local"):
+        Settings(**{**base, "storage_backend": "s3", "s3_bucket": "scores"})
+    with pytest.raises(ValidationError, match="absolute FMR_LOCAL_UPLOADS_DIR"):
+        Settings(**{**base, "local_uploads_dir": "uploads"})
+    with pytest.raises(ValidationError, match="keeps SMTP disabled"):
+        Settings(
+            **base,
+            smtp_host="smtp.example.test",
+            smtp_from_email="noreply@example.com",
+        )
+
+
 @pytest.mark.repository_contract
 def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -> None:
     repository_root = Path(__file__).resolve().parents[3]
@@ -134,6 +163,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     settings = Settings(_env_file=runtime_env)
 
     assert settings.environment == "production"
+    assert settings.deployment_profile == "standard"
     assert settings.web_app_base_url == "https://bonifacio.work/feelmyrythm"
     assert settings.smtp_host == "smtp.example.com"
     assert str(settings.smtp_from_email) == "noreply@example.com"
@@ -182,12 +212,12 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     volumes = compose.split("\nvolumes:\n", 1)[1]
 
     required_lines = {
+        "FMR_DEPLOYMENT_PROFILE: single_user_local",
         "FMR_PUBLIC_API_BASE_URL: ${FMR_PUBLIC_API_BASE_URL:?set the public API base URL}",
         "FMR_REDIS_URL: redis://fmrRedis:6379/0",
         "FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}",
-        "FMR_STORAGE_BACKEND: s3",
-        "FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}",
-        "FMR_S3_REGION: ${FMR_S3_REGION:?set the production score bucket region}",
+        "FMR_STORAGE_BACKEND: local",
+        "FMR_LOCAL_UPLOADS_DIR: /data/uploads",
         "FMR_MAIL_WORKER_COUNT: ${FMR_MAIL_WORKER_COUNT:-2}",
         "FMR_MAIL_QUEUE_CAPACITY: ${FMR_MAIL_QUEUE_CAPACITY:-128}",
         "FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS: ${FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS:-5}",
@@ -217,6 +247,34 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     assert "cap_drop:\n      - ALL" in server_service
     assert "internal: true" in backend_network
     assert "fmr_redis_data:" in volumes
+    assert "fmr_uploads:/data/uploads" in server_service
+    assert "fmr_uploads:" in volumes
+    assert "name: feelmyrythm-fmr-uploads" in volumes
+    assert "FMR_SMTP_HOST:" not in server_service
+    assert "FMR_S3_BUCKET:" not in server_service
+
+
+@pytest.mark.repository_contract
+def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (repository_root / ".github/workflows/deploy.yml").read_text()
+    web_dockerfile = (repository_root / "apps/web/Dockerfile").read_text()
+    server_dockerfile = (repository_root / "apps/server/Dockerfile").read_text()
+    notice = (repository_root / "apps/web/src/components/TemporaryOperationsNotice.tsx").read_text()
+
+    assert "VITE_FMR_TEMPORARY_SINGLE_USER=true" in workflow
+    assert "ARG VITE_FMR_TEMPORARY_SINGLE_USER=false" in web_dockerfile
+    assert "ENV VITE_FMR_TEMPORARY_SINGLE_USER=${VITE_FMR_TEMPORARY_SINGLE_USER}" in web_dockerfile
+    assert "install -d -o 10001 -g 10001 -m 0750 /data/uploads" in server_dockerfile
+    for task in (
+        "악보 파일을 서버 전용 영구 볼륨에 저장",
+        "서버에서 만든 단일 계정만 로그인",
+        "AWS S3를 준비하고 로컬 악보 파일 이관",
+        "SMTP 발송 도메인과 키 설정",
+        "로컬 파일 백업과 복구 절차 확정",
+        "모바일 연결 파일과 OMR 운영 의존성 완성",
+    ):
+        assert task in notice
 
 
 @pytest.mark.parametrize("unsafe_secret", sorted(UNSAFE_PRODUCTION_JWT_SECRETS))

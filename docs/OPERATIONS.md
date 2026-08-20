@@ -1,5 +1,19 @@
 # FeelMyRythm 운영 준비 및 검증
 
+## 현재 임시 단일 사용자 운영
+
+S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `FMR_DEPLOYMENT_PROFILE=single_user_local`을 명시한다. development fallback을 사용하지 않는다.
+
+- `FMR_STORAGE_BACKEND=local`, `FMR_LOCAL_UPLOADS_DIR=/data/uploads`와 전용 named volume `feelmyrythm-fmr-uploads`를 사용한다. runtime image가 UID/GID 10001 소유의 mount point를 제공하며 volume·DB·Redis에 `down -v`를 실행하지 않는다.
+- 공개 register, verification resend, password reset, mail 기반 account-delete challenge는 503으로 닫는다. SMTP sender 대신 signed URL을 출력하지 않는 disabled sender를 사용한다.
+- `scripts/bootstrap_single_user.py`는 이 profile에서만 active password account 하나를 생성하거나 같은 계정의 password를 reset한다. 다른 active identity가 있으면 거부한다. `--generate-credentials-file`은 stdout에 password를 출력하지 않고 새 mode-0600 file만 만든다.
+- target preflight는 SMTP를 명시적으로 skipped로 기록하고 S3 대신 local upload root의 runtime 접근성을 확인한다. 이 결과는 provider 준비나 object backup 완료를 뜻하지 않는다.
+- web release는 `VITE_FMR_TEMPORARY_SINGLE_USER=true`로 빌드한다. 첫 진입 dialog와 topbar 경고 버튼은 적용 중인 임시 조치와 S3 이관, SMTP, local backup, association, OMR 후속 작업을 계속 표시한다.
+
+운영 계정 생성은 target image가 승격된 뒤 별도 mode-0700 operator directory를 만들고 one-shot container로 실행한다. credentials file을 안전한 password manager로 옮긴 뒤 서버 사본의 보존 여부를 결정한다. 계정의 실제 email과 display name은 운영자가 선택하며 비밀번호를 채팅·CI log·shell argument로 넘기지 않는다.
+
+standard 전환 순서는 local volume backup → S3 bucket/CORS/lifecycle/credential 준비 → local object key·size 이관 검증 → SMTP domain/TLS/auth와 실제 수신 시험 → `FMR_DEPLOYMENT_PROFILE=standard` 및 S3 설정 전환 → non-skip provider preflight → public email workflow 시험 → temporary web build flag/dialog 제거다.
+
 이 문서는 실제 계정·인증서·기기·인프라가 필요한 마지막 검증을 재현 가능한 순서로 묶는다. 저장소의 자동 테스트가 통과해도 이 절차의 결과를 대신하지는 않는다. RPi가 중단된 동안에도 1–5단계는 독립적으로 준비할 수 있다.
 
 ## 1. 공개 모바일 연결 파일

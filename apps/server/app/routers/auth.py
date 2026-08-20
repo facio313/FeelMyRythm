@@ -76,6 +76,24 @@ RESEND_MESSAGE = "If an unverified account exists, a verification email has been
 REGISTRATION_MESSAGE = "If this address can be registered, a completion email has been sent."
 PASSWORD_RESET_MESSAGE = "If a password account exists, a reset email has been sent."
 ACCOUNT_DELETE_MESSAGE = "If eligible, an account deletion confirmation email has been sent."
+EMAIL_WORKFLOWS_DISABLED = "Email account workflows are temporarily unavailable."
+PUBLIC_ENROLLMENT_DISABLED = "Public account enrollment is temporarily unavailable."
+
+
+def _require_public_email_workflows(settings: AppSettings) -> None:
+    if not settings.public_email_workflows_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=EMAIL_WORKFLOWS_DISABLED,
+        )
+
+
+def _require_public_enrollment(settings: AppSettings) -> None:
+    if settings.deployment_profile == "single_user_local":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=PUBLIC_ENROLLMENT_DISABLED,
+        )
 
 
 def _lock_owned_groups_and_scores(db: DbSession, user_id: str) -> tuple[list[Group], list[Score]]:
@@ -216,6 +234,8 @@ def register(
     db: DbSession,
     settings: AppSettings,
 ) -> EmailVerificationPendingOut:
+    _require_public_enrollment(settings)
+    _require_public_email_workflows(settings)
     email = normalize_email(str(body.email))
     response.headers["Retry-After"] = str(settings.email_verification_resend_seconds)
     user = db.scalar(select(User).where(User.email == email).with_for_update())
@@ -293,6 +313,7 @@ def resend_verification(
     db: DbSession,
     settings: AppSettings,
 ) -> MessageOut:
+    _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.email_verification_resend_seconds)
     email = normalize_email(str(body.email))
     user = db.scalar(select(User).where(User.email == email).with_for_update())
@@ -319,6 +340,7 @@ def request_password_reset(
     db: DbSession,
     settings: AppSettings,
 ) -> MessageOut:
+    _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.password_reset_request_seconds)
     user = db.scalar(select(User).where(User.email == normalize_email(str(body.email))).with_for_update())
     if (
@@ -397,6 +419,7 @@ def login(
 
 @router.post("/google", response_model=TokenPairOut)
 def google_login(body: GoogleLoginIn, request: Request, db: DbSession, settings: AppSettings) -> TokenPairOut:
+    _require_public_enrollment(settings)
     if not settings.google_client_id:
         raise HTTPException(status_code=503, detail="Google OAuth is not configured")
     verifier: GoogleTokenVerifier = request.app.state.google_verifier
@@ -486,6 +509,7 @@ def request_account_delete_challenge(
     settings: AppSettings,
     user: CurrentUser,
 ) -> MessageOut:
+    _require_public_email_workflows(settings)
     response.headers["Retry-After"] = str(settings.account_delete_request_seconds)
     account = db.scalar(select(User).where(User.id == user.id).with_for_update())
     if (

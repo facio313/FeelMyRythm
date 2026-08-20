@@ -26,6 +26,50 @@ from app.security import (
 from .conftest import FakeGoogleVerifier, FakeMailSender, auth, register
 
 
+def test_single_user_profile_disables_public_email_account_workflows(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    limited = settings.model_copy(update={"deployment_profile": "single_user_local"})
+    with TestClient(
+        create_app(
+            limited,
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=mail_sender,
+        )
+    ) as limited_client:
+        requests = (
+            limited_client.post(
+                "/api/auth/register",
+                json={"email": "owner@example.com", "displayName": "Owner"},
+            ),
+            limited_client.post(
+                "/api/auth/resend-verification",
+                json={"email": "owner@example.com"},
+            ),
+            limited_client.post(
+                "/api/auth/request-password-reset",
+                json={"email": "owner@example.com"},
+            ),
+            limited_client.post(
+                "/api/auth/google",
+                json={"idToken": "valid-google-token"},
+            ),
+        )
+        assert all(response.status_code == 503 for response in requests)
+        assert requests[0].json()["detail"] == "Public account enrollment is temporarily unavailable."
+        assert all(
+            response.json()["detail"] == "Email account workflows are temporarily unavailable."
+            for response in requests[1:3]
+        )
+        assert requests[3].json()["detail"] == "Public account enrollment is temporarily unavailable."
+        with limited_client.app.state.database.session_factory() as session:
+            assert session.scalar(select(func.count()).select_from(User)) == 0
+
+    assert mail_sender.messages == []
+    assert mail_sender.password_reset_messages == []
+
+
 def test_health_email_auth_refresh_rotation_and_logout(client: TestClient) -> None:
     assert client.get("/api/health").json() == {"ok": True}
     tokens = register(client, "  Musician@Example.COM  ", "Musician")

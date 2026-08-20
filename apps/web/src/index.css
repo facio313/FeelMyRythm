@@ -163,6 +163,47 @@ p {
   background: var(--surface);
 }
 
+.temporary-operations-trigger {
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border));
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.temporary-operations {
+  display: grid;
+  gap: 18px;
+}
+
+.temporary-operations > p,
+.temporary-operations__list p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.temporary-operations__list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.temporary-operations__list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+
+.temporary-operations__list strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
 .sidebar {
   grid-area: sidebar;
   position: sticky;

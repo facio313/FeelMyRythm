@@ -23,6 +23,7 @@ import {
 } from 'react-router-dom';
 import { cn, Modal } from '@feelmyrythm/ui';
 import { useAuth } from '../lib/auth';
+import { TemporaryOperationsNotice } from './TemporaryOperationsNotice';
 
 const navigation = [
   { to: '/', label: '메트로놈', icon: Tally4, end: true },
@@ -135,6 +136,7 @@ export function AppShell() {
           <span className="brand__name">FeelMyRythm</span>
         </NavLink>
         <nav className="topbar__actions" aria-label="계정과 설정">
+          <TemporaryOperationsNotice />
           <NavLink className="icon-link" to="/settings" aria-label="설정">
             <Settings size={20} aria-hidden />
           </NavLink>

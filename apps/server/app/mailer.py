@@ -217,6 +217,22 @@ class DevelopmentMailSender:
         )
 
 
+class DisabledMailSender:
+    """Fail closed without logging signed account-recovery URLs."""
+
+    def send_email_verification(self, message: EmailVerificationMessage) -> None:
+        del message
+        raise MailDeliveryError("email delivery is disabled")
+
+    def send_password_reset(self, message: PasswordResetMessage) -> None:
+        del message
+        raise MailDeliveryError("email delivery is disabled")
+
+    def send_account_deletion(self, message: AccountDeletionMessage) -> None:
+        del message
+        raise MailDeliveryError("email delivery is disabled")
+
+
 class SmtpMailSender:
     def __init__(self, settings: Settings) -> None:
         if not settings.smtp_host or settings.smtp_from_email is None:
@@ -321,6 +337,8 @@ class SmtpMailSender:
 
 
 def make_mail_sender(settings: Settings) -> MailSender:
+    if settings.deployment_profile == "single_user_local":
+        return DisabledMailSender()
     if settings.smtp_host and settings.smtp_host.strip():
         return SmtpMailSender(settings)
     return DevelopmentMailSender()

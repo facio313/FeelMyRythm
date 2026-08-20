@@ -40,17 +40,11 @@ services:
       - .env
     environment:
       FMR_ENVIRONMENT: production
+      FMR_DEPLOYMENT_PROFILE: single_user_local
       FMR_DATABASE_URL: ${FMR_DATABASE_URL:?set the dedicated cksDB database URL}
       FMR_AUTO_CREATE_SCHEMA: 'false'
       FMR_JWT_SECRET: ${FMR_JWT_SECRET:?set a production JWT secret}
       FMR_WEB_APP_BASE_URL: ${FMR_WEB_APP_BASE_URL:?set the public web application URL}
-      FMR_SMTP_HOST: ${FMR_SMTP_HOST:?set the verification email SMTP host}
-      FMR_SMTP_PORT: ${FMR_SMTP_PORT:-587}
-      FMR_SMTP_FROM_EMAIL: ${FMR_SMTP_FROM_EMAIL:?set the verification sender address}
-      FMR_SMTP_STARTTLS: ${FMR_SMTP_STARTTLS:-true}
-      FMR_SMTP_USE_SSL: ${FMR_SMTP_USE_SSL:-false}
-      FMR_SMTP_USERNAME: ${FMR_SMTP_USERNAME:-}
-      FMR_SMTP_PASSWORD: ${FMR_SMTP_PASSWORD:-}
       FMR_MAIL_WORKER_COUNT: ${FMR_MAIL_WORKER_COUNT:-2}
       FMR_MAIL_QUEUE_CAPACITY: ${FMR_MAIL_QUEUE_CAPACITY:-128}
       FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS: ${FMR_MAIL_SHUTDOWN_TIMEOUT_SECONDS:-5}
@@ -61,10 +55,8 @@ services:
       FMR_ROOM_PRESENCE_TTL_SECONDS: ${FMR_ROOM_PRESENCE_TTL_SECONDS:-45}
       FMR_ROOM_LOCK_SECONDS: ${FMR_ROOM_LOCK_SECONDS:-5}
       FMR_ROOM_LOCK_WAIT_SECONDS: ${FMR_ROOM_LOCK_WAIT_SECONDS:-2}
-      FMR_STORAGE_BACKEND: s3
-      FMR_S3_BUCKET: ${FMR_S3_BUCKET:?set the production score bucket}
-      FMR_S3_REGION: ${FMR_S3_REGION:?set the production score bucket region}
-      FMR_S3_ENDPOINT_URL: ${FMR_S3_ENDPOINT_URL:-}
+      FMR_STORAGE_BACKEND: local
+      FMR_LOCAL_UPLOADS_DIR: /data/uploads
       FMR_STORAGE_WORKER_ENABLED: 'true'
       FMR_STORAGE_WORKER_INTERVAL_SECONDS: ${FMR_STORAGE_WORKER_INTERVAL_SECONDS:-30}
       FMR_STORAGE_DELETE_BATCH_SIZE: ${FMR_STORAGE_DELETE_BATCH_SIZE:-100}
@@ -80,6 +72,8 @@ services:
       FMR_OMR_AUDIVERIS_COMMAND: ${FMR_OMR_AUDIVERIS_COMMAND:-audiveris}
       FMR_OMR_WORKER_COUNT: ${FMR_OMR_WORKER_COUNT:-1}
       FMR_OMR_TIMEOUT_SECONDS: ${FMR_OMR_TIMEOUT_SECONDS:-300}
+    volumes:
+      - fmr_uploads:/data/uploads
     ports:
       - '127.0.0.1:9175:8000'
     networks:
@@ -132,3 +126,5 @@ networks:
 volumes:
   fmr_redis_data:
     name: feelmyrythm-fmr-redis-data
+  fmr_uploads:
+    name: feelmyrythm-fmr-uploads
