@@ -498,15 +498,11 @@ def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPa
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SSO_IDENTITY_INVALID)
     try:
         email = normalize_email(str(EMAIL_ADAPTER.validate_python(remote_email)))
-        username = normalize_email(str(EMAIL_ADAPTER.validate_python(remote_user)))
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=SSO_IDENTITY_INVALID,
         ) from exc
-    if username != email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SSO_IDENTITY_INVALID)
-
     user = db.scalar(select(User).where(User.email == email).with_for_update())
     if user is None or not user.is_active:
         raise HTTPException(

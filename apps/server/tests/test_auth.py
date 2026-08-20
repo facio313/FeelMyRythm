@@ -100,16 +100,6 @@ def test_sso_exchanges_only_an_existing_matching_active_identity(
             sso_client.post(
                 "/api/auth/sso",
                 headers={
-                    "Remote-User": "other@example.com",
-                    "Remote-Email": "owner@example.com",
-                },
-            ).status_code
-            == 401
-        )
-        assert (
-            sso_client.post(
-                "/api/auth/sso",
-                headers={
                     "Remote-User": "unknown@example.com",
                     "Remote-Email": "unknown@example.com",
                 },
@@ -120,7 +110,7 @@ def test_sso_exchanges_only_an_existing_matching_active_identity(
         exchanged = sso_client.post(
             "/api/auth/sso",
             headers={
-                "Remote-User": "OWNER@example.com",
+                "Remote-User": "owner",
                 "Remote-Email": "OWNER@example.com",
             },
         )
