@@ -36,11 +36,13 @@ def sso_headers(
     *,
     display_name: str = "Portfolio user",
     edge_secret: str = SSO_EDGE_SECRET,
+    groups: str = "user",
 ) -> dict[str, str]:
     return {
         "Remote-User": subject,
         "Remote-Email": email,
         "Remote-Name": display_name,
+        "Remote-Groups": groups,
         "X-Portfolio-Edge-Secret": edge_secret,
     }
 

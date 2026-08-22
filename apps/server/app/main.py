@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -13,12 +14,13 @@ from sqlalchemy import text
 
 from . import annotation_ws, ws
 from .annotation_sync import AnnotationSyncHub
+from .auth_cleanup import cleanup_legacy_auth
 from .config import Settings, load_settings
 from .db import Database
 from .mailer import MailDeliveryManager, MailSender, make_mail_sender
 from .omr import OmrDraftManager, OmrProcessor
 from .rooms import RoomManager
-from .routers import auth, calibrations, groups, repertoire, rooms, scores
+from .routers import auth, calibrations, groups, operations, repertoire, rooms, scores
 from .schemas import (
     AnnotationWsClientMessage,
     AnnotationWsServerMessage,
@@ -29,6 +31,8 @@ from .schemas import (
 from .security import GoogleAuthVerifier, GoogleTokenVerifier, PasswordVerifier
 from .storage import make_storage
 from .storage_lifecycle import StorageLifecycleWorker
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _install_protocol_schemas(app: FastAPI) -> None:
@@ -73,6 +77,15 @@ def create_app(
         database = Database(resolved.database_url)
         if resolved.auto_create_schema:
             database.create_schema()
+        if resolved.sso_enabled:
+            with database.session_factory() as db:
+                cleanup_result = cleanup_legacy_auth(db)
+            LOGGER.info(
+                "SSO auth cleanup users=%d legacy_refresh_sessions=%d stale_refresh_sessions=%d",
+                cleanup_result.users_cleaned,
+                cleanup_result.refresh_sessions_deleted,
+                cleanup_result.stale_refresh_sessions_deleted,
+            )
         sender = mail_sender or make_mail_sender(resolved)
         mail_delivery_manager = MailDeliveryManager(
             sender,
@@ -133,6 +146,7 @@ def create_app(
     for router in (
         auth.router,
         auth.users_router,
+        operations.router,
         groups.router,
         repertoire.router,
         scores.router,

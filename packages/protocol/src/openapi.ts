@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/admin/auth-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth Cleanup */
+        post: operations["auth_cleanup_api_admin_auth_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/annotations/{annotation_id}": {
         parameters: {
             query?: never;
@@ -368,6 +385,23 @@ export interface paths {
         };
         /** Get Omr Draft */
         get: operations["get_omr_draft_api_omr_drafts__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operations/auth-inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Inventory */
+        get: operations["auth_inventory_api_operations_auth_inventory_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1056,6 +1090,47 @@ export interface components {
         };
         AnnotationWsClientMessage: components["schemas"]["JoinAnnotationsMessage"] | components["schemas"]["AnnotationPingMessage"];
         AnnotationWsServerMessage: components["schemas"]["AnnotationJoinedServerMessage"] | components["schemas"]["AnnotationSnapshotServerMessage"] | components["schemas"]["AnnotationEventServerMessage"] | components["schemas"]["AnnotationPongServerMessage"] | components["schemas"]["ErrorServerMessage"];
+        /** AuthCleanupIn */
+        AuthCleanupIn: {
+            /**
+             * Confirmpurgeactiverefreshsessions
+             * @constant
+             */
+            confirmPurgeActiveRefreshSessions: true;
+        };
+        /** AuthCleanupOut */
+        AuthCleanupOut: {
+            /** Activerefreshsessionsdeleted */
+            activeRefreshSessionsDeleted: number;
+            inventoryBefore: components["schemas"]["AuthInventoryOut"];
+            /** Refreshsessionsdeleted */
+            refreshSessionsDeleted: number;
+            /** Stalerefreshsessionsdeleted */
+            staleRefreshSessionsDeleted: number;
+            /** Userscleaned */
+            usersCleaned: number;
+        };
+        /** AuthInventoryOut */
+        AuthInventoryOut: {
+            /** Activerefreshsessions */
+            activeRefreshSessions: number;
+            /** Legacyrefreshsessions */
+            legacyRefreshSessions: number;
+            /** Linkeduserswithlegacycredentials */
+            linkedUsersWithLegacyCredentials: number;
+            /** Stalerefreshsessions */
+            staleRefreshSessions: number;
+            /** Totalrefreshsessions */
+            totalRefreshSessions: number;
+            /** Unlinkeduserswithlegacycredentials */
+            unlinkedUsersWithLegacyCredentials: number;
+            /** Userswithgooglesubject */
+            usersWithGoogleSubject: number;
+            /** Userswithlegacycredentials */
+            usersWithLegacyCredentials: number;
+            /** Userswithpassword */
+            usersWithPassword: number;
+        };
         /** Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post */
         Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post: {
             /** File */
@@ -2439,6 +2514,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    auth_cleanup_api_admin_auth_cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthCleanupIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthCleanupOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_annotation_api_annotations__annotation_id__get: {
         parameters: {
             query?: never;
@@ -3475,6 +3583,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_inventory_api_operations_auth_inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthInventoryOut"];
                 };
             };
         };

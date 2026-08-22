@@ -114,6 +114,30 @@ class MessageOut(ApiModel):
     message: str
 
 
+class AuthInventoryOut(ApiModel):
+    total_refresh_sessions: int
+    active_refresh_sessions: int
+    users_with_password: int
+    users_with_google_subject: int
+    users_with_legacy_credentials: int
+    linked_users_with_legacy_credentials: int
+    unlinked_users_with_legacy_credentials: int
+    legacy_refresh_sessions: int
+    stale_refresh_sessions: int
+
+
+class AuthCleanupOut(ApiModel):
+    inventory_before: AuthInventoryOut
+    users_cleaned: int
+    refresh_sessions_deleted: int
+    stale_refresh_sessions_deleted: int
+    active_refresh_sessions_deleted: int
+
+
+class AuthCleanupIn(ApiModel):
+    confirm_purge_active_refresh_sessions: Literal[True]
+
+
 Role = Literal["owner", "leader", "member"]
 TransportStatus = Literal["idle", "armed", "playing", "stopped"]
 ServerMessageType = Literal[

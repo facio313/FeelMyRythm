@@ -511,6 +511,108 @@
           }
         ]
       },
+      "AuthCleanupIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmPurgeActiveRefreshSessions": {
+            "const": true,
+            "title": "Confirmpurgeactiverefreshsessions",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmPurgeActiveRefreshSessions"
+        ],
+        "title": "AuthCleanupIn",
+        "type": "object"
+      },
+      "AuthCleanupOut": {
+        "additionalProperties": false,
+        "properties": {
+          "activeRefreshSessionsDeleted": {
+            "title": "Activerefreshsessionsdeleted",
+            "type": "integer"
+          },
+          "inventoryBefore": {
+            "$ref": "#/components/schemas/AuthInventoryOut"
+          },
+          "refreshSessionsDeleted": {
+            "title": "Refreshsessionsdeleted",
+            "type": "integer"
+          },
+          "staleRefreshSessionsDeleted": {
+            "title": "Stalerefreshsessionsdeleted",
+            "type": "integer"
+          },
+          "usersCleaned": {
+            "title": "Userscleaned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "inventoryBefore",
+          "usersCleaned",
+          "refreshSessionsDeleted",
+          "staleRefreshSessionsDeleted",
+          "activeRefreshSessionsDeleted"
+        ],
+        "title": "AuthCleanupOut",
+        "type": "object"
+      },
+      "AuthInventoryOut": {
+        "additionalProperties": false,
+        "properties": {
+          "activeRefreshSessions": {
+            "title": "Activerefreshsessions",
+            "type": "integer"
+          },
+          "legacyRefreshSessions": {
+            "title": "Legacyrefreshsessions",
+            "type": "integer"
+          },
+          "linkedUsersWithLegacyCredentials": {
+            "title": "Linkeduserswithlegacycredentials",
+            "type": "integer"
+          },
+          "staleRefreshSessions": {
+            "title": "Stalerefreshsessions",
+            "type": "integer"
+          },
+          "totalRefreshSessions": {
+            "title": "Totalrefreshsessions",
+            "type": "integer"
+          },
+          "unlinkedUsersWithLegacyCredentials": {
+            "title": "Unlinkeduserswithlegacycredentials",
+            "type": "integer"
+          },
+          "usersWithGoogleSubject": {
+            "title": "Userswithgooglesubject",
+            "type": "integer"
+          },
+          "usersWithLegacyCredentials": {
+            "title": "Userswithlegacycredentials",
+            "type": "integer"
+          },
+          "usersWithPassword": {
+            "title": "Userswithpassword",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "totalRefreshSessions",
+          "activeRefreshSessions",
+          "usersWithPassword",
+          "usersWithGoogleSubject",
+          "usersWithLegacyCredentials",
+          "linkedUsersWithLegacyCredentials",
+          "unlinkedUsersWithLegacyCredentials",
+          "legacyRefreshSessions",
+          "staleRefreshSessions"
+        ],
+        "title": "AuthInventoryOut",
+        "type": "object"
+      },
       "Body_musicxml_draft_api_repertoire__repertoire_id__musicxml_draft_post": {
         "properties": {
           "file": {
@@ -4199,6 +4301,52 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/auth-cleanup": {
+      "post": {
+        "operationId": "auth_cleanup_api_admin_auth_cleanup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCleanupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthCleanupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Auth Cleanup",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
     "/api/annotations/{annotation_id}": {
       "delete": {
         "operationId": "delete_annotation_api_annotations__annotation_id__delete",
@@ -5646,6 +5794,32 @@
         "summary": "Get Omr Draft",
         "tags": [
           "scores"
+        ]
+      }
+    },
+    "/api/operations/auth-inventory": {
+      "get": {
+        "operationId": "auth_inventory_api_operations_auth_inventory_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthInventoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Auth Inventory",
+        "tags": [
+          "operations"
         ]
       }
     },

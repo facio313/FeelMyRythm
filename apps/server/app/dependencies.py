@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .models import User
 from .security import authenticate_access_token
-from .sso import require_matching_sso_subject, trusted_sso_subject
+from .sso import (
+    TrustedSsoIdentity,
+    require_matching_sso_subject,
+    require_sso_role,
+    trusted_sso_subject,
+)
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -42,3 +47,15 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_sso_developer(request: Request, settings: AppSettings) -> TrustedSsoIdentity:
+    return require_sso_role(request, settings, "developer")
+
+
+def get_sso_admin(request: Request, settings: AppSettings) -> TrustedSsoIdentity:
+    return require_sso_role(request, settings, "admin")
+
+
+SsoDeveloper = Annotated[TrustedSsoIdentity, Depends(get_sso_developer)]
+SsoAdmin = Annotated[TrustedSsoIdentity, Depends(get_sso_admin)]

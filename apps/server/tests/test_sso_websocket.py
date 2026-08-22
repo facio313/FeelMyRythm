@@ -19,7 +19,7 @@ def _sso_headers(subject: str, email: str, *, edge_secret: str = SSO_EDGE_SECRET
         "Remote-User": subject,
         "Remote-Email": email,
         "Remote-Name": "Central musician",
-        "Remote-Groups": "users",
+        "Remote-Groups": "user",
         "X-Portfolio-Edge-Secret": edge_secret,
     }
 

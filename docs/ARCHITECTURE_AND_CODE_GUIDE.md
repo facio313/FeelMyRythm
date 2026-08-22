@@ -254,7 +254,7 @@ stateDiagram-v2
 | 인증 메일 재전송 | `resendVerification` | `POST /api/auth/resend-verification`: cooldown과 새 generation으로 이전 link 무효화 |
 | 이메일 로그인 | `login` | `POST /api/auth/login`: active·verified·password 계정, dummy hash를 포함한 일정한 검증 경로 |
 | Google 로그인 | `loginWithGoogle` | `POST /api/auth/google`: Google audience·subject·verified email 검사, preclaim password 제거, 충돌 409 |
-| Portfolio SSO | `AuthProvider` 초기 exchange | `POST /api/auth/sso`: edge secret 검증, immutable subject 우선 조회, unique email legacy link 또는 managed-local verified user provision, 충돌 409 |
+| Portfolio SSO | `AuthProvider` 초기 exchange | `POST /api/auth/sso`: edge secret과 canonical `user < developer < admin` group prefix 검증, immutable subject 우선 조회, unique email legacy link 또는 managed-local verified user provision, 충돌 409 |
 | access 갱신 | `ApiClient.refresh` | `POST /api/auth/refresh`: refresh row lock/revoke/rotate. 권위 있는 401만 client session 삭제 |
 | 로그아웃 | `logout` | `POST /api/auth/logout` best effort 후 client session 즉시 제거 |
 | reset 요청 | `requestPasswordReset` | `POST /api/auth/request-password-reset`: 계정 존재를 숨기는 동일 응답과 cooldown |
@@ -272,9 +272,9 @@ stateDiagram-v2
 | refresh race | `ApiClient`는 동일 session generation의 refresh를 single-flight로 공유하고 늦은 옛 session 응답이 새 로그인을 덮지 못하게 한다. network/5xx는 기존 token을 지우지 않는다. |
 | 웹 저장 | access·refresh·user를 `fmr.auth.session.v1` 하나로 localStorage에 저장한다. HttpOnly cookie 모델이 아니므로 XSS 방어와 CSP가 중요하다. |
 | 네이티브 저장 | 플랫폼 adapter가 iOS Keychain의 ThisDeviceOnly 계열과 Android Keystore AES-GCM을 사용한다. Android cloud·device-transfer backup은 차단한다. |
-| REST 인증 | `Authorization: Bearer` → [`dependencies.py`](../apps/server/app/dependencies.py)의 `CurrentUser` → active·verified·현재 generation 확인. SSO mode에서는 앱별 edge secret과 현재 `Remote-User == User.sso_subject`도 모든 bearer HTTP 요청에서 검사한다. |
-| WS 인증 | query/cookie가 아니라 첫 `JOIN_ROOM`/`JOIN_ANNOTATIONS` frame의 access token을 검증하고 membership을 확인한다. SSO mode에서는 같은 handshake의 trusted edge secret과 `Remote-User == User.sso_subject`도 요구하며, transport 명령마다 현재 role을 다시 읽는다. |
-| 역할 | `member < leader < owner`. owner는 그룹·멤버, leader 이상은 프로젝트·레퍼토리·템포맵·악보·방 transport를 관리한다. annotation은 작성자 또는 leader 이상의 별도 규칙을 적용한다. |
+| REST 인증 | `Authorization: Bearer` → [`dependencies.py`](../apps/server/app/dependencies.py)의 `CurrentUser` → active·verified·현재 generation 확인. SSO mode에서는 앱별 edge secret, 현재 `Remote-User == User.sso_subject`, exact canonical `Remote-Groups`도 모든 bearer HTTP 요청에서 검사한다. |
+| WS 인증 | query/cookie가 아니라 첫 `JOIN_ROOM`/`JOIN_ANNOTATIONS` frame의 access token을 검증하고 membership을 확인한다. SSO mode에서는 같은 handshake의 trusted edge secret, `Remote-User == User.sso_subject`, exact canonical `Remote-Groups`도 요구하며, transport 명령마다 현재 domain role을 다시 읽는다. |
+| 역할 | 중앙 SSO는 `user < developer < admin`이며 일반 API, aggregate auth inventory, credential/session cleanup의 최소 경계를 정한다. 앱 도메인은 별도 `member < leader < owner`이고 중앙 admin도 이를 우회하지 않는다. owner는 그룹·멤버, leader 이상은 프로젝트·레퍼토리·템포맵·악보·방 transport를 관리한다. annotation은 작성자 또는 leader 이상의 별도 규칙을 적용한다. |
 
 앱 내부에는 IP 기반 rate limiter, CAPTCHA, trusted proxy IP parser가 없다. email별 cooldown과 bcrypt semaphore는 애플리케이션 보호층이고, 대규모 abuse 제한은 신뢰 가능한 nginx/CDN·메일 provider에서 별도로 구성해야 한다.
 
