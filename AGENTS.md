@@ -141,6 +141,14 @@ anthropic ──┘
    ```
 4. Merge `dev` into `main` after full verification only (user).
 
+### Branch-bound authentication
+
+- 저장소 공통 계약은 `PORTFOLIO_BRANCH`와 `PORTFOLIO_AUTH_MODE=sso|local`이다. `main`과 `dev`는 반드시 `sso`, 그 밖의 모든 branch는 반드시 `local`이며 명시값이 이 매핑과 다르면 시작·빌드·배포를 실패시킨다.
+- canonical resolver는 byte-pinned [`scripts/portfolio-auth-mode.sh`](scripts/portfolio-auth-mode.sh)이다. branch source 우선순위는 명시적 `PORTFOLIO_BRANCH` → `GITHUB_REF_NAME` → 현재 Git branch이고, `print`, `check`, `exec -- <command>` 인터페이스를 유지한다. detached checkout과 packaged/container build는 branch를 명시적으로 주입한다.
+- 로컬 checkout의 server, Vite, Compose 명령은 resolver의 `exec`를 통하거나 root package script를 사용한다. root `pnpm dev`는 local mode를 명시적으로 요청하므로 `main`/`dev`에서 fail-closed한다. 보호 branch에서 local 인증을 억지로 켜지 말고 중앙 edge와 앱 전용 secret을 준비한다. 독립적인 local 가입·로그인·직접 접근은 tool/feature branch에서 검증한다.
+- `FMR_SSO_ENABLED`와 `VITE_FMR_SSO_ENABLED`는 canonical mode의 호환 adapter일 뿐이다. 생략하면 canonical mode를 따르고, 명시하면 정확히 일치해야 한다. `FMR_DEPLOYMENT_PROFILE=managed_local_sso`와 `VITE_FMR_MANAGED_LOCAL_SSO=true`는 SSO mode에서만 허용한다.
+- CI는 checkout 이후 실제 source branch를 resolver에 명시하고, server/web image build arg와 runtime Compose 환경에도 branch와 resolved mode를 모두 전달한다.
+
 ### Naming Rules
 
 - Tool branches: `codex`, `cursor`, `anthropic`
@@ -217,7 +225,7 @@ anthropic ──┘
 - 웹은 공용 `nativeBridge`만 호출하며 native audio, Keep Awake, app lifecycle/deep link, haptics 같은 네이티브 세부 구현을 직접 알지 않는다. Android native audio는 `mediaPlayback` foreground service와 MediaStyle stop action을 재생 수명에 맞춰 유지하고, iOS는 `.playback` audio session과 `UIBackgroundModes/audio`를 사용한다.
 - 브라우저 인증은 token+user를 단일 `fmr.auth.session.v1` envelope로 원자 저장하며, refresh 결과는 시작 auth generation이 현재와 같을 때만 반영한다. refresh endpoint의 권위 있는 401만 세션을 폐기하고 network/5xx는 현재 identity와 token을 보존한 채 재시도 가능한 오류로 전달한다. `hasPassword`가 없는 구형 user envelope는 `/users/me`로 갱신한다. native refresh token은 iOS Keychain `ThisDeviceOnly` 또는 Android Keystore로 보호하고 WebView backup·평문 저장소에 남기지 않는다.
 - password 가입의 첫 단계는 이름+이메일만 받고 password를 저장하지 않는다. 발급·재발급 때마다 이전 링크를 무효화하는 만료 전용 서명 토큰을 연 사용자가 새 password+확인을 제출해야만 이메일 검증, password hash 생성, access/refresh 발급을 원자적으로 완료한다. 검증 전 login과 그룹 초대를 차단하며 legacy 미검증 hash도 완료 시 반드시 덮어쓴다.
-- `managed_local_sso`에서는 public email enrollment를 열지 않는다. `scripts/bootstrap_single_user.py`는 migration 전 legacy owner를 한 번 seed/reset하는 도구일 뿐이며, SSO subject가 연결된 뒤에는 password를 다시 만들지 못한다. 새 사용자는 중앙 관리자에서 생성하고 첫 trusted exchange에서 앱 row를 provision한다.
+- `managed_local_sso`에서는 public email enrollment와 앱 DB password bootstrap/reset을 열지 않는다. 새 사용자는 중앙 관리자에서 생성하고 첫 trusted exchange에서 verified·active·SSO-only 앱 row를 provision한다. 이미 연결된 row에 password/Google credential drift가 생기면 다음 exchange가 둘 다 제거하고 auth generation·refresh session을 회전한다.
 - `bonifacio.work`의 browser production은 `FMR_SSO_ENABLED=true`, 32자 이상의 앱 전용 edge secret, edge `auth_request`를 함께 사용한다. 운영 secret은 rootless host의 `cks:cks` small regular mode-0640 file을 read-only mount하고 `FMR_SSO_EDGE_SECRET_FILE`로 읽는 계약이 우선이다. Compose는 process UID 10001을 유지하고 GID만 0으로 두며, 서버는 container에서 secret이 `root:root` mode 0640이고 effective GID가 0인지 검사한다. `FMR_SSO_EDGE_SECRET`은 개발/격리 테스트 fallback이다. `/api/auth/sso`는 proxy가 덮어쓴 non-empty `Remote-User`를 immutable unique nullable `User.sso_subject`로 먼저 찾고, 미연결 기존 계정은 unique email이 정확히 일치할 때 한 번만 연결하며, `managed_local_sso`에서 둘 다 없으면 verified active 앱 사용자를 만든다. subject/email이 서로 다른 row를 가리키면 409로 닫는다. 모든 bearer HTTP API와 refresh/logout, access token을 첫 frame으로 받는 모든 WebSocket은 edge가 덮어쓴 `Remote-User`가 token 사용자의 `sso_subject`와 정확히 같고 `X-Portfolio-Edge-Secret`이 설정값과 일치해야 한다. health와 명시적 public HTTP 경로만 예외다. SSO 모드에서는 local register/login/Google/email recovery/account deletion을 모두 닫고, web logout은 앱 refresh session을 폐기한 뒤 중앙 `/sso/logout`으로 이동한다. 내부 nginx는 identity와 edge-secret header를 API와 WebSocket upstream 모두에 명시 전달하고 origin port는 loopback에만 둔다.
 - 비밀번호 재설정 요청은 계정 존재를 숨기고 per-email cooldown을 적용한다. 만료·1회용 reset token으로 password를 바꾸면 auth generation을 증가시키고 기존 refresh session을 전부 폐기한다. 가입·재발급·reset·탈퇴 메일은 SMTP enqueue 전에 last-attempt를 commit해 전송 실패·queue overflow도 cooldown을 유지한다. SMTP I/O는 고정 worker 수와 bounded queue를 가진 비동기 delivery manager만 수행해 요청 응답을 기다리게 하지 않으며, queue full/provider 오류 로그에는 이메일·서명 URL을 남기지 않는다.
 - password login은 계정 없음·비활성·미검증·Google-only 경로에도 고정 dummy bcrypt를 수행해 계정별 시간 차를 줄이고, 프로세스 전역 bounded bcrypt verifier로 CPU 동시성을 제한한다. 앱은 임의 `X-Forwarded-For`를 신뢰하지 않으므로 client IP/CAPTCHA/provider quota 같은 외부 abuse 제한은 trusted CDN/nginx/provider 경계에서 시행한다.

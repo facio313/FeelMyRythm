@@ -1,9 +1,18 @@
 services:
   fmrServer:
     build:
-      context: ./apps/server
+      context: .
+      dockerfile: apps/server/Dockerfile
       target: development
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?run through scripts/portfolio-auth-mode.sh}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?run through scripts/portfolio-auth-mode.sh}
     container_name: fmrServerDev
+    environment:
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?run through scripts/portfolio-auth-mode.sh}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?run through scripts/portfolio-auth-mode.sh}
+      FMR_SSO_ENABLED: 'false'
+      FMR_SSO_EDGE_SECRET: ${FMR_SSO_EDGE_SECRET:-}
     ports:
       - '8000:8000'
     restart: unless-stopped
@@ -14,7 +23,15 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?run through scripts/portfolio-auth-mode.sh}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?run through scripts/portfolio-auth-mode.sh}
+        VITE_FMR_SSO_ENABLED: 'false'
+        VITE_FMR_MANAGED_LOCAL_SSO: 'false'
     container_name: fmrWebDev
+    environment:
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?run through scripts/portfolio-auth-mode.sh}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?run through scripts/portfolio-auth-mode.sh}
     depends_on:
       fmrServer:
         condition: service_healthy

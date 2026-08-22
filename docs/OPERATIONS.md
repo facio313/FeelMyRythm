@@ -2,18 +2,18 @@
 
 ## 현재 임시 중앙 계정·로컬 저장 운영
 
-S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `FMR_DEPLOYMENT_PROFILE=managed_local_sso`를 명시한다. development fallback을 사용하지 않는다.
+S3와 SMTP가 준비되기 전 `bonifacio.work` 배포는 `production`을 유지하면서 `PORTFOLIO_BRANCH=main`, `PORTFOLIO_AUTH_MODE=sso`, `FMR_DEPLOYMENT_PROFILE=managed_local_sso`를 명시한다. `scripts/portfolio-auth-mode.sh check`가 실패하거나 canonical 값이 빠진 packaged/container 실행은 중단하며 development fallback을 사용하지 않는다.
 
 - `FMR_STORAGE_BACKEND=local`, `FMR_LOCAL_UPLOADS_DIR=/data/uploads`와 전용 named volume `feelmyrythm-fmr-uploads`를 사용한다. runtime image가 UID/GID 10001 소유의 mount point를 제공하며 volume·DB·Redis에 `down -v`를 실행하지 않는다.
 - 공개 register, verification resend, password reset, mail 기반 account-delete challenge는 닫는다. SMTP sender 대신 signed URL을 출력하지 않는 disabled sender를 사용한다.
-- `scripts/bootstrap_single_user.py`는 기존 owner를 첫 SSO 연결 전에만 seed/reset하는 migration 도구다. 다른 active identity가 있거나 owner에 `sso_subject`가 이미 연결됐으면 거부한다. `--generate-credentials-file`은 stdout에 password를 출력하지 않고 새 mode-0600 file만 만든다. 중앙 연결 뒤에는 이 도구 대신 Bonifacio 관리자 화면에서 사용자를 만든다.
-- `bonifacio.work` browser 배포는 `FMR_SSO_ENABLED=true`, `VITE_FMR_SSO_ENABLED=true`, `VITE_FMR_MANAGED_LOCAL_SSO=true`를 함께 고정한다. `/api/auth/sso`는 stable `Remote-User` subject를 먼저 찾고, 미연결 unique email owner를 한 번 link하거나 새 중앙 identity를 verified active 앱 user로 provision한다. subject와 email이 서로 다른 row를 가리키면 409로 실패한다. local login·Google·email recovery·account deletion은 403으로 닫고 logout은 중앙 SSO session도 끝낸다.
+- 운영 사용자 계정은 Bonifacio 관리자에서 관리하고 첫 trusted SSO exchange가 앱 row를 verified·active·SSO-only 상태로 자동 provision한다. 앱 DB에 운영 password를 seed/reset하는 bootstrap 경로는 두지 않는다.
+- `bonifacio.work` browser 배포는 canonical `main/sso`에 맞춰 legacy adapter `FMR_SSO_ENABLED=true`, `VITE_FMR_SSO_ENABLED=true`, `VITE_FMR_MANAGED_LOCAL_SSO=true`도 함께 고정한다. 어느 adapter든 canonical mode와 다르면 server startup 또는 web build를 실패시킨다. `/api/auth/sso`는 stable `Remote-User` subject를 먼저 찾고, 미연결 unique email owner를 한 번 link하거나 새 중앙 identity를 verified active 앱 user로 provision한다. subject와 email이 서로 다른 row를 가리키면 409로 실패한다. local login·Google·email recovery·account deletion은 403으로 닫고 logout은 중앙 SSO session도 끝낸다.
 - 앱 전용 edge secret은 `openssl rand -hex 48` 같은 CSPRNG로 생성해 secret 본문에 trailing newline 없이 저장한다. rootless host 파일은 작은 regular file, `cks:cks`, mode 0640으로 만들고 경로만 Compose interpolation용 `FMR_SSO_EDGE_SECRET_FILE`에 둔다. Compose는 서버를 비-root UID 10001, GID 0으로 실행하며 read-only bind는 container의 `/run/secrets/fmr_sso_edge_secret`에서 `root:root` mode 0640으로 보여야 한다. 서버는 owner/group/mode와 effective GID 0을 시작 시 검증한다. secret 본문을 Compose·`.env`·nginx access log·CI output에 넣지 않는다. 환경변수 `FMR_SSO_EDGE_SECRET`은 개발/격리 테스트 fallback일 뿐 운영 기본이 아니다.
 - outer trusted proxy는 client가 보낸 `Remote-*`와 `X-Portfolio-Edge-Secret`을 제거·덮어쓰고, auth_request 결과의 subject/email/name과 위 파일의 앱 전용 secret을 loopback fmrWeb에 전달한다. 내부 nginx는 API와 WebSocket upstream 모두에 이 header를 명시 전달한다. 서버는 SSO exchange, 모든 bearer HTTP API, refresh, logout과 room·annotation WebSocket의 first-frame token 인증에서 secret과 `Remote-User == User.sso_subject`를 함께 검사한다. `/api/health`와 명시적 public HTTP 경로만 예외다.
 - target preflight는 SMTP를 명시적으로 skipped로 기록하고 S3 대신 local upload root의 runtime 접근성을 확인한다. 이 결과는 provider 준비나 object backup 완료를 뜻하지 않는다.
 - web release는 `VITE_FMR_MANAGED_LOCAL_SSO=true`로 빌드한다. 첫 진입 dialog와 topbar 경고 버튼은 적용 중인 임시 조치와 S3 이관, SMTP, local backup, association, OMR 후속 작업을 계속 표시한다.
 
-기존 owner bootstrap이 필요한 경우에만 target image 승격 뒤 별도 mode-0700 operator directory와 one-shot container를 사용한다. credentials file을 안전한 password manager로 옮긴 뒤 서버 사본의 보존 여부를 결정한다. 새 운영 계정은 중앙 관리자 화면에서 만들고, 비밀번호나 edge secret을 채팅·CI log·shell argument로 넘기지 않는다.
+새 운영 계정은 중앙 관리자 화면에서 만들고 trusted exchange로 앱에 투영한다. 앱 DB에 운영 비밀번호를 만들거나 비밀번호·edge secret을 채팅·CI log·shell argument로 넘기지 않는다.
 
 standard 전환 순서는 local volume backup → S3 bucket/CORS/lifecycle/credential 준비 → local object key·size 이관 검증 → SMTP domain/TLS/auth와 실제 수신 시험 → `FMR_DEPLOYMENT_PROFILE=standard` 및 S3 설정 전환 → non-skip provider preflight → public email workflow 시험 → temporary web build flag/dialog 제거다.
 
@@ -142,7 +142,7 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 ## 7. RPi 복구 후 마지막 단계
 
-RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
+RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. Validate와 deploy workflow는 checkout의 실제 source branch를 `PORTFOLIO_BRANCH`로 주입하고 resolver가 만든 mode를 이후 step에 전달한다. `dev`도 `dev/sso`로 ARM64 server/web image build와 runtime smoke를 완료하지만 registry push, latest/release 취급, 제한 SSH 운영 배포는 실행하지 않는다. main image build와 운영 Compose에는 `main/sso`가 모두 명시되어야 한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
 
 GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최대 20분 대기할 수 있으므로 timeout을 40분으로 유지한다. 이 직렬화는 다른 Compose project가 동시에 변경되어 snapshot 검증이 무의미해지는 것을 막는다.
 

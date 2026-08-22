@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Condition
@@ -8,6 +9,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Unit tests exercise local authentication unless a test constructs an explicit SSO contract.
+os.environ["PORTFOLIO_BRANCH"] = "test"
+os.environ["PORTFOLIO_AUTH_MODE"] = "local"
 
 from app.config import Settings
 from app.mailer import AccountDeletionMessage, EmailVerificationMessage, PasswordResetMessage

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -13,6 +15,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from alembic import command
+from app import config as config_module
 from app.config import UNSAFE_PRODUCTION_JWT_SECRETS, Settings
 from app.main import create_app
 from app.models import Base
@@ -78,6 +81,8 @@ def test_production_settings_require_secret_postgres_and_migrations() -> None:
 
 def test_production_email_verification_configuration_fails_closed() -> None:
     base = {
+        "portfolio_branch": "release-candidate",
+        "portfolio_auth_mode": "local",
         "environment": "production",
         "jwt_secret": "runtime-secret-with-at-least-32-characters",
         "database_url": "postgresql+psycopg://user:password@db/feelmyrythm",
@@ -119,6 +124,8 @@ def test_production_email_verification_configuration_fails_closed() -> None:
 
 def test_managed_local_sso_production_is_explicit_and_fail_closed() -> None:
     base = {
+        "portfolio_branch": "main",
+        "portfolio_auth_mode": "sso",
         "environment": "production",
         "deployment_profile": "managed_local_sso",
         "sso_enabled": True,
@@ -148,7 +155,7 @@ def test_managed_local_sso_production_is_explicit_and_fail_closed() -> None:
             smtp_host="smtp.example.test",
             smtp_from_email="noreply@example.com",
         )
-    with pytest.raises(ValidationError, match="FMR_SSO_ENABLED=true"):
+    with pytest.raises(ValidationError, match="FMR_SSO_ENABLED conflicts"):
         Settings(**{**base, "sso_enabled": False})
     with pytest.raises(ValidationError, match="32 to 4096 printable characters"):
         Settings(**{**base, "sso_edge_secret": "too-short"})
@@ -175,6 +182,8 @@ def test_managed_local_sso_prefers_a_bounded_private_secret_file(
     monkeypatch.setattr("app.config.os.fstat", container_fstat)
     monkeypatch.setattr("app.config.os.getegid", lambda: effective_gid["value"])
     base = {
+        "portfolio_branch": "main",
+        "portfolio_auth_mode": "sso",
         "environment": "production",
         "deployment_profile": "managed_local_sso",
         "sso_enabled": True,
@@ -225,7 +234,9 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     repository_root = Path(__file__).resolve().parents[3]
     example = (repository_root / ".env.example").read_text()
     configured = (
-        example.replace(
+        example.replace("PORTFOLIO_BRANCH=\n", "PORTFOLIO_BRANCH=test\n")
+        .replace("PORTFOLIO_AUTH_MODE=\n", "PORTFOLIO_AUTH_MODE=local\n")
+        .replace(
             "FMR_JWT_SECRET=\n",
             "FMR_JWT_SECRET=runtime-secret-with-at-least-32-characters\n",
         )
@@ -239,6 +250,8 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     settings = Settings(_env_file=runtime_env)
 
     assert settings.environment == "production"
+    assert settings.portfolio_branch == "test"
+    assert settings.portfolio_auth_mode == "local"
     assert settings.deployment_profile == "standard"
     assert settings.sso_enabled is False
     assert settings.sso_edge_secret is not None
@@ -293,6 +306,8 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     volumes = compose.split("\nvolumes:\n", 1)[1]
 
     required_lines = {
+        "PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?set the deployed source branch}",
+        "PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?resolve the branch auth contract}",
         "FMR_DEPLOYMENT_PROFILE: managed_local_sso",
         "FMR_SSO_ENABLED: 'true'",
         "FMR_SSO_EDGE_SECRET_FILE: /run/secrets/fmr_sso_edge_secret",
@@ -361,8 +376,11 @@ def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
 
     assert "VITE_FMR_MANAGED_LOCAL_SSO=true" in workflow
     assert "VITE_FMR_SSO_ENABLED=true" in workflow
-    assert "ARG VITE_FMR_MANAGED_LOCAL_SSO=false" in web_dockerfile
-    assert "ARG VITE_FMR_SSO_ENABLED=false" in web_dockerfile
+    assert "ARG PORTFOLIO_BRANCH" in web_dockerfile
+    assert "ARG PORTFOLIO_AUTH_MODE" in web_dockerfile
+    assert "ARG VITE_FMR_MANAGED_LOCAL_SSO" in web_dockerfile
+    assert "ARG VITE_FMR_SSO_ENABLED" in web_dockerfile
+    assert "ENV PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" in web_dockerfile
     assert "ENV VITE_FMR_MANAGED_LOCAL_SSO=${VITE_FMR_MANAGED_LOCAL_SSO}" in web_dockerfile
     assert "install -d -o 10001 -g 10001 -m 0750 /data/uploads" in server_dockerfile
     for task in (
@@ -374,6 +392,191 @@ def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
         "모바일 연결 파일과 OMR 운영 의존성 완성",
     ):
         assert task in notice
+
+
+def test_portfolio_auth_contract_drives_and_checks_the_legacy_sso_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    edge_secret = "test-fmr-edge-secret-with-at-least-32-characters"
+    for branch in ("main", "dev", "refs/heads/main"):
+        settings = Settings(
+            _env_file=None,
+            portfolio_branch=branch,
+            portfolio_auth_mode="sso",
+            sso_edge_secret=edge_secret,
+        )
+        assert settings.portfolio_branch in {"main", "dev"}
+        assert settings.sso_enabled is True
+
+    local = Settings(
+        _env_file=None,
+        portfolio_branch="feature/local-auth",
+        portfolio_auth_mode="local",
+    )
+    assert local.sso_enabled is False
+
+    with pytest.raises(ValidationError, match="requires PORTFOLIO_AUTH_MODE=sso"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="main",
+            portfolio_auth_mode="local",
+        )
+    with pytest.raises(ValidationError, match="FMR_SSO_ENABLED conflicts"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="feature/local-auth",
+            portfolio_auth_mode="local",
+            sso_enabled=True,
+        )
+    with pytest.raises(ValidationError, match="FMR_SSO_EDGE_SECRET"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="dev",
+            portfolio_auth_mode="sso",
+        )
+
+    monkeypatch.delenv("PORTFOLIO_BRANCH")
+    monkeypatch.delenv("PORTFOLIO_AUTH_MODE")
+    with pytest.raises(ValidationError, match="PORTFOLIO_BRANCH"):
+        Settings(_env_file=None)
+
+
+def test_server_image_contract_cannot_be_changed_at_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_contract = tmp_path / "portfolio-auth-build"
+    build_contract.write_text("main\nsso\n", encoding="ascii")
+    monkeypatch.setattr(config_module, "PORTFOLIO_BUILD_CONTRACT_PATH", build_contract)
+
+    matching = Settings(
+        _env_file=None,
+        portfolio_branch="main",
+        portfolio_auth_mode="sso",
+        sso_edge_secret="test-fmr-edge-secret-with-at-least-32-characters",
+    )
+    assert matching.portfolio_branch == "main"
+
+    with pytest.raises(ValidationError, match="differs from the immutable server image"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="runtime-smoke",
+            portfolio_auth_mode="local",
+        )
+    with pytest.raises(ValidationError, match="differs from the immutable server image"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="dev",
+            portfolio_auth_mode="sso",
+        )
+
+    build_contract.write_text("main\nlocal\n", encoding="ascii")
+    with pytest.raises(ValidationError, match="invalid branch/mode mapping"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="main",
+            portfolio_auth_mode="sso",
+            sso_edge_secret="test-fmr-edge-secret-with-at-least-32-characters",
+        )
+
+    build_contract.write_text("main\nsso", encoding="ascii")
+    with pytest.raises(ValidationError, match="must contain branch and mode"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="main",
+            portfolio_auth_mode="sso",
+            sso_edge_secret="test-fmr-edge-secret-with-at-least-32-characters",
+        )
+
+    target_contract = tmp_path / "portfolio-auth-build-target"
+    target_contract.write_text("main\nsso\n", encoding="ascii")
+    build_contract.unlink()
+    build_contract.symlink_to(target_contract)
+    with pytest.raises(ValidationError, match="regular image file"):
+        Settings(
+            _env_file=None,
+            portfolio_branch="main",
+            portfolio_auth_mode="sso",
+            sso_edge_secret="test-fmr-edge-secret-with-at-least-32-characters",
+        )
+
+
+@pytest.mark.repository_contract
+def test_shared_portfolio_auth_resolver_is_pinned_and_executable() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    resolver = repository_root / "scripts/portfolio-auth-mode.sh"
+    resolver_test = repository_root / "scripts/test-portfolio-auth-mode.sh"
+
+    assert hashlib.sha256(resolver.read_bytes()).hexdigest() == (
+        "93d730a2507336c9bfcec3444bc83847b319e41c71dc4d6188f068abf12383ee"
+    )
+    assert resolver.stat().st_mode & 0o111
+    assert resolver_test.stat().st_mode & 0o111
+    completed = subprocess.run(
+        [str(resolver_test)],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "portfolio auth mode contract: ok"
+
+
+@pytest.mark.repository_contract
+def test_portfolio_auth_contract_is_injected_into_builds_and_containers() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    ci = (repository_root / ".github/workflows/ci.yml").read_text()
+    deploy = (repository_root / ".github/workflows/deploy.yml").read_text()
+    development_compose = (repository_root / "docker-compose.yml").read_text()
+    production_compose = (repository_root / "docker-compose.prod.yml").read_text()
+    runtime_smoke = (repository_root / ".github/scripts/smoke-runtime-images.sh").read_text()
+    package_manifest = (repository_root / "package.json").read_text()
+    server_dockerfile = (repository_root / "apps/server/Dockerfile").read_text()
+    web_dockerfile = (repository_root / "apps/web/Dockerfile").read_text()
+    web_runtime_contract = (repository_root / "apps/web/docker/40-validate-portfolio-auth.sh").read_text()
+    alembic_environment = (repository_root / "apps/server/alembic/env.py").read_text()
+    operations = (repository_root / "docs/OPERATIONS.md").read_text()
+
+    assert ci.count("name: Resolve portfolio auth contract") == 5
+    assert "PORTFOLIO_BRANCH: ${{ github.head_ref || github.ref_name }}" in ci
+    assert "sh scripts/portfolio-auth-mode.sh print" in ci
+    assert "PORTFOLIO_BRANCH: ${{ github.event.workflow_run.head_branch }}" in deploy
+    assert "PORTFOLIO_BRANCH=${{ steps.portfolio_auth.outputs.branch }}" in deploy
+    assert "PORTFOLIO_AUTH_MODE=${{ steps.portfolio_auth.outputs.auth_mode }}" in deploy
+    assert "branches:\n      - dev\n      - main" in deploy
+    assert deploy.count("if: github.event.workflow_run.head_branch == 'main'") == 3
+    assert ":latest" not in deploy
+    assert development_compose.count("PORTFOLIO_BRANCH:") >= 4
+    assert development_compose.count("PORTFOLIO_AUTH_MODE:") >= 4
+    assert production_compose.count("PORTFOLIO_BRANCH:") >= 2
+    assert production_compose.count("PORTFOLIO_AUTH_MODE:") >= 2
+    assert '[[ "$PORTFOLIO_AUTH_MODE" == "sso" ]]' in runtime_smoke
+    assert "PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" in runtime_smoke
+    assert "PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" in runtime_smoke
+    assert "differs from the immutable server image contract" in runtime_smoke
+    assert "does not match image" in runtime_smoke
+    assert "FROM base AS portfolio-contract" in server_dockerfile
+    assert "FROM portfolio-contract AS runtime" in server_dockerfile
+    assert "COPY scripts/portfolio-auth-mode.sh /usr/local/bin/portfolio-auth-mode" in server_dockerfile
+    assert "RUN portfolio-auth-mode check" in server_dockerfile
+    assert "/etc/portfolio-auth-build" in server_dockerfile
+    assert "load_settings()' && alembic upgrade head" in server_dockerfile
+    assert "load_settings().database_url" in alembic_environment
+    assert "FROM nginx:1.29.4-alpine" in web_dockerfile
+    assert "ENV PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" in web_dockerfile
+    assert "work.bonifacio.portfolio.auth-mode=${PORTFOLIO_AUTH_MODE}" in web_dockerfile
+    assert "/etc/portfolio-auth-build" in web_dockerfile
+    assert "portfolio-auth-mode check" in web_runtime_contract
+    assert (repository_root / "apps/web/docker/40-validate-portfolio-auth.sh").stat().st_mode & 0o111
+    assert '"portfolio-auth:check": "scripts/test-portfolio-auth-mode.sh"' in package_manifest
+    assert (
+        '"dev": "PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- '
+        'corepack pnpm --filter @feelmyrythm/web dev"'
+    ) in package_manifest
+    assert "FMR_SSO_ENABLED: 'false'" in development_compose
+    assert "VITE_FMR_SSO_ENABLED: 'false'" in development_compose
+    assert not (repository_root / "apps/server/scripts/bootstrap_single_user.py").exists()
+    assert "bootstrap_single_user.py" not in operations
 
 
 @pytest.mark.parametrize("unsafe_secret", sorted(UNSAFE_PRODUCTION_JWT_SECRETS))

@@ -48,6 +48,8 @@ def sso_headers(
 def managed_sso_settings(settings: Settings) -> Settings:
     return settings.model_copy(
         update={
+            "portfolio_branch": "main",
+            "portfolio_auth_mode": "sso",
             "deployment_profile": "managed_local_sso",
             "sso_enabled": True,
             "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
@@ -172,12 +174,80 @@ def test_sso_links_an_existing_owner_once_and_removes_local_credentials(
         )
 
 
+def test_repeated_sso_exchange_removes_reintroduced_local_credentials_and_sessions(
+    settings: Settings,
+    mail_sender: FakeMailSender,
+) -> None:
+    headers = sso_headers("central-owner", "owner@example.com")
+    with TestClient(
+        create_app(
+            managed_sso_settings(settings),
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=mail_sender,
+        )
+    ) as sso_client:
+        initial = sso_client.post("/api/auth/sso", headers=headers)
+        assert initial.status_code == 200, initial.text
+        initial_tokens = initial.json()
+        user_id = initial_tokens["user"]["id"]
+
+        with sso_client.app.state.database.session_factory() as session:
+            linked_user = session.get(User, user_id)
+            assert linked_user is not None
+            linked_user.password_hash = hash_password("reintroduced-password")
+            linked_user.google_subject = "reintroduced-google-subject"
+            session.commit()
+
+        projected = sso_client.post("/api/auth/sso", headers=headers)
+        assert projected.status_code == 200, projected.text
+        projected_tokens = projected.json()
+        assert projected_tokens["user"]["id"] == user_id
+
+        with sso_client.app.state.database.session_factory() as session:
+            linked_user = session.get(User, user_id)
+            assert linked_user is not None
+            assert linked_user.password_hash is None
+            assert linked_user.google_subject is None
+            assert linked_user.auth_generation == 1
+            assert (
+                session.scalar(
+                    select(func.count()).select_from(RefreshSession).where(RefreshSession.user_id == user_id)
+                )
+                == 1
+            )
+
+        assert (
+            sso_client.get(
+                "/api/users/me",
+                headers={**auth(initial_tokens["accessToken"]), **headers},
+            ).status_code
+            == 401
+        )
+        assert (
+            sso_client.post(
+                "/api/auth/refresh",
+                headers=headers,
+                json={"refreshToken": initial_tokens["refreshToken"]},
+            ).status_code
+            == 401
+        )
+        assert (
+            sso_client.get(
+                "/api/users/me",
+                headers={**auth(projected_tokens["accessToken"]), **headers},
+            ).status_code
+            == 200
+        )
+
+
 def test_sso_mode_disables_local_credential_routes(
     settings: Settings,
     mail_sender: FakeMailSender,
 ) -> None:
     sso_settings = settings.model_copy(
         update={
+            "portfolio_branch": "main",
+            "portfolio_auth_mode": "sso",
             "sso_enabled": True,
             "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
         }
@@ -271,6 +341,8 @@ def test_standard_sso_does_not_implicitly_provision_unknown_users(
 ) -> None:
     standard_sso = settings.model_copy(
         update={
+            "portfolio_branch": "main",
+            "portfolio_auth_mode": "sso",
             "sso_enabled": True,
             "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),
         }

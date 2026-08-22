@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_ROOT))
+
+# Schema generation is an isolated local-auth fixture, not a deployable branch build.
+os.environ["PORTFOLIO_BRANCH"] = "openapi-schema"
+os.environ["PORTFOLIO_AUTH_MODE"] = "local"
 
 from app.main import create_app  # noqa: E402
 

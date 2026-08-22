@@ -7,13 +7,14 @@ on:
     types:
       - completed
     branches:
+      - dev
       - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: feelmyrythm-production
+  group: feelmyrythm-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 env:
@@ -25,12 +26,14 @@ env:
 
 jobs:
   publish:
-    name: Publish validated immutable ARM64 images
+    name: Build validated ARM64 images and publish main
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.head_branch == 'main' ||
+       github.event.workflow_run.head_branch == 'dev') &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.head_sha == github.sha &&
+      (github.event.workflow_run.head_branch != 'main' ||
+       github.event.workflow_run.head_sha == github.sha) &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
@@ -55,6 +58,17 @@ jobs:
           ref: ${{ steps.source.outputs.sha }}
           persist-credentials: false
 
+      - name: Resolve portfolio auth contract
+        id: portfolio_auth
+        env:
+          PORTFOLIO_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          PORTFOLIO_AUTH_MODE="$(sh scripts/portfolio-auth-mode.sh print)"
+          printf 'PORTFOLIO_BRANCH=%s\nPORTFOLIO_AUTH_MODE=%s\n' \
+            "$PORTFOLIO_BRANCH" "$PORTFOLIO_AUTH_MODE" >> "$GITHUB_ENV"
+          printf 'branch=%s\nauth_mode=%s\n' \
+            "$PORTFOLIO_BRANCH" "$PORTFOLIO_AUTH_MODE" >> "$GITHUB_OUTPUT"
+
       - name: Verify checked-out commit
         env:
           VALIDATED_SHA: ${{ steps.source.outputs.sha }}
@@ -63,6 +77,7 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "$VALIDATED_SHA" ]]
 
       - name: Sign in to GitHub Container Registry
+        if: github.event.workflow_run.head_branch == 'main'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.REGISTRY }}
@@ -75,22 +90,30 @@ jobs:
       - name: Test server image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          context: ./apps/server
+          context: .
+          file: ./apps/server/Dockerfile
           target: test
           platforms: linux/arm64
           push: false
           pull: true
+          build-args: |
+            PORTFOLIO_BRANCH=${{ steps.portfolio_auth.outputs.branch }}
+            PORTFOLIO_AUTH_MODE=${{ steps.portfolio_auth.outputs.auth_mode }}
           cache-from: type=gha,scope=feelmyrythm-server
 
       - name: Build immutable server runtime image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          context: ./apps/server
+          context: .
+          file: ./apps/server/Dockerfile
           platforms: linux/arm64
           load: true
           push: false
           pull: true
           tags: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
+          build-args: |
+            PORTFOLIO_BRANCH=${{ steps.portfolio_auth.outputs.branch }}
+            PORTFOLIO_AUTH_MODE=${{ steps.portfolio_auth.outputs.auth_mode }}
           cache-from: type=gha,scope=feelmyrythm-server
           cache-to: type=gha,mode=max,scope=feelmyrythm-server
 
@@ -105,6 +128,8 @@ jobs:
           pull: true
           tags: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
           build-args: |
+            PORTFOLIO_BRANCH=${{ steps.portfolio_auth.outputs.branch }}
+            PORTFOLIO_AUTH_MODE=${{ steps.portfolio_auth.outputs.auth_mode }}
             VITE_GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
             VITE_FMR_MANAGED_LOCAL_SSO=true
             VITE_FMR_SSO_ENABLED=true
@@ -120,6 +145,7 @@ jobs:
         run: bash .github/scripts/smoke-runtime-images.sh
 
       - name: Publish the smoke-tested immutable images
+        if: github.event.workflow_run.head_branch == 'main'
         env:
           SERVER_RUNTIME_IMAGE: ${{ env.SERVER_IMAGE }}:${{ steps.source.outputs.sha }}
           WEB_RUNTIME_IMAGE: ${{ env.WEB_IMAGE }}:${{ steps.source.outputs.sha }}
@@ -131,6 +157,7 @@ jobs:
   deploy:
     name: Request restricted server deployment
     needs: publish
+    if: github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-24.04
     # The host serializes portfolio deploys with a lock that may wait up to 20 minutes.
     timeout-minutes: 40

@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: {
     cwd: '..',
     command:
-      'corepack pnpm --filter @feelmyrythm/core --filter @feelmyrythm/audio build && corepack pnpm --filter @feelmyrythm/web build && node e2e/pwa/server.mjs',
+      'PORTFOLIO_BRANCH=e2e-pwa PORTFOLIO_AUTH_MODE=local corepack pnpm --filter @feelmyrythm/core --filter @feelmyrythm/audio build && PORTFOLIO_BRANCH=e2e-pwa PORTFOLIO_AUTH_MODE=local corepack pnpm --filter @feelmyrythm/web build && node e2e/pwa/server.mjs',
     url: `${baseURL}/__pwa/health`,
     reuseExistingServer: false,
     timeout: 180_000,

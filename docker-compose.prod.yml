@@ -40,6 +40,8 @@ services:
     env_file:
       - .env
     environment:
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?set the deployed source branch}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?resolve the branch auth contract}
       FMR_ENVIRONMENT: production
       FMR_DEPLOYMENT_PROFILE: managed_local_sso
       FMR_SSO_ENABLED: 'true'
@@ -100,6 +102,9 @@ services:
     image: ghcr.io/facio313/feelmyrythm-web:${FMR_IMAGE_TAG:?set a 40-character commit SHA}
     platform: linux/arm64
     container_name: fmrWeb
+    environment:
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?set the deployed source branch}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?resolve the branch auth contract}
     depends_on:
       fmrServer:
         condition: service_healthy

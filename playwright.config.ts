@@ -38,7 +38,7 @@ export default defineConfig({
     : {
         webServer: {
           command:
-            'corepack pnpm build:workspace-libs && corepack pnpm --filter @feelmyrythm/web build:e2e && corepack pnpm --filter @feelmyrythm/web preview --host 127.0.0.1 --port 4173 --strictPort',
+            'PORTFOLIO_BRANCH=e2e PORTFOLIO_AUTH_MODE=local corepack pnpm build:workspace-libs && PORTFOLIO_BRANCH=e2e PORTFOLIO_AUTH_MODE=local corepack pnpm --filter @feelmyrythm/web build:e2e && corepack pnpm --filter @feelmyrythm/web preview --host 127.0.0.1 --port 4173 --strictPort',
           url: localBaseUrl,
           reuseExistingServer: false,
           timeout: 120_000,

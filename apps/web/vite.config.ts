@@ -1,13 +1,16 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { resolvePortfolioAuthBuildContract } from './src/lib/portfolioAuthContract';
 
 const MOBILE_SERVER_ORIGIN = 'https://bonifacio.work';
 
 export default defineConfig(({ mode }) => {
   const mobile = mode === 'mobile';
   const e2e = mode === 'e2e';
+  const buildEnvironment = { ...loadEnv(mode, process.cwd(), ''), ...process.env };
+  const portfolioAuth = resolvePortfolioAuthBuildContract(buildEnvironment);
 
   return {
     base: mobile ? './' : '/feelmyrythm/',
@@ -15,6 +18,8 @@ export default defineConfig(({ mode }) => {
     define: {
       __FMR_MOBILE_SERVER_ORIGIN__: JSON.stringify(MOBILE_SERVER_ORIGIN),
       __FMR_PWA_ENABLED__: JSON.stringify(!mobile && !e2e),
+      __FMR_PORTFOLIO_AUTH_MODE__: JSON.stringify(portfolioAuth.authMode),
+      __FMR_MANAGED_LOCAL_SSO__: JSON.stringify(portfolioAuth.managedLocalSso),
     },
     plugins: [
       react(),

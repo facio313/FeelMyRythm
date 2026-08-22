@@ -544,6 +544,13 @@ def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPa
         user = subject_user
         # The stable subject is authoritative. A central email/name update is
         # safe only while the new email is not owned by another local identity.
+        # Re-project every linked account into SSO-only credentials. This also
+        # repairs legacy/manual drift without leaving its bearer sessions usable.
+        if user.password_hash is not None or user.google_subject is not None:
+            user.password_hash = None
+            user.google_subject = None
+            user.auth_generation += 1
+            db.execute(delete(RefreshSession).where(RefreshSession.user_id == user.id))
         user.email = email
         user.display_name = display_name
     elif email_user is not None:

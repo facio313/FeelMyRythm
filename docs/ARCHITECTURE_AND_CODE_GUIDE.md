@@ -165,9 +165,9 @@ flowchart TD
 
 실행 방식은 환경에 따라 다르다.
 
-- 로컬: `uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload`
+- 로컬 checkout: `PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload`
 - development image: [`Dockerfile`](../apps/server/Dockerfile)의 `development` target이 reload Uvicorn을 실행한다.
-- production image: 같은 Dockerfile의 final target이 `alembic upgrade head` 성공 후 `exec uvicorn app.main:app`을 실행한다. migration 실패 시 API를 시작하지 않는다.
+- production image: 같은 Dockerfile의 final target이 `/etc/portfolio-auth-build`의 immutable build branch/mode와 runtime canonical 계약을 공통 resolver와 server `Settings`에서 각각 대조하고, `load_settings()` 검증 뒤 `alembic upgrade head`와 `exec uvicorn app.main:app`을 순서대로 실행한다. 설정 또는 migration이 실패하면 API를 시작하지 않는다.
 
 `create_app()` 호출만으로 DB 연결과 worker loop가 시작되는 것은 아니다. 이들은 ASGI lifespan startup 때 만들어진다. 따라서 app factory를 쓰는 테스트는 lifespan을 실제로 열었는지 구분해야 한다.
 
@@ -306,7 +306,7 @@ Celery, RQ, APScheduler, Kubernetes CronJob이나 OS cron은 없다. API process
 | 설정군 | 주요 변수 | 기본·검증 의미 |
 | --- | --- | --- |
 | 환경·DB | `FMR_ENVIRONMENT`, `FMR_DATABASE_URL`, `FMR_AUTO_CREATE_SCHEMA` | 개발 기본 SQLite/auto-create. 운영은 PostgreSQL과 `false`를 강제하고 Alembic만 사용 |
-| Portfolio SSO | `FMR_DEPLOYMENT_PROFILE`, `FMR_SSO_ENABLED`, `FMR_SSO_EDGE_SECRET_FILE` (`FMR_SSO_EDGE_SECRET` fallback) | `managed_local_sso`는 SSO와 32–4096 printable byte 앱 전용 edge secret, 절대 local upload path를 강제하고 SMTP를 금지한다. rootless host는 `cks:cks` mode-0640 file을 read-only bind하고 Compose는 UID 10001/GID 0을 사용한다. 서버는 container `root:root` mode 0640과 effective GID 0을 검증하며 secret은 outer proxy와 server에만 둔다. |
+| Portfolio auth | `PORTFOLIO_BRANCH`, `PORTFOLIO_AUTH_MODE`, `FMR_DEPLOYMENT_PROFILE`, legacy `FMR_SSO_ENABLED`, `FMR_SSO_EDGE_SECRET_FILE` (`FMR_SSO_EDGE_SECRET` fallback) | 공통 resolver는 `main/dev → sso`, 나머지 branch → `local`을 강제한다. local checkout은 Git branch를 감지하고 CI/build/container는 branch와 mode를 명시한다. legacy SSO flag가 있으면 canonical mode와 정확히 일치해야 한다. SSO는 32–4096 printable byte 앱 전용 edge secret을 강제한다. `managed_local_sso`는 절대 local upload path와 SMTP 금지를 추가하며 rootless host는 `cks:cks` mode-0640 file을 read-only bind하고 Compose는 UID 10001/GID 0을 사용한다. 서버는 container `root:root` mode 0640과 effective GID 0을 검증한다. |
 | JWT | `FMR_JWT_SECRET`, `FMR_JWT_ISSUER`, `FMR_ACCESS_TOKEN_MINUTES`, `FMR_REFRESH_TOKEN_DAYS` | 운영 secret 32자 이상·알려진 placeholder 거부. 개발에서 생략하면 process-random이라 재시작 시 기존 token 만료 |
 | Google | `FMR_GOOGLE_CLIENT_ID` | server ID-token audience. web build의 `VITE_GOOGLE_CLIENT_ID`와 같은 OAuth web client ID 사용 |
 | link | `FMR_WEB_APP_BASE_URL`, verification/reset/delete 만료·재요청 초 | 운영 HTTPS·query/fragment 없음. 기본 link 만료 verification/reset 30분, delete 15분 |
@@ -641,7 +641,7 @@ python3 --version
 uv --version
 ```
 
-먼저 [`AGENTS.md`](../AGENTS.md)의 브랜치·운영 DB 경계를 읽는다. `.env`, 실제 DB/S3/SMTP credential, mobile signing 자산은 커밋하지 않는다. 개발 편의를 위해 공용 `cksDB`를 로컬 stack에서 만들거나 지우지 않는다.
+먼저 [`AGENTS.md`](../AGENTS.md)의 브랜치·운영 DB 경계를 읽는다. `.env`, 실제 DB/S3/SMTP credential, mobile signing 자산은 커밋하지 않는다. 개발 편의를 위해 공용 `cksDB`를 로컬 stack에서 만들거나 지우지 않는다. `scripts/portfolio-auth-mode.sh print`로 현재 mode를 확인한다. `main`과 `dev`는 SSO/edge secret이 필수이고, 독립적인 local 가입·로그인·직접 접근은 그 밖의 tool/feature branch에서만 열린다. 명시적 `PORTFOLIO_AUTH_MODE`로 이 매핑을 뒤집을 수 없다.
 
 ### 15.2 의존성 설치
 
@@ -655,6 +655,8 @@ uv sync --project apps/server --frozen --all-groups
 ### 15.3 최소 개발용 `.env`
 
 루트 [`.env.example`](../.env.example)은 **운영 배포 템플릿**이다. 빈 `FMR_SMTP_FROM_EMAIL=` 같은 typed placeholder를 포함하므로 그대로 복사한 뒤 일부 값만 개발용으로 바꾸는 절차는 권장하지 않는다. root에 새 `.env`를 만들고 최소한 다음처럼 작성한다.
+
+아래 로컬 checkout 명령은 resolver가 현재 Git branch를 자식 process에 주입한다. detached checkout, CI, Docker build와 배포 host에는 `PORTFOLIO_BRANCH`와 resolved `PORTFOLIO_AUTH_MODE`를 둘 다 명시한다.
 
 ```dotenv
 FMR_ENVIRONMENT=development
@@ -703,7 +705,8 @@ cd ../..
 터미널 1:
 
 ```bash
-uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload
+PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- \
+  uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload
 ```
 
 터미널 2:
@@ -711,6 +714,8 @@ uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload
 ```bash
 corepack pnpm dev
 ```
+
+두 명령은 모두 local mode를 명시적으로 요청한다. 따라서 독립 가입·로그인은 tool/feature branch에서만 열리며, `main`/`dev`에서는 resolver가 실행을 즉시 거부한다.
 
 - 웹: `http://localhost:5173/feelmyrythm/`
 - API health: `http://localhost:8000/api/health`
@@ -743,7 +748,7 @@ corepack pnpm protocol:check
 [`docker-compose.yml`](../docker-compose.yml)은 server development target을 8000, nginx web bundle을 5175에 띄우는 smoke에 가깝다. DB service는 없고 SQLite 기본값을 사용한다.
 
 ```bash
-docker compose up --build
+PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- docker compose up --build
 ```
 
 현재 Compose에는 source volume이 없다. 따라서 server CMD에 `--reload`가 있어도 host code 변경이 container에 들어가지 않으며, web도 Vite HMR가 아니라 build된 nginx image다. 일상 코딩에는 위의 Uvicorn+Vite 두 terminal 방식을 사용하고, container 경계 확인 때 Compose를 rebuild한다.
@@ -751,7 +756,7 @@ docker compose up --build
 ### 15.8 모바일 개발 순서
 
 ```bash
-corepack pnpm --filter @feelmyrythm/mobile sync
+scripts/portfolio-auth-mode.sh exec -- corepack pnpm --filter @feelmyrythm/mobile sync
 corepack pnpm --filter @feelmyrythm/mobile open:ios
 # 또는
 corepack pnpm --filter @feelmyrythm/mobile open:android

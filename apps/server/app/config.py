@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import stat
 from functools import cached_property
@@ -17,6 +18,49 @@ UNSAFE_PRODUCTION_JWT_SECRETS = frozenset(
         "change-me-before-production-deploy",
     }
 )
+PORTFOLIO_BUILD_CONTRACT_PATH = Path("/etc/portfolio-auth-build")
+
+
+def _normalize_portfolio_branch(branch: str, *, source: str) -> str:
+    normalized = branch.removeprefix("refs/heads/")
+    if not normalized:
+        raise ValueError(f"{source} must be non-empty")
+    if re.fullmatch(r"[A-Za-z0-9._/-]+", normalized) is None:
+        raise ValueError(f"{source} contains unsupported characters")
+    return normalized
+
+
+def _expected_portfolio_auth_mode(branch: str) -> Literal["sso", "local"]:
+    return "sso" if branch in {"main", "dev"} else "local"
+
+
+def _read_portfolio_build_contract() -> tuple[str, Literal["sso", "local"]] | None:
+    try:
+        metadata = PORTFOLIO_BUILD_CONTRACT_PATH.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("immutable server portfolio auth contract is unreadable") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError("immutable server portfolio auth contract must be a regular image file")
+
+    try:
+        contents = PORTFOLIO_BUILD_CONTRACT_PATH.read_text(encoding="ascii")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("immutable server portfolio auth contract is unreadable") from exc
+
+    lines = contents.split("\n")
+    if len(lines) != 3 or lines[2] != "":
+        raise ValueError("immutable server portfolio auth contract must contain branch and mode")
+    branch = _normalize_portfolio_branch(
+        lines[0],
+        source="immutable server portfolio auth contract branch",
+    )
+    mode = lines[1]
+    expected_mode = _expected_portfolio_auth_mode(branch)
+    if mode not in {"sso", "local"} or mode != expected_mode:
+        raise ValueError("immutable server portfolio auth contract has an invalid branch/mode mapping")
+    return branch, mode
 
 
 class Settings(BaseSettings):
@@ -25,8 +69,11 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
+    portfolio_branch: str = Field(validation_alias="PORTFOLIO_BRANCH")
+    portfolio_auth_mode: Literal["sso", "local"] = Field(validation_alias="PORTFOLIO_AUTH_MODE")
     environment: Literal["development", "test", "production"] = "development"
     deployment_profile: Literal["standard", "managed_local_sso"] = "standard"
     sso_enabled: bool = False
@@ -99,6 +146,31 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
+        normalized_branch = _normalize_portfolio_branch(
+            self.portfolio_branch,
+            source="PORTFOLIO_BRANCH",
+        )
+        expected_auth_mode = _expected_portfolio_auth_mode(normalized_branch)
+        if self.portfolio_auth_mode != expected_auth_mode:
+            raise ValueError(
+                f"PORTFOLIO_BRANCH={normalized_branch} requires PORTFOLIO_AUTH_MODE={expected_auth_mode}"
+            )
+        self.portfolio_branch = normalized_branch
+        build_contract = _read_portfolio_build_contract()
+        if build_contract is not None and build_contract != (
+            normalized_branch,
+            self.portfolio_auth_mode,
+        ):
+            raise ValueError(
+                "runtime portfolio auth contract differs from the immutable server image contract"
+            )
+        expected_sso_enabled = expected_auth_mode == "sso"
+        if "sso_enabled" in self.model_fields_set and self.sso_enabled != expected_sso_enabled:
+            raise ValueError(
+                f"FMR_SSO_ENABLED conflicts with the canonical PORTFOLIO_AUTH_MODE ({expected_auth_mode})"
+            )
+        self.sso_enabled = expected_sso_enabled
+
         smtp_host_configured = bool(self.smtp_host and self.smtp_host.strip())
         smtp_from_configured = self.smtp_from_email is not None
         if self.sso_enabled:

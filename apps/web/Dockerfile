@@ -2,9 +2,13 @@ FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e
 WORKDIR /workspace
 
 ARG VITE_GOOGLE_CLIENT_ID
-ARG VITE_FMR_MANAGED_LOCAL_SSO=false
-ARG VITE_FMR_SSO_ENABLED=false
+ARG PORTFOLIO_BRANCH
+ARG PORTFOLIO_AUTH_MODE
+ARG VITE_FMR_MANAGED_LOCAL_SSO
+ARG VITE_FMR_SSO_ENABLED
 ENV VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+ENV PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}
+ENV PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}
 ENV VITE_FMR_MANAGED_LOCAL_SSO=${VITE_FMR_MANAGED_LOCAL_SSO}
 ENV VITE_FMR_SSO_ENABLED=${VITE_FMR_SSO_ENABLED}
 
@@ -28,7 +32,20 @@ RUN pnpm --filter @feelmyrythm/core build \
     && pnpm --filter @feelmyrythm/web build
 
 FROM nginx:1.29.4-alpine@sha256:4870c12cd2ca986de501a804b4f506ad3875a0b1874940ba0a2c7f763f1855b2 AS runtime
+ARG PORTFOLIO_BRANCH
+ARG PORTFOLIO_AUTH_MODE
+ENV PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}
+ENV PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}
+LABEL work.bonifacio.portfolio.branch=${PORTFOLIO_BRANCH} \
+    work.bonifacio.portfolio.auth-mode=${PORTFOLIO_AUTH_MODE}
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY scripts/portfolio-auth-mode.sh /usr/local/bin/portfolio-auth-mode
+COPY apps/web/docker/40-validate-portfolio-auth.sh /docker-entrypoint.d/40-validate-portfolio-auth.sh
 COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html/feelmyrythm
+RUN portfolio-auth-mode check \
+    && build_branch="${PORTFOLIO_BRANCH#refs/heads/}" \
+    && printf '%s\n%s\n' "$build_branch" "$PORTFOLIO_AUTH_MODE" > /etc/portfolio-auth-build \
+    && chmod 0555 /docker-entrypoint.d/40-validate-portfolio-auth.sh \
+    && chmod 0444 /etc/portfolio-auth-build
 EXPOSE 80
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=4 CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]

@@ -27,6 +27,8 @@ def _sso_headers(subject: str, email: str, *, edge_secret: str = SSO_EDGE_SECRET
 def _managed_sso_settings(settings: Settings) -> Settings:
     return settings.model_copy(
         update={
+            "portfolio_branch": "main",
+            "portfolio_auth_mode": "sso",
             "deployment_profile": "managed_local_sso",
             "sso_enabled": True,
             "sso_edge_secret": SecretStr(SSO_EDGE_SECRET),

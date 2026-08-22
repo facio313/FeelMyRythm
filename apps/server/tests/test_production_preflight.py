@@ -54,6 +54,8 @@ def test_managed_local_sso_preflight_skips_external_providers_and_checks_local_s
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("PORTFOLIO_BRANCH", "main")
+    monkeypatch.setenv("PORTFOLIO_AUTH_MODE", "sso")
     uploads = tmp_path / "uploads"
     uploads.mkdir()
     edge_secret_file = tmp_path / "fmr-edge-secret"

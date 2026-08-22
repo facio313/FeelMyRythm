@@ -6,6 +6,14 @@ set -Eeuo pipefail
 : "${WEB_RUNTIME_IMAGE:?WEB_RUNTIME_IMAGE is required}"
 : "${POSTGRES_RUNTIME_IMAGE:?POSTGRES_RUNTIME_IMAGE is required}"
 : "${REDIS_RUNTIME_IMAGE:?REDIS_RUNTIME_IMAGE is required}"
+: "${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}"
+: "${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}"
+
+sh scripts/portfolio-auth-mode.sh check
+[[ "$PORTFOLIO_AUTH_MODE" == "sso" ]] || {
+  echo "The deploy runtime smoke expects a protected main/dev SSO build." >&2
+  exit 1
+}
 
 for executable in curl docker openssl python3; do
   command -v "$executable" >/dev/null
@@ -92,8 +100,12 @@ docker run --detach \
   --network-alias fmrServer \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+  --env "PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" \
+  --env "PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" \
   --env FMR_ENVIRONMENT=production \
   --env FMR_DEPLOYMENT_PROFILE=standard \
+  --env FMR_SSO_ENABLED=true \
+  --env "FMR_SSO_EDGE_SECRET=${edge_secret}" \
   --env "FMR_DATABASE_URL=postgresql+psycopg://feelmyrythm:${database_password}@postgres:5432/feelmyrythm" \
   --env FMR_AUTO_CREATE_SCHEMA=false \
   --env "FMR_JWT_SECRET=${jwt_secret}" \
@@ -134,6 +146,27 @@ docker exec "$server_container" sh -c \
   'command -v alembic >/dev/null && command -v uvicorn >/dev/null && test ! -w / && test ! -w /app && test -w /tmp' \
   >/dev/null
 
+[[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.branch" }}' "$SERVER_RUNTIME_IMAGE")" == "$PORTFOLIO_BRANCH" ]]
+[[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.auth-mode" }}' "$SERVER_RUNTIME_IMAGE")" == "$PORTFOLIO_AUTH_MODE" ]]
+if server_resolver_failure="$(docker run --rm \
+  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_AUTH_MODE=local \
+  "$SERVER_RUNTIME_IMAGE" 2>&1)"; then
+  echo "Server runtime resolver accepted an auth contract different from its build." >&2
+  exit 1
+fi
+grep -Fq 'does not match image' <<<"$server_resolver_failure"
+if server_contract_failure="$(docker run --rm \
+  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_AUTH_MODE=local \
+  --entrypoint python \
+  "$SERVER_RUNTIME_IMAGE" \
+  -c 'from app.config import Settings; Settings()' 2>&1)"; then
+  echo "Server runtime image accepted an auth contract different from its build." >&2
+  exit 1
+fi
+grep -Fq 'differs from the immutable server image contract' <<<"$server_contract_failure"
+
 docker volume create "$local_upload_volume" >/dev/null
 docker volume create "$edge_secret_volume" >/dev/null
 printf '%s' "$edge_secret" | docker run --rm --interactive \
@@ -149,6 +182,8 @@ docker run --rm \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
   --volume "${local_upload_volume}:/data/uploads" \
   --volume "${edge_secret_volume}:/run/secrets:ro" \
+  --env "PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" \
+  --env "PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" \
   --env FMR_ENVIRONMENT=production \
   --env FMR_DEPLOYMENT_PROFILE=managed_local_sso \
   --env FMR_SSO_ENABLED=true \
@@ -169,8 +204,24 @@ docker run --detach \
   --name "$web_container" \
   --network "$network_name" \
   --publish 127.0.0.1::80 \
+  --env "PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" \
+  --env "PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" \
   "$WEB_RUNTIME_IMAGE" >/dev/null
 docker exec "$web_container" nginx -t >/dev/null
+[[ "$(docker exec "$web_container" printenv PORTFOLIO_BRANCH)" == "$PORTFOLIO_BRANCH" ]]
+[[ "$(docker exec "$web_container" printenv PORTFOLIO_AUTH_MODE)" == "$PORTFOLIO_AUTH_MODE" ]]
+[[ "$(docker exec "$web_container" sed -n '1p' /etc/portfolio-auth-build)" == "$PORTFOLIO_BRANCH" ]]
+[[ "$(docker exec "$web_container" sed -n '2p' /etc/portfolio-auth-build)" == "$PORTFOLIO_AUTH_MODE" ]]
+[[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.branch" }}' "$WEB_RUNTIME_IMAGE")" == "$PORTFOLIO_BRANCH" ]]
+[[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.auth-mode" }}' "$WEB_RUNTIME_IMAGE")" == "$PORTFOLIO_AUTH_MODE" ]]
+if web_contract_failure="$(docker run --rm \
+  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_AUTH_MODE=local \
+  "$WEB_RUNTIME_IMAGE" 2>&1)"; then
+  echo "Web runtime image accepted an auth contract different from its bundle." >&2
+  exit 1
+fi
+grep -Fq 'does not match image' <<<"$web_contract_failure"
 
 web_port="$(docker port "$web_container" 80/tcp | sed -n '1s/.*://p')"
 [[ "$web_port" =~ ^[0-9]+$ ]]
