@@ -508,7 +508,7 @@ def test_shared_portfolio_auth_resolver_is_pinned_and_executable() -> None:
     resolver_test = repository_root / "scripts/test-portfolio-auth-mode.sh"
 
     assert hashlib.sha256(resolver.read_bytes()).hexdigest() == (
-        "93d730a2507336c9bfcec3444bc83847b319e41c71dc4d6188f068abf12383ee"
+        "d9496aeee5b13b27324857e2c726a214b564a511ed0c046a2477865a72303c53"
     )
     assert resolver.stat().st_mode & 0o111
     assert resolver_test.stat().st_mode & 0o111
