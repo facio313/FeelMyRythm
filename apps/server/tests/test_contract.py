@@ -603,6 +603,7 @@ def test_portfolio_auth_contract_is_injected_into_builds_and_containers() -> Non
     assert '[[ "$PORTFOLIO_AUTH_MODE" == "sso" ]]' in runtime_smoke
     assert "PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}" in runtime_smoke
     assert "PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}" in runtime_smoke
+    assert "FMR_SMTP_" not in runtime_smoke
     assert "differs from the immutable server image contract" in runtime_smoke
     assert "does not match image" in runtime_smoke
     assert "FROM base AS portfolio-contract" in server_dockerfile

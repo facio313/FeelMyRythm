@@ -113,8 +113,6 @@ docker run --detach \
   --env FMR_STORAGE_BACKEND=s3 \
   --env FMR_S3_BUCKET=fmr-runtime-smoke \
   --env FMR_S3_REGION=us-east-1 \
-  --env FMR_SMTP_HOST=smtp.example.com \
-  --env FMR_SMTP_FROM_EMAIL=smoke@example.com \
   --env FMR_WEB_APP_BASE_URL=https://example.com/feelmyrythm \
   --env FMR_PUBLIC_API_BASE_URL=https://example.com/feelmyrythm \
   --env AWS_ACCESS_KEY_ID=runtime-smoke \
