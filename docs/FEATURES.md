@@ -11,7 +11,7 @@
 | 표기 | 의미 |
 | --- | --- |
 | **구현** | 현재 코드에 사용자 또는 API가 사용할 수 있는 경로가 있고 관련 테스트나 검증 코드가 있다. |
-| **설정 필요** | 기능은 구현됐지만 OAuth, SMTP, S3 같은 외부 설정이 있어야 해당 경로를 사용할 수 있다. |
+| **설정 필요** | 기능은 구현됐지만 선택한 profile에서 OAuth, SMTP, S3 같은 외부 provider를 실제로 사용할 때 해당 설정이 필요하다. |
 | **외부 검증 필요** | 앱 선언·빌드·분석 도구는 있으나 실기기나 실제 운영 인프라에서 최종 판정해야 한다. |
 | **의도적 비범위** | 현재 아키텍처가 명시적으로 제공하지 않는 기능이다. 미완료 구현으로 오해하지 않는다. |
 
@@ -85,6 +85,7 @@
 | 로컬·프로젝트 저장 | 비로그인 악보는 IndexedDB에, 프로젝트 악보는 서버 객체 저장소에 저장한다. 업로드·삭제·정보 수정은 leader 이상만 가능하다. | UI의 access role 제한과 서버의 권한 검사를 모두 적용한다. | [ScoresPage.tsx](../apps/web/src/pages/ScoresPage.tsx), [scores.py](../apps/server/app/routers/scores.py) |
 | 안전한 원격 업로드 | 프로젝트 업로드는 staging URL에 직접 전송한 뒤 complete하고, 준비 완료 전 악보는 목록에서 숨긴다. | complete가 staging 객체를 final key로 promote하고 DB 상태와 staging 삭제 outbox를 transaction으로 확정한다. | [scoreApi.ts](../apps/web/src/lib/scoreApi.ts), [scores.py](../apps/server/app/routers/scores.py), [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py) |
 | MusicXML 템포맵 초안 | MusicXML에서 제목, 마디 수, 박자, 템포, 못갖춘마디, 반복·volta·D.C./D.S./Fine/Coda를 분석하고 경고와 함께 검토 후 저장한다. | 원격 파일은 defused XML parser와 MXL 크기·압축비 제한을 거치며, 로컬 파일에도 간이 초안 경로가 있다. | [musicxml.py](../apps/server/app/musicxml.py), [scoreApi.ts](../apps/web/src/lib/scoreApi.ts), [test_musicxml_parser.py](../apps/server/tests/test_musicxml_parser.py) |
+| PDF·이미지 OMR 초안 | 운영에서 OMR을 활성화한 경우 Audiveris 결과로 마디 영역 초안을 만들고 사용자가 미리보기 후 명시적으로 저장한다. | persistent bounded job과 시작 revision 충돌 검사를 사용하며 기존 MeasureMap을 자동으로 덮어쓰지 않는다. 현재 RPi profile은 Audiveris를 설치하지 않고 OMR을 비활성화한다. | [omr.py](../apps/server/app/omr.py), [scores.py](../apps/server/app/routers/scores.py), [test_omr.py](../apps/server/tests/test_omr.py) |
 | 총보·파트보 | 총보/파트 종류와 악기 이름을 저장하고 tablist에서 화살표·Home·End로 파트를 전환한다. | roving tab index와 tabpanel 관계를 제공하고 현재 canonical 마디를 파트 간 유지한다. | [ScoresPage.tsx](../apps/web/src/pages/ScoresPage.tsx), [scores.spec.ts](../e2e/scores.spec.ts) |
 | 마디 매핑 | PDF·이미지의 한 단을 드래그하고 마디 경계를 찍거나, 키보드로 정규화 좌표를 입력해 영역을 만든다. | 좌표를 확대율과 무관한 0–1 page surface로 저장하고 현재 `pointerId`만 pointer capture한다. | [ScoresPage.tsx](../apps/web/src/pages/ScoresPage.tsx), [scoreApi.ts](../apps/web/src/lib/scoreApi.ts) |
 | 마디 번호 보정 | 파트보의 인쇄 마디와 곡의 canonical 마디가 다르면 공통 offset을 저장한다. | Score metadata와 MeasureMap을 하나의 `/settings` 요청과 transaction으로 revision 검증해 저장한다. | [scoreApi.ts](../apps/web/src/lib/scoreApi.ts), [scores.py](../apps/server/app/routers/scores.py), [test_permissions_revision.py](../apps/server/tests/test_permissions_revision.py) |
@@ -194,13 +195,14 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | DB와 migration | SQLAlchemy 2 모델과 Alembic migration을 사용한다. 개발·test는 SQLite를 쓸 수 있고 운영·CI migration은 PostgreSQL을 대상으로 한다. | [models.py](../apps/server/app/models.py), [alembic](../apps/server/alembic), [test_postgres_migration.py](../apps/server/tests/test_postgres_migration.py) |
 | 권한 경계 | 그룹 역할과 객체 소유 관계를 공통 helper에서 검사하고 존재하지 않음과 접근 불가를 안전하게 처리한다. | [access.py](../apps/server/app/access.py), [test_permissions_revision.py](../apps/server/tests/test_permissions_revision.py) |
 | revision·원자성 | 템포맵, MeasureMap, annotation은 `expectedRevision`으로 낙관적 동시성을 적용한다. Score metadata+MeasureMap은 한 transaction으로 저장한다. | [repertoire.py](../apps/server/app/routers/repertoire.py), [scores.py](../apps/server/app/routers/scores.py) |
-| 로컬·S3 객체 저장 | 개발/test와 명시적 임시 managed-local SSO 운영에서는 서명된 local upload URL을 쓰고, standard 운영에서는 S3 presigned staging upload와 download URL을 사용한다. | [storage.py](../apps/server/app/storage.py), [config.py](../apps/server/app/config.py) |
+| 로컬·S3 객체 저장 | 개발/test와 현재 단일 서버 managed-local SSO 운영에서는 external local volume과 서명된 local upload URL을 쓴다. 다중 서버·off-host object storage가 필요해 standard/S3를 선택하면 presigned staging upload와 download URL을 사용한다. 두 backend 모두 같은 DB object key 계약을 쓴다. | [storage.py](../apps/server/app/storage.py), [config.py](../apps/server/app/config.py), [docker-compose.prod.yml](../docker-compose.prod.yml) |
+| DB 파일 관리 계약 | `Score`가 filename/content type/size/final·staging key/pending·ready 상태를 보관하고 `StorageDeletionJob`이 lease·retry 가능한 삭제 outbox를 맡는다. Host/container 절대 경로는 DB에 저장하지 않는다. | [models.py](../apps/server/app/models.py), [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py) |
 | durable 객체 삭제 | Score·레퍼토리·프로젝트·그룹·계정 삭제 transaction이 객체 키를 outbox에 기록하고 worker가 lease·멱등 삭제·지수 backoff로 계속 재시도한다. | [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py), [storage_cleanup.py](../apps/server/app/routers/storage_cleanup.py), [test_storage_lifecycle.py](../apps/server/tests/test_storage_lifecycle.py) |
 | 미완료 업로드 회수 | 만료 pending upload와 staging 객체를 reaper가 회수하며 late upload guard가 삭제 뒤 늦게 도착한 객체도 다시 제거한다. | [storage_lifecycle.py](../apps/server/app/storage_lifecycle.py), [test_storage_lifecycle.py](../apps/server/tests/test_storage_lifecycle.py) |
 | 실시간 프로토콜 | 첫 frame의 access-token `JOIN_ROOM`, PING/PONG, READY, START/STOP/SEEK와 typed server envelope를 제공한다. | [ws.py](../apps/server/app/ws.py), [schemas.py](../apps/server/app/schemas.py), [test_websocket.py](../apps/server/tests/test_websocket.py) |
 | 서버 생명주기 | 앱 시작·종료 때 DB, bounded mail workers, storage lifecycle worker, room manager를 순서대로 시작하고 정리한다. | [main.py](../apps/server/app/main.py) |
-| 운영 fail-fast | standard production에서 S3 bucket/region, storage worker, JWT·웹 URL·SMTP 등 필수 설정이 없거나 안전하지 않으면 시작을 거부한다. | [config.py](../apps/server/app/config.py), [docker-compose.prod.yml](../docker-compose.prod.yml) |
-| 임시 중앙 계정·로컬 저장 운영 | 명시적 `managed_local_sso` production은 persistent local volume을 유지하고 public email/local credential workflow를 닫는다. 중앙 SSO subject를 우선 연결하고 unique email legacy owner를 한 번 link하거나 새 verified app user를 provision하며 충돌은 409로 닫는다. 모든 bearer HTTP·refresh·logout과 room·annotation WebSocket join은 subject와 앱별 edge secret을 재검증한다. | [auth.py](../apps/server/app/routers/auth.py), [sso.py](../apps/server/app/sso.py), [TemporaryOperationsNotice.tsx](../apps/web/src/components/TemporaryOperationsNotice.tsx) |
+| 운영 fail-fast | production에서 storage worker, JWT·웹 URL 등 공통 설정을 검사한다. 선택한 S3 backend는 bucket/region을, 앱이 local account email workflow를 소유할 때만 SMTP를 요구하며 SSO mode에서는 app SMTP를 거부한다. | [config.py](../apps/server/app/config.py), [production_preflight.py](../apps/server/scripts/production_preflight.py) |
+| 중앙 계정·로컬 저장 운영 | `managed_local_sso` production은 external persistent local volume을 유지하고 public email/local credential workflow를 닫는다. 중앙 SSO subject를 우선 연결하고 unique email legacy owner를 한 번 link하거나 새 verified app user를 storage profile과 무관하게 provision하며 충돌은 409로 닫는다. 웹은 같은 tab bootstrap을 single-flight로 실행하고 저장된 app session을 현재 edge subject 아래 먼저 검증해 재사용한다. 권위 있는 부팅·일반 API refresh 거부에만 blocking exchange하며 transient 실패는 session을 보존한다. 모든 bearer HTTP·refresh·logout과 room·annotation WebSocket join은 subject와 앱별 edge secret을 재검증한다. | [auth.tsx](../apps/web/src/lib/auth.tsx), [auth.py](../apps/server/app/routers/auth.py), [sso.py](../apps/server/app/sso.py), [TemporaryOperationsNotice.tsx](../apps/web/src/components/TemporaryOperationsNotice.tsx) |
 
 ## 11. 빌드, 배포와 자동 검증
 
@@ -225,10 +227,14 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | 기기 간 ±10ms 동기 기준 | 외부 검증 필요 | 시계 estimator, server anchor, calibration, 파형 분석 도구 | 2–3대 실제 기기의 동시 녹음 파형과 장시간 drift 측정 |
 | Universal Links·Android App Links | 외부 검증 필요 | 제한된 associated-domain/intent-filter·URL parser, signed identity 기반 association generator와 public preflight | 운영 게시 후 실제 설치 기기 검증 |
 | 스토어 archive·제출 | 외부 검증 필요 | signing 값을 요구하는 archive/bundle script와 개인정보·탈퇴 공개 화면 | 실제 인증서·provisioning·keystore, 설치·스토어 심사 |
-| SMTP·Google OAuth 운영 | 설정 필요 / 외부 검증 필요 | provider adapter, token 검증, bounded queue, TLS/auth 및 opt-in delivery preflight | 실제 client ID·도메인·SMTP quota/반송/전달률 및 abuse 정책 |
-| S3·공용 cksDB·RPi 배포 | 설정 필요 / 외부 검증 필요 | S3 backend/outbox, CORS·lifecycle/canary preflight, Alembic-head 검사, immutable deploy workflow | 실제 DB backup/restore, forced deploy와 rollback rehearsal |
+| local-auth SMTP·Google OAuth 운영 | 조건부 설정 / 외부 검증 필요 | provider adapter, token 검증, bounded queue, TLS/auth 및 opt-in delivery preflight | SSO가 아닌 local account profile을 선택할 때만 실제 client ID·도메인·SMTP quota/반송/전달률 및 abuse 정책 |
+| 선택적 S3 운영 | 조건부 설정 / 외부 검증 필요 | S3 backend/outbox, CORS·lifecycle/canary preflight | 다중 서버·off-host object storage를 선택할 때 실제 bucket policy와 이관 검증 |
+| 서버 local-volume 복구 | 권장 / 현재 비차단 | external named volume, backend-neutral DB key와 durable deletion outbox | 데이터 보존을 약속하기 전에 DB와 같은 시점의 off-host backup·restore·key/size/hash 대조 실연 |
+| 공용 cksDB·RPi 배포 | 설정 필요 / 외부 검증 필요 | Alembic-head 검사, immutable deploy workflow, 제한 SSH 배포 | 실제 DB backup/restore, forced deploy와 rollback rehearsal |
+| Audiveris OMR 운영 | 선택 기능 / 외부 검증 필요 | persistent bounded OMR job, revision 고정, preview·명시적 저장 | 기능을 켤 때 ARM64 실행 환경·version/license·resource limit·실제 악보 정확도 검증 |
 | CDN/IP abuse 제한 | 의도적 외부 경계 | 앱 내부 cooldown, dummy bcrypt, bounded verifier | trusted proxy/CDN에서 IP rate limit, CAPTCHA와 provider quota 설정 |
-| native Google/Apple 로그인 | 의도적 비범위 | native에서는 이메일 인증 로그인만 제공 | 제3자 native 로그인과 스토어 정책을 별도 설계·구현하기 전에는 제공하지 않음 |
+| production mobile SSO 로그인 | 미구현 / 출시 차단 | browser SSO와 local-auth mobile build를 fail-closed로 구분 | system browser 중앙 session → 일회용 app credential → native callback/secure session 교환을 구현하고 실제 설치 앱에서 검증 |
+| native Google/Apple 로그인 | 의도적 비범위 | Google web SDK를 WebView에서 숨김 | 제3자 native 로그인이 필요하면 스토어 정책과 native SDK를 별도 설계·구현 |
 | 서버의 beat 스트리밍 | 의도적 비범위 | revision·anchor·서버 시각만 합의 | 추가 구현 대상이 아니라 결정론적 로컬 전개를 지키기 위한 설계 원칙 |
 | 원격 snapshot 오프라인 편집·자동 merge | 의도적 비범위 | 검증된 마지막 응답의 읽기 전용 fallback | 명시적 충돌·동기화 모델을 새로 설계하기 전에는 쓰기를 허용하지 않음 |
 | RPi 소스 빌드·별도 운영 DB 생성 | 의도적 비범위 | smoke한 immutable image와 외부 `cksDB` 연결 | 운영 안전 경계를 깨므로 배포 경로에서 제공하지 않음 |

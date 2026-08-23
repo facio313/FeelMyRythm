@@ -397,18 +397,18 @@ export function LoginPage() {
     }
   }
 
-  if (ssoMode && !user) {
+  if ((ssoMode || managedLocalSsoMode) && !user) {
     return (
       <div className="page page--narrow auth-page">
         <Card className="auth-card">
           <LogIn className="auth-card__icon" size={40} aria-hidden />
-          <h1>통합 로그인 연결이 필요합니다</h1>
-          <p className="subtle" role="alert">
-            중앙 로그인은 확인됐지만 FeelMyRythm 계정을 안전하게 연결하지 못했습니다. 페이지를 다시
-            열어 보거나 중앙 계정의 아이디·이메일 충돌 여부를 관리자에게 확인해 주세요.
+          <h1>중앙 로그인 세션을 확인해 주세요</h1>
+          <p className="subtle" role="status">
+            중앙 관리자가 만든 통합 로그인 계정으로 접속합니다. 앱의 별도 이메일·비밀번호 로그인은
+            사용하지 않습니다.
           </p>
           <Button variant="primary" onClick={() => window.location.reload()}>
-            다시 연결
+            중앙 세션 다시 확인
           </Button>
         </Card>
       </div>

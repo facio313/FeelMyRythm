@@ -79,6 +79,7 @@ graph LR
 | 작업 | 내용 |
 |---|---|
 | 서버 | FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL, JWT 인증 (이메일 + Google OAuth) |
+| 운영 SSO | 중앙 edge가 확인한 immutable subject를 우선 연결하고, unique email의 기존 계정은 한 번만 link하며 새 중앙 계정은 verified SSO-only 사용자로 provision. 저장된 app session은 현재 edge identity 아래 검증·refresh해 재사용하고 권위 있는 거부에만 재교환 |
 | 도메인 CRUD | Group / Project / RepertoireItem / TempoMap(revision) — §8 스키마 |
 | 클라 연동 | 로그인, 그룹·프로젝트·레파토리 화면, 템포맵 서버 저장·불러오기, 로컬↔서버 병합(단순 revision 우선) |
 | protocol | Pydantic → OpenAPI → `openapi-typescript`로 TS 타입 자동 생성 파이프라인 (CI 검증 포함) |
@@ -106,6 +107,7 @@ graph LR
 | 작업 | 내용 |
 |---|---|
 | 업로드 | final과 분리된 presigned staging 업로드, PDF/이미지/MusicXML 타입 감지. complete는 멱등 promote 뒤 `ready`+staging 삭제 outbox를 원자 commit하고, stale pending reaper·late-write guard가 client 실패를 회수하며 악보 수는 `ready`만 집계 |
+| 저장 backend | DB에는 물리 경로가 아닌 backend-neutral object key·size·상태를 저장. 현재 단일 서버 운영은 Compose 밖에서 사전 생성한 external local volume을 사용하고, 다중 서버·off-host object storage가 필요할 때 같은 key 계약으로 S3를 선택 |
 | MusicXML | 파싱 → 마디 수·박자표·템포·도돌이 추출 → **템포맵 초안 자동 생성** (§7.1), OSMD 렌더링 |
 | PDF/이미지 | PDF.js 뷰어 + **수동 마디 매핑 도구**. pointer 좌표를 zoom과 무관한 score page surface 0–1 좌표로 저장 |
 | 원자적 저장 | `PUT /scores/:id/settings`로 metadata와 MeasureMap을 revision 검증 후 함께 저장. 최초 map 생성도 Score parent lock, 경합은 rollback + 409 |
@@ -143,6 +145,7 @@ graph LR
 | 작업 | 내용 |
 |---|---|
 | Capacitor | iOS/Android 프로젝트, 아이콘·스플래시, 딥링크(방 초대 링크) |
+| production SSO 인증 | system browser에서 확인한 중앙 session을 짧은 수명의 일회용 app credential로 교환하고 native callback 뒤 secure storage session을 만든다. WebView cookie 공유나 production local login에 의존하지 않음 |
 | 설치 첫인상 | PWA `id`/scope/start URL·`ko-KR`·category, 분리된 `any`/`maskable` PNG, Apple touch icon을 검증. 다크/라이트는 `theme-color`와 Capacitor SystemBars까지 동기화 |
 | 네이티브 보강 | `NativeAudioEngine` 구현 완료: iOS AVAudioEngine/.playback session, Android Oboe low-latency callback/foreground media service, 전체 timeline batch·경계 취소. Keep-Awake와 Haptics도 동일 bridge 수명에 연결 |
 | 지연 검증 | 실기기 매트릭스에서 Phase 4 DoD 재검증. iOS/Android 녹음 파형으로 화면 꺼짐·인터럽트·기기 간 ±10ms를 확인하고 calibration 값을 기록 |
@@ -172,6 +175,7 @@ graph LR
 | 악보 cache/UX | network error와 HTTP error 분기, IndexedDB v3 user partition/migration/snapshot, Service Worker 인증 API cache 부재, zoom 좌표, manual page resume, compact fixed overlay를 단위·Playwright 테스트로 검증 |
 | 반응형·접근성 | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md)의 viewport 매트릭스에서 route별 overflow·고정 UI 비가림·터치 타깃·키보드 순서 검증 |
 | 런타임 이미지 | tag+digest로 고정한 base로 ARM64 image를 빌드한 뒤 exact publish tag의 server default CMD/Alembic/health/non-root/read-only 경계와 nginx config/SPA/header/API proxy를 실제 container로 smoke |
+| SSO·provider 운영 계약 | SSO session 재사용·거부 후 재교환·오류 차단 UI와 local form 비노출을 단위 테스트한다. preflight는 인증, SMTP, storage, mobile association을 독립 조건으로 판정하고 runtime image의 현재 운영 안내 문구를 확인한다. |
 
 ## 5. 리스크 관리 (검증 시점을 앞당긴 것들)
 

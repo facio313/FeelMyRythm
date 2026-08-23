@@ -252,9 +252,9 @@ grep -Eiq '^cache-control:.*no-cache' "$index_headers"
 grep -Eiq '^content-security-policy:' "$index_headers"
 grep -Eiq '^strict-transport-security:' "$index_headers"
 grep -Fq '<div id="root"></div>' "$index_body"
-docker exec "$web_container" grep -R -Fq '임시 운영 할 일' \
+docker exec "$web_container" grep -R -Fq '현재 운영 구성' \
   /usr/share/nginx/html/feelmyrythm/assets
-docker exec "$web_container" grep -R -Fq 'AWS S3를 준비하고 로컬 악보 파일 이관' \
+docker exec "$web_container" grep -R -Fq 'S3 호환 저장소로 확장' \
   /usr/share/nginx/html/feelmyrythm/assets
 
 spa_body="${temporary_directory}/spa.html"

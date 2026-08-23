@@ -41,6 +41,7 @@ import { AnnotationSyncClient, type AnnotationConnectionState } from '../lib/ann
 import { useAuth } from '../lib/auth';
 import { localDb, type LocalMeasureMap, type LocalScore } from '../lib/localDb';
 import { musicXmlToTempoMap, readMusicXml, renderMusicXml } from '../lib/musicxml';
+import { managedLocalSsoModeEnabled } from '../lib/runtimeMode';
 import {
   listPracticeLogs,
   practiceAnchorMarkers,
@@ -239,6 +240,10 @@ export function mergeRemoteScoreMetadata(record: ScoreRecord, score: LocalScore)
   return localScoreWithMetadata(record, score.blob, score.mimeType);
 }
 
+export function omrDraftCreationAvailableInCurrentBuild(): boolean {
+  return !managedLocalSsoModeEnabled();
+}
+
 function useObjectUrl(blob?: Blob) {
   const url = useMemo(() => (blob ? URL.createObjectURL(blob) : undefined), [blob]);
   useEffect(() => {
@@ -415,6 +420,7 @@ export function ScoresPage() {
   const repertoireItemId = routeRepertoireId ?? queryRepertoireId;
   const activeRepertoireIdRef = useRef(repertoireItemId);
   const remoteMode = Boolean(user && repertoireItemId);
+  const omrDraftCreationEnabled = omrDraftCreationAvailableInCurrentBuild();
   const remoteCacheScope = useMemo(() => ({ userId: user?.id ?? '' }), [user?.id]);
   const inputRef = useRef<HTMLInputElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -2546,66 +2552,77 @@ export function ScoresPage() {
                   selected.mimeType.startsWith('image/')) ? (
                   <section className="omr-draft-panel" aria-labelledby="omr-draft-heading">
                     <strong id="omr-draft-heading">Audiveris OMR 초안</strong>
-                    <p className="subtle">
-                      자동 인식은 시작점만 제공합니다. 저장하기 전에 모든 페이지와 마디 영역을
-                      확인하세요.
-                    </p>
-                    {!omrDraft ? (
-                      <Button
-                        disabled={omrRequesting || usingOfflineCache || !canManageScores}
-                        onClick={() => void requestOmrDraft()}
-                      >
-                        <MapIcon size={17} aria-hidden />
-                        {omrRequesting ? '요청 중…' : 'OMR 초안 생성'}
-                      </Button>
-                    ) : null}
-                    {omrDraft?.status === 'pending' || omrDraft?.status === 'running' ? (
-                      <div role="status" aria-live="polite" className="omr-draft-status">
-                        <span>
-                          {omrDraft.status === 'pending' ? '분석 대기 중…' : '악보 분석 중…'}
-                        </span>
-                        {omrPollingError ? (
-                          <>
-                            <span className="danger-text">{omrPollingError}</span>
-                            <Button onClick={() => void refreshOmrDraft()}>상태 다시 확인</Button>
-                          </>
+                    {omrDraftCreationEnabled ? (
+                      <>
+                        <p className="subtle">
+                          자동 인식은 시작점만 제공합니다. 저장하기 전에 모든 페이지와 마디 영역을
+                          확인하세요.
+                        </p>
+                        {!omrDraft ? (
+                          <Button
+                            disabled={omrRequesting || usingOfflineCache || !canManageScores}
+                            onClick={() => void requestOmrDraft()}
+                          >
+                            <MapIcon size={17} aria-hidden />
+                            {omrRequesting ? '요청 중…' : 'OMR 초안 생성'}
+                          </Button>
                         ) : null}
-                      </div>
-                    ) : null}
-                    {omrDraft?.status === 'failed' ? (
-                      <div role="alert" className="omr-draft-status">
-                        <span>{omrDraft.error ?? 'OMR 분석에 실패했습니다.'}</span>
-                        <Button onClick={() => void requestOmrDraft()}>다시 생성</Button>
-                      </div>
-                    ) : null}
-                    {omrDraft?.status === 'succeeded' ? (
-                      <div className="omr-draft-result">
-                        <span>{omrDraft.regions.length}개 마디 영역을 인식했습니다.</span>
-                        {omrDraft.warnings.map((warning) => (
-                          <span key={warning} className="subtle">
-                            {warning}
-                          </span>
-                        ))}
-                        <div className="omr-draft-actions">
-                          <Button
-                            aria-pressed={showOmrPreview}
-                            onClick={() => setShowOmrPreview((current) => !current)}
-                          >
-                            {showOmrPreview ? '초안 미리보기 닫기' : '초안 영역 미리보기'}
-                          </Button>
-                          <Button
-                            variant="primary"
-                            disabled={usingOfflineCache || !canManageScores}
-                            onClick={() => void applyOmrDraft()}
-                          >
-                            초안을 마디 맵으로 저장
-                          </Button>
-                          <Button variant="ghost" onClick={() => void requestOmrDraft()}>
-                            다시 분석
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
+                        {omrDraft?.status === 'pending' || omrDraft?.status === 'running' ? (
+                          <div role="status" aria-live="polite" className="omr-draft-status">
+                            <span>
+                              {omrDraft.status === 'pending' ? '분석 대기 중…' : '악보 분석 중…'}
+                            </span>
+                            {omrPollingError ? (
+                              <>
+                                <span className="danger-text">{omrPollingError}</span>
+                                <Button onClick={() => void refreshOmrDraft()}>
+                                  상태 다시 확인
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {omrDraft?.status === 'failed' ? (
+                          <div role="alert" className="omr-draft-status">
+                            <span>{omrDraft.error ?? 'OMR 분석에 실패했습니다.'}</span>
+                            <Button onClick={() => void requestOmrDraft()}>다시 생성</Button>
+                          </div>
+                        ) : null}
+                        {omrDraft?.status === 'succeeded' ? (
+                          <div className="omr-draft-result">
+                            <span>{omrDraft.regions.length}개 마디 영역을 인식했습니다.</span>
+                            {omrDraft.warnings.map((warning) => (
+                              <span key={warning} className="subtle">
+                                {warning}
+                              </span>
+                            ))}
+                            <div className="omr-draft-actions">
+                              <Button
+                                aria-pressed={showOmrPreview}
+                                onClick={() => setShowOmrPreview((current) => !current)}
+                              >
+                                {showOmrPreview ? '초안 미리보기 닫기' : '초안 영역 미리보기'}
+                              </Button>
+                              <Button
+                                variant="primary"
+                                disabled={usingOfflineCache || !canManageScores}
+                                onClick={() => void applyOmrDraft()}
+                              >
+                                초안을 마디 맵으로 저장
+                              </Button>
+                              <Button variant="ghost" onClick={() => void requestOmrDraft()}>
+                                다시 분석
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="subtle" role="status">
+                        현재 서버 구성에서는 OMR 자동 인식을 제공하지 않습니다. 도구 모음의 ‘마디
+                        매핑’으로 직접 영역을 지정할 수 있습니다.
+                      </p>
+                    )}
                   </section>
                 ) : null}
                 {usingOfflineCache ? (

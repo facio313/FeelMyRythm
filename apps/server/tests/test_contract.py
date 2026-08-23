@@ -122,6 +122,52 @@ def test_production_email_verification_configuration_fails_closed() -> None:
         )
 
 
+def test_standard_sso_keeps_storage_and_email_provider_choices_independent() -> None:
+    base = {
+        "portfolio_branch": "main",
+        "portfolio_auth_mode": "sso",
+        "environment": "production",
+        "sso_edge_secret": "test-fmr-edge-secret-with-at-least-32-characters",
+        "jwt_secret": "runtime-secret-with-at-least-32-characters",
+        "database_url": "postgresql+psycopg://user:password@db/feelmyrythm",
+        "auto_create_schema": False,
+        "storage_backend": "s3",
+        "s3_bucket": "scores-bucket",
+        "s3_region": "ap-northeast-2",
+        "smtp_starttls": False,
+        "smtp_use_ssl": False,
+        "web_app_base_url": "https://bonifacio.work/feelmyrythm",
+        "public_api_base_url": "https://bonifacio.work/feelmyrythm",
+        "redis_url": "redis://fmrRedis:6379/0",
+    }
+
+    settings = Settings(**base)
+
+    assert settings.sso_enabled is True
+    assert settings.storage_backend == "s3"
+    assert settings.public_email_workflows_enabled is False
+    blank_smtp = Settings(
+        **base,
+        smtp_host="",
+        smtp_from_email="",
+        smtp_username="",
+        smtp_password="",
+    )
+    assert blank_smtp.public_email_workflows_enabled is False
+    with pytest.raises(ValidationError, match="central identity provider"):
+        Settings(
+            **base,
+            smtp_host="smtp.example.test",
+            smtp_from_email="noreply@example.com",
+        )
+    with pytest.raises(ValidationError, match="central identity provider"):
+        Settings(
+            **base,
+            smtp_username="unused-sso-user",
+            smtp_password="unused-sso-password",
+        )
+
+
 def test_managed_local_sso_production_is_explicit_and_fail_closed() -> None:
     base = {
         "portfolio_branch": "main",
@@ -304,6 +350,7 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     networks = compose.split("\nnetworks:\n", 1)[1].split("\nvolumes:\n", 1)[0]
     backend_network = networks.split("  feelmyrythm-backend:\n", 1)[1].split("\n  cksDB:\n", 1)[0]
     volumes = compose.split("\nvolumes:\n", 1)[1]
+    upload_volume = volumes.split("  fmr_uploads:\n", 1)[1]
 
     required_lines = {
         "PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?set the deployed source branch}",
@@ -352,7 +399,8 @@ def test_production_compose_passes_required_runtime_settings() -> None:
     )
     assert "user: '10001:0'" in server_service
     assert "fmr_uploads:" in volumes
-    assert "name: feelmyrythm-fmr-uploads" in volumes
+    assert "external: true" in upload_volume
+    assert "name: feelmyrythm-fmr-uploads" in upload_volume
     assert "FMR_SMTP_HOST:" not in server_service
     assert "FMR_S3_BUCKET:" not in server_service
     assert "proxy_set_header X-Portfolio-Edge-Secret $http_x_portfolio_edge_secret;" in nginx
@@ -367,7 +415,7 @@ def test_production_compose_passes_required_runtime_settings() -> None:
 
 
 @pytest.mark.repository_contract
-def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
+def test_managed_local_web_release_exposes_the_current_operations_contract() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     workflow = (repository_root / ".github/workflows/deploy.yml").read_text()
     web_dockerfile = (repository_root / "apps/web/Dockerfile").read_text()
@@ -384,12 +432,14 @@ def test_temporary_web_release_exposes_the_operator_todo_contract() -> None:
     assert "ENV VITE_FMR_MANAGED_LOCAL_SSO=${VITE_FMR_MANAGED_LOCAL_SSO}" in web_dockerfile
     assert "install -d -o 10001 -g 10001 -m 0750 /data/uploads" in server_dockerfile
     for task in (
-        "악보 파일을 서버 전용 영구 볼륨에 저장",
+        "현재 운영 구성",
+        "악보 파일을 컨테이너 외부 영구 볼륨에 저장",
         "중앙 통합 로그인 계정을 자동 연결",
-        "AWS S3를 준비하고 로컬 악보 파일 이관",
-        "SMTP 발송 도메인과 키 설정",
-        "로컬 파일 백업과 복구 절차 확정",
-        "모바일 연결 파일과 OMR 운영 의존성 완성",
+        "S3 호환 저장소로 확장",
+        "FeelMyRythm SMTP",
+        "서버 악보 볼륨 별도 백업",
+        "모바일 HTTPS 연결 파일 검증",
+        "Audiveris OMR 운영 의존성",
     ):
         assert task in notice
 

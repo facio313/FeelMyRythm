@@ -1,5 +1,6 @@
 import { platformStorage } from '@feelmyrythm/mobile';
 import type { components } from '@feelmyrythm/protocol';
+import { Button } from '@feelmyrythm/ui';
 import {
   createContext,
   useCallback,
@@ -9,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { ApiClient, type TokenPair } from './api';
+import { ApiClient, ApiError, type TokenPair } from './api';
 import { localDb } from './localDb';
 import { portfolioSsoEnabled } from './runtimeMode';
 
@@ -18,6 +19,7 @@ const USER_KEY = 'fmr.auth.user.v1';
 const SESSION_KEY = 'fmr.auth.session.v1';
 const LEGACY_AUTH_KEYS = [TOKEN_KEY, USER_KEY, 'fmr-auth'] as const;
 const WEB_AUTH_KEYS = [SESSION_KEY, ...LEGACY_AUTH_KEYS] as const;
+const SSO_LOGOUT_REVOKE_TIMEOUT_MS = 3_000;
 
 export type AuthUser = components['schemas']['UserOut'];
 export interface AccountDeletionProof {
@@ -76,6 +78,25 @@ function hasCurrentUserEnvelope(user: AuthUser | null): user is AuthUser {
   return Boolean(user && typeof user.hasPassword === 'boolean');
 }
 
+function isAuthoritativeSsoRejection(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
+}
+
+function ssoBootstrapErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return '중앙 로그인 세션을 확인할 수 없습니다. 중앙 로그인을 확인한 뒤 다시 시도해 주세요.';
+    }
+    if (error.status === 409) {
+      return '중앙 계정과 FeelMyRythm 계정 정보가 충돌합니다. 관리자에게 계정 연결 상태를 확인해 주세요.';
+    }
+    if (error.status >= 500) {
+      return '중앙 로그인 확인 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해 주세요.';
+    }
+  }
+  return '중앙 로그인 세션을 확인하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+}
+
 function tokenPairFromResponse(payload: AuthResponse): TokenPair {
   return {
     accessToken: payload.accessToken,
@@ -112,14 +133,191 @@ class AuthRuntime {
     });
     return pending;
   }
+
+  waitForStorage(): Promise<void> {
+    return this.storageQueue;
+  }
 }
 
 const authRuntime = new AuthRuntime();
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+interface AuthBootstrapResult {
+  tokens: TokenPair | null;
+  user: AuthUser | null;
+}
+
+interface SharedSsoBootstrap {
+  generation: number;
+  promise: Promise<AuthBootstrapResult>;
+}
+
+class SupersededSsoBootstrapError extends Error {
+  constructor() {
+    super('The SSO bootstrap was superseded by a newer authentication generation.');
+    this.name = 'SupersededSsoBootstrapError';
+  }
+}
+
+let ssoBootstrapGeneration = 0;
+let sharedSsoBootstrap: SharedSsoBootstrap | null = null;
+let ssoRebootstrapPending = false;
+
+function assertCurrentSsoBootstrap(generation: number): void {
+  if (generation !== ssoBootstrapGeneration) throw new SupersededSsoBootstrapError();
+}
+
+function invalidateSsoBootstrap(): void {
+  ssoBootstrapGeneration += 1;
+  sharedSsoBootstrap = null;
+}
+
+async function initializeSsoSession(generation: number): Promise<AuthBootstrapResult> {
+  await authRuntime.waitForStorage();
+  assertCurrentSsoBootstrap(generation);
+  const atomicSession = parseStoredSession(await platformStorage.getItem(SESSION_KEY));
+  assertCurrentSsoBootstrap(generation);
+  let nextTokens = atomicSession?.tokens ?? null;
+  let nextUser = atomicSession?.user ?? null;
+
+  try {
+    let exchangeRequired = atomicSession === null;
+    if (atomicSession) {
+      authRuntime.setTokens(nextTokens);
+      const verificationClient = new ApiClient(authRuntime.readTokens, (verifiedTokens) => {
+        assertCurrentSsoBootstrap(generation);
+        authRuntime.setTokens(verifiedTokens);
+        nextTokens = verifiedTokens;
+      });
+      try {
+        nextUser = await verificationClient.get<AuthUser>('/users/me');
+        assertCurrentSsoBootstrap(generation);
+        nextTokens = authRuntime.readTokens();
+        if (!nextTokens) {
+          throw new Error('The verified SSO application session did not retain its tokens.');
+        }
+      } catch (error: unknown) {
+        assertCurrentSsoBootstrap(generation);
+        authRuntime.setTokens(null);
+        nextTokens = null;
+        nextUser = null;
+        if (!isAuthoritativeSsoRejection(error)) throw error;
+        await authRuntime.enqueueStorage(async () => {
+          assertCurrentSsoBootstrap(generation);
+          await removePlatformAuth();
+        });
+        exchangeRequired = true;
+      }
+    }
+
+    if (exchangeRequired) {
+      const ssoClient = new ApiClient(
+        () => null,
+        () => undefined,
+      );
+      const payload = await ssoClient.request<AuthResponse>(
+        '/auth/sso',
+        { method: 'POST' },
+        { authenticated: false, retryAuth: false },
+      );
+      assertCurrentSsoBootstrap(generation);
+      nextTokens = tokenPairFromResponse(payload);
+      nextUser = payload.user;
+    }
+
+    if (!nextTokens || !nextUser) {
+      throw new Error('The SSO bootstrap did not produce an application session.');
+    }
+    const bootstrapTokens = nextTokens;
+    const bootstrapUser = nextUser;
+    await authRuntime.enqueueStorage(async () => {
+      assertCurrentSsoBootstrap(generation);
+      await platformStorage.setItem(SESSION_KEY, storedSession(bootstrapTokens, bootstrapUser));
+      await Promise.all(LEGACY_AUTH_KEYS.map((key) => platformStorage.removeItem(key)));
+    });
+    assertCurrentSsoBootstrap(generation);
+    authRuntime.setTokens(bootstrapTokens);
+    authRuntime.setUser(bootstrapUser);
+    return { tokens: bootstrapTokens, user: bootstrapUser };
+  } catch (error: unknown) {
+    if (generation === ssoBootstrapGeneration) {
+      authRuntime.setTokens(null);
+      authRuntime.setUser(null);
+    }
+    throw error;
+  }
+}
+
+function acquireSsoBootstrap(): SharedSsoBootstrap {
+  if (sharedSsoBootstrap) return sharedSsoBootstrap;
+
+  const generation = ++ssoBootstrapGeneration;
+  const promise = initializeSsoSession(generation).finally(() => {
+    if (sharedSsoBootstrap?.generation === generation) sharedSsoBootstrap = null;
+  });
+  sharedSsoBootstrap = { generation, promise };
+  return sharedSsoBootstrap;
+}
+
+async function initializeLocalSession(): Promise<AuthBootstrapResult> {
+  await authRuntime.waitForStorage();
+  const [sessionValue, legacyTokenValue, legacyUserValue] = await Promise.all([
+    platformStorage.getItem(SESSION_KEY),
+    platformStorage.getItem(TOKEN_KEY),
+    platformStorage.getItem(USER_KEY),
+  ]);
+  const atomicSession = parseStoredSession(sessionValue);
+  let nextTokens = atomicSession?.tokens ?? parseJson<TokenPair>(legacyTokenValue);
+  let nextUser = atomicSession?.user ?? parseJson<AuthUser>(legacyUserValue);
+  let sessionNeedsUpgrade = !atomicSession;
+
+  if (nextTokens && !hasCurrentUserEnvelope(nextUser)) {
+    sessionNeedsUpgrade = true;
+    authRuntime.setTokens(nextTokens);
+    const recoveryClient = new ApiClient(authRuntime.readTokens, (recoveredTokens) => {
+      authRuntime.setTokens(recoveredTokens);
+    });
+    try {
+      nextUser = await recoveryClient.get<AuthUser>('/users/me');
+      nextTokens = authRuntime.readTokens();
+    } catch {
+      nextTokens = null;
+      nextUser = null;
+      authRuntime.setTokens(null);
+    }
+  }
+
+  if (nextTokens && nextUser) {
+    if (sessionNeedsUpgrade) {
+      await platformStorage.setItem(SESSION_KEY, storedSession(nextTokens, nextUser));
+    }
+    await Promise.all(LEGACY_AUTH_KEYS.map((key) => platformStorage.removeItem(key)));
+  } else {
+    await removePlatformAuth();
+  }
+
+  authRuntime.setTokens(nextTokens);
+  authRuntime.setUser(nextUser);
+  return { tokens: nextTokens, user: nextUser };
+}
+
+interface AuthProviderProps {
+  children: ReactNode;
+  navigateToCentralLogout?: (url: string) => void;
+}
+
+function navigateBrowserToCentralLogout(url: string): void {
+  window.location.assign(url);
+}
+
+export function AuthProvider({
+  children,
+  navigateToCentralLogout = navigateBrowserToCentralLogout,
+}: AuthProviderProps) {
   const [tokens, setTokensState] = useState<TokenPair | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [ssoBootstrapError, setSsoBootstrapError] = useState<string | null>(null);
+  const [ssoBootstrapAttempt, setSsoBootstrapAttempt] = useState(0);
 
   const enqueueStorage = useCallback((operation: () => Promise<void>): Promise<void> => {
     return authRuntime.enqueueStorage(operation);
@@ -127,6 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    const ssoEnabled = portfolioSsoEnabled();
     if (platformStorage.secure) {
       try {
         for (const key of WEB_AUTH_KEYS) window.localStorage.removeItem(key);
@@ -135,80 +334,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    void (async () => {
-      const [sessionValue, legacyTokenValue, legacyUserValue] = await Promise.all([
-        platformStorage.getItem(SESSION_KEY),
-        platformStorage.getItem(TOKEN_KEY),
-        platformStorage.getItem(USER_KEY),
-      ]);
-      const atomicSession = parseStoredSession(sessionValue);
-      let nextTokens = atomicSession?.tokens ?? parseJson<TokenPair>(legacyTokenValue);
-      let nextUser = atomicSession?.user ?? parseJson<AuthUser>(legacyUserValue);
-      let sessionNeedsUpgrade = !atomicSession;
-
-      if (portfolioSsoEnabled()) {
-        const ssoClient = new ApiClient(
-          () => null,
-          () => undefined,
-        );
-        const payload = await ssoClient.request<AuthResponse>(
-          '/auth/sso',
-          { method: 'POST' },
-          { authenticated: false, retryAuth: false },
-        );
-        nextTokens = tokenPairFromResponse(payload);
-        nextUser = payload.user;
-        sessionNeedsUpgrade = true;
-      }
-
-      if (nextTokens && !hasCurrentUserEnvelope(nextUser)) {
-        sessionNeedsUpgrade = true;
-        authRuntime.setTokens(nextTokens);
-        const recoveryClient = new ApiClient(authRuntime.readTokens, (recoveredTokens) => {
-          authRuntime.setTokens(recoveredTokens);
-        });
-        try {
-          nextUser = await recoveryClient.get<AuthUser>('/users/me');
-          nextTokens = authRuntime.readTokens();
-        } catch {
-          nextTokens = null;
-          nextUser = null;
-          authRuntime.setTokens(null);
-        }
-      }
-
-      if (nextTokens && nextUser) {
-        if (sessionNeedsUpgrade) {
-          await platformStorage.setItem(SESSION_KEY, storedSession(nextTokens, nextUser));
-        }
-        await Promise.all(LEGACY_AUTH_KEYS.map((key) => platformStorage.removeItem(key)));
-      } else {
-        await removePlatformAuth();
-      }
-
-      if (!active) return;
-      authRuntime.setTokens(nextTokens);
-      authRuntime.setUser(nextUser);
-      setTokensState(nextTokens);
-      setUser(nextUser);
-    })()
+    const bootstrap = ssoEnabled ? acquireSsoBootstrap().promise : initializeLocalSession();
+    void bootstrap
+      .then(({ tokens: nextTokens, user: nextUser }) => {
+        if (!active) return;
+        setTokensState(nextTokens);
+        setUser(nextUser);
+      })
       .catch((error: unknown) => {
         if (active) {
-          authRuntime.setTokens(null);
-          authRuntime.setUser(null);
+          if (!ssoEnabled) {
+            authRuntime.setTokens(null);
+            authRuntime.setUser(null);
+          }
           setTokensState(null);
           setUser(null);
+          if (ssoEnabled) setSsoBootstrapError(ssoBootstrapErrorMessage(error));
           console.error('Authentication storage could not be loaded', error);
         }
       })
       .finally(() => {
-        if (active) setReady(true);
+        if (active) {
+          ssoRebootstrapPending = false;
+          setReady(true);
+        }
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [ssoBootstrapAttempt]);
 
   const writeTokens = useCallback(
     (next: TokenPair | null) => {
@@ -225,7 +380,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       authRuntime.setUser(null);
       setUser(null);
-      void enqueueStorage(removePlatformAuth).catch(() => undefined);
+      if (!portfolioSsoEnabled()) {
+        void enqueueStorage(removePlatformAuth).catch(() => undefined);
+        return;
+      }
+      if (ssoRebootstrapPending) return;
+
+      ssoRebootstrapPending = true;
+      invalidateSsoBootstrap();
+      setReady(false);
+      setSsoBootstrapError(null);
+      void enqueueStorage(removePlatformAuth)
+        .then(() => {
+          setSsoBootstrapAttempt((attempt) => attempt + 1);
+        })
+        .catch((error: unknown) => {
+          ssoRebootstrapPending = false;
+          setSsoBootstrapError(ssoBootstrapErrorMessage(error));
+          setReady(true);
+          console.error('Rejected SSO authentication storage could not be cleared', error);
+        });
     },
     [enqueueStorage],
   );
@@ -378,23 +552,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     const current = authRuntime.readTokens();
-    if (current) {
-      void client
-        .request(
-          '/auth/logout',
-          { method: 'POST', body: JSON.stringify({ refreshToken: current.refreshToken }) },
-          { authenticated: false, retryAuth: false },
-        )
-        .catch(() => undefined);
+    const ssoEnabled = portfolioSsoEnabled();
+    if (ssoEnabled) {
+      ssoRebootstrapPending = true;
+      invalidateSsoBootstrap();
+      setReady(false);
+      setSsoBootstrapError(null);
     }
-    writeTokens(null);
+    authRuntime.setTokens(null);
     authRuntime.setUser(null);
+    setTokensState(null);
     setUser(null);
-    if (portfolioSsoEnabled()) {
-      const returnUrl = `${window.location.origin}/feelmyrythm/`;
-      window.location.assign(`/sso/logout?rd=${encodeURIComponent(returnUrl)}`);
+    const storageCleanup = enqueueStorage(removePlatformAuth);
+
+    if (!ssoEnabled) {
+      if (current) {
+        void client
+          .request(
+            '/auth/logout',
+            { method: 'POST', body: JSON.stringify({ refreshToken: current.refreshToken }) },
+            { authenticated: false, retryAuth: false },
+          )
+          .catch(() => undefined);
+      }
+      void storageCleanup.catch(() => undefined);
+      return;
     }
-  }, [client, writeTokens]);
+
+    void (async () => {
+      const abortController = new AbortController();
+      let timeoutId: number | undefined;
+      const revokeSettled = current
+        ? client
+            .request(
+              '/auth/logout',
+              {
+                method: 'POST',
+                body: JSON.stringify({ refreshToken: current.refreshToken }),
+                signal: abortController.signal,
+              },
+              { authenticated: false, retryAuth: false },
+            )
+            .then(() => undefined)
+            .catch(() => undefined)
+        : Promise.resolve();
+      const timeout = new Promise<void>((resolve) => {
+        timeoutId = window.setTimeout(() => {
+          abortController.abort();
+          resolve();
+        }, SSO_LOGOUT_REVOKE_TIMEOUT_MS);
+      });
+      const localLogoutSettled = Promise.allSettled([revokeSettled, storageCleanup]).then(
+        () => undefined,
+      );
+
+      await Promise.race([localLogoutSettled, timeout]);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      const returnUrl = `${window.location.origin}/feelmyrythm/`;
+      navigateToCentralLogout(`/sso/logout?rd=${encodeURIComponent(returnUrl)}`);
+    })();
+  }, [client, enqueueStorage, navigateToCentralLogout]);
 
   const value = useMemo(
     () => ({
@@ -433,6 +650,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (
       <div className="loading-panel" role="status">
         로그인 상태를 불러오는 중…
+      </div>
+    );
+  }
+
+  if (ssoBootstrapError) {
+    return (
+      <div className="loading-panel" aria-live="polite">
+        <h1>중앙 세션을 확인하지 못했습니다</h1>
+        <p role="alert">{ssoBootstrapError}</p>
+        <Button
+          variant="primary"
+          onClick={() => {
+            setReady(false);
+            setSsoBootstrapError(null);
+            setSsoBootstrapAttempt((attempt) => attempt + 1);
+          }}
+        >
+          중앙 세션 다시 확인
+        </Button>
       </div>
     );
   }

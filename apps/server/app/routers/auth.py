@@ -78,8 +78,8 @@ RESEND_MESSAGE = "If an unverified account exists, a verification email has been
 REGISTRATION_MESSAGE = "If this address can be registered, a completion email has been sent."
 PASSWORD_RESET_MESSAGE = "If a password account exists, a reset email has been sent."
 ACCOUNT_DELETE_MESSAGE = "If eligible, an account deletion confirmation email has been sent."
-EMAIL_WORKFLOWS_DISABLED = "Email account workflows are temporarily unavailable."
-PUBLIC_ENROLLMENT_DISABLED = "Public account enrollment is temporarily unavailable."
+EMAIL_WORKFLOWS_DISABLED = "Application email account workflows are disabled for this deployment."
+PUBLIC_ENROLLMENT_DISABLED = "Public account enrollment is disabled for this deployment."
 LOCAL_AUTH_DISABLED = "Local account authentication is disabled; use portfolio single sign-on."
 SSO_IDENTITY_INVALID = "Single sign-on identity is missing or invalid."
 SSO_IDENTITY_NOT_PROVISIONED = "Single sign-on identity is not provisioned for this application."
@@ -96,7 +96,7 @@ def _require_public_email_workflows(settings: AppSettings) -> None:
 
 
 def _require_public_enrollment(settings: AppSettings) -> None:
-    if settings.deployment_profile == "managed_local_sso":
+    if not settings.public_email_workflows_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=PUBLIC_ENROLLMENT_DISABLED,
@@ -573,7 +573,7 @@ def sso_login(request: Request, db: DbSession, settings: AppSettings) -> TokenPa
         user.auth_generation += 1
         db.execute(delete(RefreshSession).where(RefreshSession.user_id == user.id))
         user.display_name = display_name
-    elif settings.deployment_profile == "managed_local_sso":
+    elif settings.sso_enabled:
         user = User(
             email=email,
             display_name=display_name,

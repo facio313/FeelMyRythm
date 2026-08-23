@@ -49,8 +49,8 @@ flowchart LR
   end
 
   PG[("PostgreSQL\ncksDB의 전용 DB")]
-  S3[("S3 객체 저장소")]
-  SMTP["SMTP"]
+  S3[("객체 저장소\nexternal local volume / 선택적 S3")]
+  SMTP["조건부 앱 SMTP"]
 
   User --> Web
   User --> Mobile
@@ -82,7 +82,7 @@ flowchart LR
 | API 타입 | OpenAPI → openapi-typescript | [`apps/server/openapi.json`](../apps/server/openapi.json), [`packages/protocol`](../packages/protocol/src/openapi.ts) | 서버 계약을 웹 TypeScript에서 재사용 |
 | 서버 | Python 3.13, FastAPI, Pydantic, SQLAlchemy 2, Alembic | [`apps/server`](../apps/server/app/main.py) | 인증, 그룹·악보·연습 데이터, WS 방, worker |
 | 데이터 | PostgreSQL 운영, SQLite 로컬·테스트 | [`db.py`](../apps/server/app/db.py), [`models.py`](../apps/server/app/models.py) | 영속 데이터와 revision·outbox |
-| 객체 저장 | S3 운영, local adapter 개발 | [`storage.py`](../apps/server/app/storage.py) | 악보 staging/final 객체 |
+| 객체 저장 | 현재 single-server external local volume, 확장 시 선택적 S3 adapter | [`storage.py`](../apps/server/app/storage.py), [`docker-compose.prod.yml`](../docker-compose.prod.yml) | backend-neutral key의 악보 staging/final 객체 |
 | 모바일 | Capacitor 8, Swift, Kotlin | [`apps/mobile`](../apps/mobile/README.md) | 웹 번들 래핑, Keychain/Keystore, 딥링크, 햅틱 |
 | 엣지·배포 | nginx, Docker/Compose, GHCR ARM64, GitHub Actions | [`nginx.conf`](../nginx/nginx.conf), [`deploy.yml`](../.github/workflows/deploy.yml) | `/feelmyrythm` 라우팅, 이미지 검증·배포 |
 | 검증 | Vitest, Testing Library, Playwright, pytest, Ruff, mypy | [`vitest.workspace.ts`](../vitest.workspace.ts), [`playwright.config.ts`](../playwright.config.ts) | 단위·계약·반응형·실브라우저·서버 검증 |
@@ -133,7 +133,7 @@ sequenceDiagram
   end
 ```
 
-`AuthProvider`는 route를 보이기 전에 플랫폼 인증 저장소에서 atomic session envelope를 복구한다. 구형 envelope에 현재 `UserOut` 필드가 없으면 `/api/users/me`로 갱신하거나 전체 세션을 비운다. 브라우저와 네이티브의 저장 방식은 [11장](#11-인증오프라인캐시-경계)에서 설명한다.
+`AuthProvider`는 route를 보이기 전에 플랫폼 인증 저장소에서 atomic session envelope를 복구한다. Browser SSO mode에서는 같은 tab의 StrictMode/remount가 공유 single-flight와 generation assertion을 사용한다. 저장된 token으로 `/api/users/me`와 필요 시 refresh를 호출해 현재 edge subject 아래 session을 먼저 검증하고, 성공하면 새 `/api/auth/sso` exchange 없이 재사용한다. 최종 권위 401이면 stale envelope를 제거한 뒤 현재 중앙 identity를 교환하며, 부팅 뒤 일반 API refresh 401도 app을 차단한 상태에서 같은 rebootstrap으로 전환한다. network/5xx/conflict는 기존 확인 가능한 session을 버리지 않고 재시도 화면에 머문다. SSO logout은 refresh revoke와 storage cleanup을 기다리고 3초 timeout에서 abort한 뒤 중앙 logout으로 이동한다. 구형 envelope에 현재 `UserOut` 필드가 없으면 같은 `/api/users/me` 경계에서 갱신한다. Production mobile SSO에는 중앙 browser session을 native app credential로 바꾸는 bridge가 아직 없으므로 signed release를 차단하며, local-auth 개발 build의 email flow로 우회하지 않는다. 브라우저와 네이티브의 저장 방식은 [11장](#11-인증오프라인캐시-경계)에서 설명한다.
 
 ### 4.2 백엔드 시작점
 
@@ -254,9 +254,9 @@ stateDiagram-v2
 | 인증 메일 재전송 | `resendVerification` | `POST /api/auth/resend-verification`: cooldown과 새 generation으로 이전 link 무효화 |
 | 이메일 로그인 | `login` | `POST /api/auth/login`: active·verified·password 계정, dummy hash를 포함한 일정한 검증 경로 |
 | Google 로그인 | `loginWithGoogle` | `POST /api/auth/google`: Google audience·subject·verified email 검사, preclaim password 제거, 충돌 409 |
-| Portfolio SSO | `AuthProvider` 초기 exchange | `POST /api/auth/sso`: edge secret과 canonical `user < developer < admin` group prefix 검증, immutable subject 우선 조회, unique email legacy link 또는 managed-local verified user provision, 충돌 409 |
+| Portfolio SSO | `AuthProvider`의 stored-session 검증 후 필요 시 exchange | `GET /api/users/me`로 현재 edge subject 아래 기존 session을 재사용하고 최종 401에만 `POST /api/auth/sso`: immutable subject 우선 조회, unique email legacy link 또는 storage profile과 무관한 verified user provision, 충돌 409 |
 | access 갱신 | `ApiClient.refresh` | `POST /api/auth/refresh`: refresh row lock/revoke/rotate. 권위 있는 401만 client session 삭제 |
-| 로그아웃 | `logout` | `POST /api/auth/logout` best effort 후 client session 즉시 제거 |
+| 로그아웃 | `logout` | local auth는 `POST /api/auth/logout` best effort 후 client session을 제거하고, SSO는 app refresh revoke와 storage cleanup 완료 또는 3초 bounded abort를 기다린 뒤 중앙 `/sso/logout`으로 이동 |
 | reset 요청 | `requestPasswordReset` | `POST /api/auth/request-password-reset`: 계정 존재를 숨기는 동일 응답과 cooldown |
 | reset 완료 | `resetPassword` | `POST /api/auth/reset-password`: one-use generation link, 새 hash, 모든 refresh revoke |
 | 탈퇴 proof | Settings/Google 또는 email challenge | `POST /api/users/me/delete-challenge`: 짧은 fresh proof link. URL 제거 뒤 web memory에만 둔다. |
@@ -306,14 +306,14 @@ Celery, RQ, APScheduler, Kubernetes CronJob이나 OS cron은 없다. API process
 | 설정군 | 주요 변수 | 기본·검증 의미 |
 | --- | --- | --- |
 | 환경·DB | `FMR_ENVIRONMENT`, `FMR_DATABASE_URL`, `FMR_AUTO_CREATE_SCHEMA` | 개발 기본 SQLite/auto-create. 운영은 PostgreSQL과 `false`를 강제하고 Alembic만 사용 |
-| Portfolio auth | `PORTFOLIO_BRANCH`, `PORTFOLIO_AUTH_MODE`, `FMR_DEPLOYMENT_PROFILE`, legacy `FMR_SSO_ENABLED`, `FMR_SSO_EDGE_SECRET_FILE` (`FMR_SSO_EDGE_SECRET` fallback) | 공통 resolver는 `main/dev → sso`, 나머지 branch → `local`을 강제한다. local checkout은 Git branch를 감지하고 CI/build/container는 branch와 mode를 명시한다. legacy SSO flag가 있으면 canonical mode와 정확히 일치해야 한다. SSO는 32–4096 printable byte 앱 전용 edge secret을 강제한다. `managed_local_sso`는 절대 local upload path와 SMTP 금지를 추가하며 rootless host는 `cks:cks` mode-0640 file을 read-only bind하고 Compose는 UID 10001/GID 0을 사용한다. 서버는 container `root:root` mode 0640과 effective GID 0을 검증한다. |
+| Portfolio auth | `PORTFOLIO_BRANCH`, `PORTFOLIO_AUTH_MODE`, `FMR_DEPLOYMENT_PROFILE`, legacy `FMR_SSO_ENABLED`, `FMR_SSO_EDGE_SECRET_FILE` (`FMR_SSO_EDGE_SECRET` fallback) | 공통 resolver는 `main/dev → sso`, 나머지 branch → `local`을 강제한다. local checkout은 Git branch를 감지하고 CI/build/container는 branch와 mode를 명시한다. legacy SSO flag가 있으면 canonical mode와 정확히 일치해야 한다. SSO는 32–4096 printable byte 앱 전용 edge secret을 강제하고 app SMTP/public email workflow를 닫는다. `managed_local_sso`는 절대 local upload path를 추가하며 rootless host는 `cks:cks` mode-0640 secret file을 read-only bind하고 Compose는 UID 10001/GID 0을 사용한다. 서버는 container `root:root` mode 0640과 effective GID 0을 검증한다. |
 | JWT | `FMR_JWT_SECRET`, `FMR_JWT_ISSUER`, `FMR_ACCESS_TOKEN_MINUTES`, `FMR_REFRESH_TOKEN_DAYS` | 운영 secret 32자 이상·알려진 placeholder 거부. 개발에서 생략하면 process-random이라 재시작 시 기존 token 만료 |
 | Google | `FMR_GOOGLE_CLIENT_ID` | server ID-token audience. web build의 `VITE_GOOGLE_CLIENT_ID`와 같은 OAuth web client ID 사용 |
 | link | `FMR_WEB_APP_BASE_URL`, verification/reset/delete 만료·재요청 초 | 운영 HTTPS·query/fragment 없음. 기본 link 만료 verification/reset 30분, delete 15분 |
-| SMTP | host/port/from, username/password, STARTTLS/SSL | 운영 host+from 필수, 인증 값은 쌍, STARTTLS/SSL 정확히 하나. 기본 587 STARTTLS |
+| SMTP | host/port/from, username/password, STARTTLS/SSL | local-auth public email workflow에서만 host+from 필수. SSO mode에서는 중앙 account provider에 위임하고 app SMTP 설정을 거부한다. 인증 값은 쌍, 기본 587 STARTTLS |
 | auth worker | mail worker count/capacity/shutdown, password verify concurrency | 기본 `2/128/5초/4` |
 | network | `FMR_CORS_ORIGINS`, `FMR_PUBLIC_API_BASE_URL` | CORS는 JSON array. 운영 public API는 HTTPS absolute URL |
-| storage | backend, local dir, max bytes, upload TTL, S3 bucket/region/endpoint | 운영은 S3, bucket·region 필수. boto3 자격증명은 표준 AWS provider chain 사용 |
+| storage | backend, local dir, max bytes, upload TTL, S3 bucket/region/endpoint | 현재 `managed_local_sso`는 절대 local dir과 사전 생성 external volume, standard는 S3 bucket·region을 강제한다. DB에는 어느 쪽도 물리 root가 아닌 상대 object key만 저장한다. boto3 자격증명은 표준 AWS provider chain 사용 |
 | storage worker | enabled, interval, batch, lease, retry, pending grace, late guard, temp TTL | 운영 worker는 끌 수 없다. retry base≤max, redelete interval≤late guard 검증 |
 | room | lead time, TTL, cleanup interval | 기본 `3000ms/1800초/30초` |
 
@@ -393,6 +393,7 @@ flowchart LR
 - `vite build --mode mobile`은 상대 경로 `./`를 사용해 [`apps/mobile/web`](../apps/mobile)로 출력한다.
 - 네이티브 번들은 로컬 HTML을 열지만 REST/WS는 `https://bonifacio.work/feelmyrythm/api|ws`로 보낸다.
 - [`nativeAudio.ts`](../apps/mobile/src/nativeAudio.ts)가 Web Audio와 네이티브 오디오 clock 사이의 batch scheduling 경계를 제공하고, [`nativeBridge.ts`](../apps/mobile/src/nativeBridge.ts)가 keep-awake, haptics, system bar와 딥링크를 추상화한다.
+- Keychain/Keystore는 발급된 app session의 저장 경계일 뿐 중앙 identity proof를 생성하지 않는다. `main`/`dev` mobile release에는 system-browser login, 일회용 credential exchange와 native callback bridge가 추가로 필요하다.
 - [`secureStorage.ts`](../apps/mobile/src/secureStorage.ts)는 브라우저 localStorage와 iOS Keychain/Android Keystore 경계를 분리한다.
 - 웹 번들 변경 뒤에는 `corepack pnpm --filter @feelmyrythm/mobile sync`로 세 복사본과 동적 chunk까지 검증한다.
 
@@ -504,19 +505,20 @@ b881b6589baa  initial schema
   → 72d06f7d91c4  email verification + auth generation
     → b44b9e7c2d10  secure auth completion/reset/delete attempts
       → c7f2a9d4e6b1  staging upload + durable storage deletion outbox
-        → e3a1f6c9b2d4  persistent OMR draft jobs (head)
+        → e3a1f6c9b2d4  persistent OMR draft jobs
+          → f4c8d1a2b3e5  immutable portfolio SSO subject (head)
 ```
 
 [`alembic/env.py`](../apps/server/alembic/env.py)는 `Settings.database_url`로 Alembic URL을 덮어쓴다. 운영은 `AUTO_CREATE_SCHEMA=false`와 Alembic을 강제하고, 개발의 `create_all`은 fresh SQLite 편의를 위한 별도 경로다.
 
-초기 운영판이 `Base.metadata.create_all()`로 만든 PostgreSQL DB에는 `alembic_version`이 없다. root revision은 이 상태에서 정확한 legacy table·column signature를 먼저 검사하고, 일치할 때만 기존 table을 `fmr_legacy` schema로 옮긴 뒤 새 revision schema를 만들고 사용자·그룹·곡·템포맵·악보 metadata·measure map·주석·연습 기록·할 일·calibration row를 같은 migration transaction에서 복사한다. 기존 `stored_name`은 S3 이관 시 같은 object key로 유지한다. 변환이 끝나면 임시 schema를 제거하며, signature가 다르면 임의 stamp나 부분 변환 없이 실패한다. 실제 PostgreSQL 회귀 테스트는 별도 임시 DB에서 이 upgrade와 row 보존을 검증한다.
+초기 운영판이 `Base.metadata.create_all()`로 만든 PostgreSQL DB에는 `alembic_version`이 없다. root revision은 이 상태에서 정확한 legacy table·column signature를 먼저 검사하고, 일치할 때만 기존 table을 `fmr_legacy` schema로 옮긴 뒤 새 revision schema를 만들고 사용자·그룹·곡·템포맵·악보 metadata·measure map·주석·연습 기록·할 일·calibration row를 같은 migration transaction에서 복사한다. 기존 `stored_name`은 backend-neutral object key로 유지하므로 local volume을 계속 쓰거나 선택적으로 S3에 같은 key로 이관할 수 있다. 변환이 끝나면 임시 schema를 제거하며, signature가 다르면 임의 stamp나 부분 변환 없이 실패한다. 실제 PostgreSQL 회귀 테스트는 별도 임시 DB에서 이 upgrade와 row 보존을 검증한다.
 
 ## 11. 인증·오프라인·캐시 경계
 
 ### 인증
 
 - 브라우저 인증 상태는 하나의 `fmr.auth.session.v1` envelope로 저장한다: [`auth.tsx`](../apps/web/src/lib/auth.tsx).
-- managed-local browser SSO는 stable central subject로 앱 계정을 자동 연결·생성한다. access/refresh token만으로는 충분하지 않으며 동일 요청의 trusted edge secret과 현재 subject가 token 사용자에 묶여야 한다: [`sso.py`](../apps/server/app/sso.py).
+- browser SSO는 stable central subject로 앱 계정을 storage profile과 무관하게 자동 연결·생성한다. 저장된 atomic session은 먼저 현재 edge subject 아래 검증해 재사용하며 권위 있는 거부에만 exchange한다. access/refresh token만으로는 충분하지 않고 동일 요청의 trusted edge secret과 현재 subject가 token 사용자에 묶여야 한다: [`auth.tsx`](../apps/web/src/lib/auth.tsx), [`sso.py`](../apps/server/app/sso.py).
 - access token 401은 refresh를 single-flight로 회전한다. 세대가 바뀐 늦은 응답은 새 로그인 세션을 덮지 못한다: [`api.ts`](../apps/web/src/lib/api.ts).
 - refresh endpoint의 확정 401만 세션을 제거한다. 네트워크 오류와 5xx는 기존 신원을 유지하고 재시도 가능한 오류로 전달한다.
 - 네이티브 refresh token은 Keychain/Keystore에 두며 브라우저 저장소와 섞지 않는다.
@@ -808,12 +810,12 @@ flowchart LR
 |---|---|
 | PostgreSQL | 전용 DB/user, `cksDB` network, backup/restore |
 | JWT·OAuth | 충분히 긴 JWT secret, Google client ID |
-| 메일 | HTTPS web base URL, SMTP host/from, TLS와 선택 인증 |
-| 객체 저장 | S3 bucket/region/credentials, CORS, staging lifecycle |
-| 모바일 | signing, AASA/assetlinks, store metadata와 privacy URL |
+| 메일 | local-auth public email workflow를 선택할 때만 HTTPS web base URL, SMTP host/from, TLS와 선택 인증. 현재 SSO account mail은 중앙 provider 책임 |
+| 객체 저장 | 현재 external local volume 사전 생성·권한·보존. S3를 선택할 때만 bucket/region/credentials, CORS, staging lifecycle |
+| 모바일 | signed mobile 출시를 선택할 때 signing, AASA/assetlinks, store metadata와 privacy URL |
 | 배포 | GHCR access, 제한 deploy key, rollback·post-health 절차 |
 
-실제 값을 주입한 뒤에는 [운영 preflight와 release runbook](./OPERATIONS.md)을 따른다. 기본 preflight는 read-only이며 S3 canary와 test mail은 각각 명시적인 opt-in flag가 있어야만 실행한다.
+실제 값을 주입한 뒤에는 [운영 preflight와 release runbook](./OPERATIONS.md)을 따른다. 기본 preflight는 read-only이며 선택한 provider만 검사한다. S3 canary와 test mail은 각각 명시적인 opt-in flag가 있어야만 실행한다.
 
 ## 18. 반드시 지킬 불변 조건
 

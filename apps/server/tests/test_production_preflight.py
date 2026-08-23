@@ -117,6 +117,57 @@ def test_managed_local_sso_preflight_skips_external_providers_and_checks_local_s
     assert "s3" not in by_name
 
 
+def test_standard_sso_preflight_checks_s3_without_requiring_app_smtp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PORTFOLIO_BRANCH", "main")
+    monkeypatch.setenv("PORTFOLIO_AUTH_MODE", "sso")
+    env_file = tmp_path / "production.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "FMR_ENVIRONMENT=production",
+                "FMR_DEPLOYMENT_PROFILE=standard",
+                "FMR_SSO_ENABLED=true",
+                "FMR_SSO_EDGE_SECRET=test-fmr-edge-secret-with-at-least-32-characters",
+                "FMR_DATABASE_URL=postgresql+psycopg://user:password@db/feelmyrythm",
+                "FMR_AUTO_CREATE_SCHEMA=false",
+                "FMR_JWT_SECRET=runtime-secret-with-at-least-32-characters",
+                "FMR_WEB_APP_BASE_URL=https://bonifacio.work/feelmyrythm",
+                "FMR_PUBLIC_API_BASE_URL=https://bonifacio.work/feelmyrythm",
+                "FMR_REDIS_URL=redis://fmrRedis:6379/0",
+                "FMR_STORAGE_BACKEND=s3",
+                "FMR_S3_BUCKET=scores-bucket",
+                "FMR_S3_REGION=ap-northeast-2",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(production_preflight, "_check_database", lambda *args, **kwargs: "ok")
+    monkeypatch.setattr(production_preflight, "_check_redis", lambda *args, **kwargs: "ok")
+    monkeypatch.setattr(production_preflight, "_check_s3", lambda *args, **kwargs: "ok")
+    monkeypatch.setattr(production_preflight, "_check_public_health", lambda *args, **kwargs: "ok")
+
+    results = run_preflight(
+        Namespace(
+            env_file=env_file,
+            send_test_email=None,
+            exercise_s3=False,
+            skip_association=True,
+            allow_database_behind=False,
+            ios_team_id=None,
+            android_cert_sha256=None,
+        )
+    )
+
+    by_name = {result.name: result for result in results}
+    assert by_name["configuration"].status == "passed"
+    assert by_name["smtp"].status == "skipped"
+    assert by_name["s3"].status == "passed"
+    assert "local-storage" not in by_name
+
+
 def test_database_preflight_only_allows_known_upgrade_ancestors() -> None:
     server_root = Path(__file__).resolve().parents[1]
     alembic_config = Config(str(server_root / "alembic.ini"))

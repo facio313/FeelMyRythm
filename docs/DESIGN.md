@@ -48,7 +48,7 @@
 | 서버 | **Python + FastAPI** (uvicorn/uvloop) — REST + WebSocket 단일 앱. Flask 대비 근거는 §2.3 |
 | ORM/마이그레이션 | SQLAlchemy 2 + Alembic |
 | DB | **PostgreSQL** (+ Redis: 실시간 세션 상태, 멀티 인스턴스 시) |
-| 파일 저장 | S3 호환 스토리지 (악보 PDF/이미지/MusicXML) |
+| 파일 저장 | `ObjectStorage` adapter: 현재 single-server external local volume, 확장 시 선택적 S3 호환 스토리지 |
 | 모노레포 | pnpm workspaces (JS 측) + uv (Python 서버) |
 | 테스트 | Vitest (코어 단위 테스트), pytest (서버), Playwright (E2E) |
 
@@ -65,7 +65,7 @@
 - **PWA만으로는 부족한 이유**: iOS Safari는 화면 잠금/백그라운드에서 오디오·타이머를 강하게 제한한다. 연습 중 화면이 꺼지면 메트로놈이 멈추는 것은 치명적. → 네이티브 셸 필요.
 - **React Native가 아닌 이유**: 이 앱의 성능 민감 지점은 UI가 아니라 **오디오 스케줄링**이다. RN을 써도 오디오는 결국 네이티브 모듈을 짜야 하므로, UI까지 재작업하는 RN보다 웹 UI를 그대로 쓰고 오디오만 필요시 플러그인화하는 Capacitor가 유리하다.
 - **알려진 리스크와 대응**: WKWebView 타이머 중단을 오디오 경로에서 제거하기 위해 `AudioEngine` 인터페이스 뒤에 AVAudioEngine/Oboe 구현을 둔다(§5.1). 기기별 출력 지연은 §6.5 캘리브레이션으로 흡수하고 실제 파형으로 최종 검증한다. 코어 로직은 플랫폼과 무관하다.
-- **native 인증 경계**: Google Identity Services의 웹 button은 Capacitor WebView에서 신뢰할 수 있는 native 로그인으로 간주하지 않는다. Sign in with Apple과 native Google 연동 전까지 모든 Capacitor 빌드는 Google button/SDK를 숨기고 이메일 가입·로그인·복구만 제공한다. 브라우저 배포는 기존 Google 로그인을 유지한다.
+- **native 인증 경계**: Google Identity Services의 웹 button과 browser SSO cookie는 Capacitor WebView의 production identity proof로 간주하지 않는다. 모든 Capacitor build는 Google web button/SDK를 숨기며, local-auth tool/feature build에서만 이메일 가입·로그인·복구를 사용할 수 있다. `main`/`dev` SSO mobile release는 system browser에서 확인한 중앙 session을 일회용 app credential로 교환하는 native callback/bridge를 별도 설계·구현·검증한 뒤 승인한다. 이를 피하려고 production SSO server의 local login을 다시 열지 않는다.
 
 ### 2.3 서버 스택 근거 — Python은 적합, 프레임워크는 Flask보다 FastAPI
 
@@ -121,7 +121,7 @@ graph TB
         REST["REST API<br/>인증 · 그룹 · 곡 · 템포맵 · 악보 · 일지"]
         WS["WS Gateway<br/>시계동기(PING/PONG) · 트랜스포트(START/STOP/SEEK)"]
         DB[("PostgreSQL")]
-        S3[("객체 스토리지<br/>악보 파일")]
+        S3[("객체 스토리지<br/>external local volume / 선택적 S3")]
         REST --> DB
         REST --> S3
         WS --> DB
@@ -141,10 +141,10 @@ graph TB
 
 ### 3.4 인증·계정 보안 흐름
 
-- `bonifacio.work` browser production의 `managed_local_sso` profile은 edge가 덮어쓴 `Remote-User`를 nullable unique `User.sso_subject`에 한 번 연결하고 이후 변경을 금지한다. 교환은 subject를 먼저 찾고, 아직 subject가 없는 unique email row만 legacy owner로 한 번 연결한다. 둘 다 없으면 verified active 앱 사용자를 만들며 subject와 email이 서로 다른 row를 가리키는 모든 경우는 409로 닫는다. edge는 client 입력을 덮어쓴 앱 전용 `X-Portfolio-Edge-Secret`과 whitespace 없는 canonical `Remote-Groups`도 주입한다. 서버는 SSO exchange뿐 아니라 모든 bearer HTTP API와 refresh/logout, room·annotation WebSocket의 first-frame token 인증에서 secret, token 사용자의 subject, exact `user < developer < admin` prefix를 함께 확인하고 역할은 매 요청 다시 계산한다.
+- `bonifacio.work` browser production의 SSO mode는 edge가 덮어쓴 `Remote-User`를 nullable unique `User.sso_subject`에 한 번 연결하고 이후 변경을 금지한다. 교환은 subject를 먼저 찾고, 아직 subject가 없는 unique email row만 legacy owner로 한 번 연결한다. 둘 다 없으면 storage profile과 무관하게 verified active 앱 사용자를 만들며 subject와 email이 서로 다른 row를 가리키는 모든 경우는 409로 닫는다. 웹 bootstrap은 저장된 atomic app session을 먼저 `/users/me`와 필요 시 refresh로 현재 edge subject 아래 검증하고, 최종 401일 때만 SSO exchange한다. network/5xx/conflict에서는 app child를 노출하지 않고 재시도 상태에 머문다. edge는 client 입력을 덮어쓴 앱 전용 `X-Portfolio-Edge-Secret`과 whitespace 없는 canonical `Remote-Groups`도 주입한다. 서버는 SSO exchange뿐 아니라 모든 bearer HTTP API와 refresh/logout, room·annotation WebSocket의 first-frame token 인증에서 secret, token 사용자의 subject, exact `user < developer < admin` prefix를 함께 확인하고 역할은 매 요청 다시 계산한다.
 - 이메일 가입 첫 요청은 이름과 이메일만 저장하고 password hash나 세션을 만들지 않는다. 메일 링크의 `verificationToken`은 purpose·email·`auth_generation`·만료에 묶이며, 재발급 전에 generation을 올려 이전 링크를 무효화한다. 링크 소유자가 별도 화면에서 새 password와 확인값을 제출한 때에만 legacy 미검증 hash를 덮어쓰고 검증 시각·새 generation·세션 발급을 한 transaction 흐름으로 완료한다.
 - 비밀번호 재설정 요청은 등록 여부와 무관하게 같은 202 응답을 보낸다. reset token은 purpose·email·generation·만료에 묶고, 성공 시 generation 증가와 모든 refresh session 삭제로 한 번만 쓸 수 있게 한다. 브라우저/앱은 verification/reset token을 URL fragment에서 즉시 지우고 메모리에만 두며, 새로고침 뒤에는 메일 링크를 다시 열도록 안내한다.
-- 가입·재발급·reset·Google-only 탈퇴 확인 메일은 SMTP enqueue **전에** 사용자별 last-attempt를 commit한다. provider timeout과 bounded queue overflow도 `Retry-After` cooldown을 유지한다. SMTP I/O는 고정 worker 수·bounded queue의 비동기 delivery manager로 요청 밖에서 수행하고, queue full/provider 오류 로그에는 recipient나 서명 URL을 남기지 않는다. shutdown은 제한 시간까지 drain한 뒤 아직 시작하지 않은 job을 취소한다. 운영은 SMTP, absolute HTTPS `FMR_WEB_APP_BASE_URL`, query/fragment 없는 absolute HTTPS `FMR_PUBLIC_API_BASE_URL`이 유효하지 않으면 시작하지 않는다.
+- local-auth profile에서 가입·재발급·reset·Google-only 탈퇴 확인 메일을 제공할 때는 SMTP enqueue **전에** 사용자별 last-attempt를 commit한다. provider timeout과 bounded queue overflow도 `Retry-After` cooldown을 유지한다. SMTP I/O는 고정 worker 수·bounded queue의 비동기 delivery manager로 요청 밖에서 수행하고, queue full/provider 오류 로그에는 recipient나 서명 URL을 남기지 않는다. shutdown은 제한 시간까지 drain한 뒤 아직 시작하지 않은 job을 취소한다. 이 profile은 SMTP와 absolute HTTPS URL이 유효하지 않으면 시작하지 않는다. SSO mode는 이 앱의 public email workflow와 SMTP sender를 닫고 중앙 identity provider에 account mail을 위임한다.
 - password login은 계정 없음·비활성·미검증·Google-only에도 고정 dummy bcrypt를 실행하고, bounded 전역 verifier로 동시 bcrypt CPU 작업을 제한한다. client IP/CAPTCHA/provider quota 제한은 trusted CDN/nginx/provider에서 수행하며 앱은 임의 `X-Forwarded-For`를 신뢰하지 않는다.
 - 검증된 Google 이메일이 미검증 선점 row와 같으면 그 row에 subject를 연결하고 legacy password·refresh session을 제거하며 generation을 올린다. 이미 다른 Google subject나 별도 계정에 연결된 충돌은 409다.
 - password 계정 탈퇴는 현재 password를 다시 검증한다. Google-only 계정은 브라우저에서 audience·verified email·subject를 다시 검증한 Google ID token을 쓰거나, native에서도 열 수 있는 purpose=`account_delete` 만료 메일 token을 쓴다. 후자는 email·Google subject·generation에 묶고 fragment에서 즉시 제거해 메모리에만 보관한다.
@@ -460,7 +460,7 @@ erDiagram
 
 - `GroupMember.role`: owner / leader / member — leader 이상만 동기 세션에서 트랜스포트 조작.
 - `TempoMap`: JSON 컬럼(sections, jumps) + `revision` 정수. 수정 시 revision 증가 (동기화 일관성 근거).
-- `Score.kind`: full(총보) | part, `instrument`, 파일은 S3 키 참조.
+- `Score.kind`: full(총보) | part, `instrument`, 파일은 backend-neutral object key 참조. 현재 local backend는 `/data/uploads` 아래에, 선택적 S3 backend는 bucket 안에 같은 key를 해석하며 DB에는 물리 root를 저장하지 않는다.
 - `Annotation.scope`: private | project.
 - `PracticeLog`: 마크다운 본문 + 마디/악보 위치 앵커 참조 가능. `Todo`: 내용, 담당자, 기한, 완료 여부.
 - `DeviceCalibration`: userId + 기기 지문 + 출력장치 라벨 → offsetMs.

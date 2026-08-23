@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const secureStorage = vi.hoisted(() => {
@@ -48,6 +48,20 @@ const user = {
   hasPassword: true,
 };
 
+function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 const legacyValues = new Map<string, string>();
 const legacyStorage: Storage = {
   get length() {
@@ -66,12 +80,24 @@ function AuthProbe() {
   const [registrationEmail, setRegistrationEmail] = useState('');
   const [accountDeletionResult, setAccountDeletionResult] = useState('');
   const [recoveryResult, setRecoveryResult] = useState('');
+  const [protectedResult, setProtectedResult] = useState('');
   return (
     <div>
       <span>{auth.user?.displayName ?? 'anonymous'}</span>
       <span>{auth.tokens?.accessToken ?? 'no-token'}</span>
       <button type="button" onClick={auth.logout}>
         로그아웃
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void auth.client
+            .get('/protected')
+            .then(() => setProtectedResult('protected-success'))
+            .catch(() => setProtectedResult('protected-error'));
+        }}
+      >
+        보호 API 호출
       </button>
       <button
         type="button"
@@ -147,6 +173,7 @@ function AuthProbe() {
       <span>{registrationEmail}</span>
       <span>{accountDeletionResult}</span>
       <span>{recoveryResult}</span>
+      <span>{protectedResult}</span>
     </div>
   );
 }
@@ -174,6 +201,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -212,6 +240,531 @@ describe('AuthProvider native storage', () => {
       tokens,
       user: ssoUser,
     });
+  });
+
+  it('shares one SSO exchange across StrictMode provider remounts', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Strict Portfolio Owner', hasPassword: false };
+    const exchangeResponse = deferred<Response>();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = requestUrl(input);
+      if (!url.endsWith('/auth/sso')) {
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }
+      return exchangeResponse.promise;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <StrictMode>
+        <AuthProvider>
+          <AuthProbe />
+        </AuthProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+    exchangeResponse.resolve(
+      new Response(JSON.stringify({ ...tokens, user: ssoUser }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(await screen.findByText('Strict Portfolio Owner')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(secureStorage.setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens,
+      user: ssoUser,
+    });
+  });
+
+  it('reuses an atomic SSO session after users/me confirms the current edge identity', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Current Portfolio Owner', hasPassword: false };
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      expect(url).toMatch(/\/users\/me$/);
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer native-access');
+      return new Response(JSON.stringify(ssoUser), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Current Portfolio Owner')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/sso'))).toBe(
+      false,
+    );
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens,
+      user: ssoUser,
+    });
+  });
+
+  it('rotates an expired SSO access token and reuses the existing application session', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    const refreshedTokens = {
+      ...tokens,
+      accessToken: 'refreshed-access',
+      refreshToken: 'refreshed-refresh',
+    };
+    let usersMeAttempts = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      if (url.endsWith('/users/me')) {
+        usersMeAttempts += 1;
+        const expectedAccess = usersMeAttempts === 1 ? 'native-access' : 'refreshed-access';
+        expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${expectedAccess}`);
+        if (usersMeAttempts === 1) {
+          return new Response(JSON.stringify({ detail: 'expired' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ...user, hasPassword: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/auth/refresh')) {
+        expect(init?.body).toBe(JSON.stringify({ refreshToken: 'native-refresh' }));
+        return new Response(JSON.stringify(refreshedTokens), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText(user.displayName)).toBeInTheDocument();
+    expect(screen.getByText('refreshed-access')).toBeInTheDocument();
+    expect(usersMeAttempts).toBe(2);
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/sso'))).toBe(
+      false,
+    );
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens: refreshedTokens,
+      user: { ...user, hasPassword: false },
+    });
+  });
+
+  it('exchanges a new SSO identity only after the stored session is authoritatively rejected', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    const switchedUser = {
+      ...user,
+      id: 'user-2',
+      email: 'switched@example.test',
+      displayName: 'Switched Portfolio Owner',
+      hasPassword: false,
+    };
+    const switchedTokens = {
+      ...tokens,
+      accessToken: 'switched-access',
+      refreshToken: 'switched-refresh',
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      if (url.endsWith('/users/me') || url.endsWith('/auth/refresh')) {
+        return new Response(JSON.stringify({ detail: 'identity mismatch' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/auth/sso')) {
+        return new Response(JSON.stringify({ ...switchedTokens, user: switchedUser }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Switched Portfolio Owner')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => requestUrl(input))).toEqual([
+      expect.stringMatching(/\/users\/me$/),
+      expect.stringMatching(/\/auth\/refresh$/),
+      expect.stringMatching(/\/auth\/sso$/),
+    ]);
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens: switchedTokens,
+      user: switchedUser,
+    });
+  });
+
+  it('rebootstraps from the current edge identity after an ordinary API refresh is rejected', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const currentUser = { ...user, displayName: 'Original Portfolio Owner', hasPassword: false };
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user: currentUser }));
+    const switchedUser = {
+      ...user,
+      id: 'user-2',
+      email: 'switched@example.test',
+      displayName: 'Rebootstrapped Portfolio Owner',
+      hasPassword: false,
+    };
+    const switchedTokens = {
+      ...tokens,
+      accessToken: 'rebootstrapped-access',
+      refreshToken: 'rebootstrapped-refresh',
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = requestUrl(input);
+      if (url.endsWith('/users/me')) {
+        return new Response(JSON.stringify(currentUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/protected') || url.endsWith('/auth/refresh')) {
+        return new Response(JSON.stringify({ detail: 'identity changed' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/auth/sso')) {
+        return new Response(JSON.stringify({ ...switchedTokens, user: switchedUser }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Original Portfolio Owner')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }));
+
+    expect(await screen.findByText('Rebootstrapped Portfolio Owner')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => requestUrl(input))).toEqual([
+      expect.stringMatching(/\/users\/me$/),
+      expect.stringMatching(/\/protected$/),
+      expect.stringMatching(/\/auth\/refresh$/),
+      expect.stringMatching(/\/auth\/sso$/),
+    ]);
+    expect(screen.queryByText('anonymous')).not.toBeInTheDocument();
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens: switchedTokens,
+      user: switchedUser,
+    });
+  });
+
+  it('preserves the current SSO session when an ordinary API refresh fails transiently', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Resilient Portfolio Owner', hasPassword: false };
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user: ssoUser }));
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = requestUrl(input);
+      if (url.endsWith('/users/me')) {
+        return new Response(JSON.stringify(ssoUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/protected')) {
+        return new Response(JSON.stringify({ detail: 'expired access' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/auth/refresh')) {
+        return new Response(JSON.stringify({ detail: 'temporarily unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Resilient Portfolio Owner')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }));
+
+    expect(await screen.findByText('protected-error')).toBeInTheDocument();
+    expect(screen.getByText('Resilient Portfolio Owner')).toBeInTheDocument();
+    expect(screen.getByText(tokens.accessToken)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/sso'))).toBe(
+      false,
+    );
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens,
+      user: ssoUser,
+    });
+  });
+
+  it('blocks the app on a transient SSO verification failure and retries without exchanging', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let usersMeAttempts = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      if (!url.endsWith('/users/me')) throw new Error(`Unexpected request: ${url}`);
+      usersMeAttempts += 1;
+      if (usersMeAttempts === 1) {
+        return new Response(JSON.stringify({ detail: 'temporarily unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ...user, hasPassword: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: '중앙 세션을 확인하지 못했습니다' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('일시적으로 응답하지 않습니다');
+    expect(screen.queryByText('anonymous')).not.toBeInTheDocument();
+    expect(secureStorage.values.has('fmr.auth.session.v1')).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/sso'))).toBe(
+      false,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '중앙 세션 다시 확인' }));
+
+    expect(await screen.findByText(user.displayName)).toBeInTheDocument();
+    expect(usersMeAttempts).toBe(2);
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/sso'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps a network verification failure fail-closed until the user retries', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('network unavailable'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...user, hasPassword: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('네트워크 상태를 확인');
+    expect(screen.queryByText('anonymous')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '중앙 세션 다시 확인' }));
+    expect(await screen.findByText(user.displayName)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes a stale SSO session before showing an exchange conflict and can retry safely', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let exchangeAttempts = 0;
+    const replacementUser = { ...user, displayName: 'Replacement Owner', hasPassword: false };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : input.href;
+      if (url.endsWith('/users/me') || url.endsWith('/auth/refresh')) {
+        return new Response(JSON.stringify({ detail: 'identity mismatch' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/auth/sso')) {
+        exchangeAttempts += 1;
+        if (exchangeAttempts === 1) {
+          return new Response(JSON.stringify({ detail: 'identity conflict' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ...tokens, user: replacementUser }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('계정 정보가 충돌합니다');
+    expect(screen.queryByText('anonymous')).not.toBeInTheDocument();
+    expect(secureStorage.values.has('fmr.auth.session.v1')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '중앙 세션 다시 확인' }));
+
+    expect(await screen.findByText('Replacement Owner')).toBeInTheDocument();
+    expect(exchangeAttempts).toBe(2);
+    expect(JSON.parse(secureStorage.values.get('fmr.auth.session.v1') ?? '')).toEqual({
+      tokens,
+      user: replacementUser,
+    });
+  });
+
+  it('waits for the application refresh-session revoke before navigating to central logout', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Logging Out Owner', hasPassword: false };
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user: ssoUser }));
+    const revokeResponse = deferred<Response>();
+    const navigateToCentralLogout = vi.fn<(url: string) => void>();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = requestUrl(input);
+      if (url.endsWith('/users/me')) {
+        return Promise.resolve(
+          new Response(JSON.stringify(ssoUser), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+      if (url.endsWith('/auth/logout')) return revokeResponse.promise;
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider navigateToCentralLogout={navigateToCentralLogout}>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Logging Out Owner')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/auth/logout')),
+      ).toBe(true);
+    });
+    expect(navigateToCentralLogout).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('로그인 상태를 불러오는 중');
+
+    const logoutCall = fetchMock.mock.calls.find(([input]) =>
+      requestUrl(input).endsWith('/auth/logout'),
+    );
+    expect(logoutCall?.[1]?.body).toBe(JSON.stringify({ refreshToken: tokens.refreshToken }));
+    expect(logoutCall?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(logoutCall?.[1]?.signal?.aborted).toBe(false);
+
+    revokeResponse.resolve(new Response(null, { status: 204 }));
+
+    await waitFor(() => {
+      expect(navigateToCentralLogout).toHaveBeenCalledWith(
+        `/sso/logout?rd=${encodeURIComponent(`${window.location.origin}/feelmyrythm/`)}`,
+      );
+    });
+    expect(secureStorage.values.has('fmr.auth.session.v1')).toBe(false);
+  });
+
+  it('uses the bounded abort condition when an SSO application logout does not settle', async () => {
+    vi.stubEnv('VITE_FMR_SSO_ENABLED', 'true');
+    const ssoUser = { ...user, displayName: 'Timeout Logout Owner', hasPassword: false };
+    secureStorage.values.set('fmr.auth.session.v1', JSON.stringify({ tokens, user: ssoUser }));
+    const navigateToCentralLogout = vi.fn<(url: string) => void>();
+    const logoutRequest: { signal: AbortSignal | null } = { signal: null };
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = requestUrl(input);
+      if (url.endsWith('/users/me')) {
+        return Promise.resolve(
+          new Response(JSON.stringify(ssoUser), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+      if (url.endsWith('/auth/logout')) {
+        logoutRequest.signal = init?.signal ?? null;
+        return new Promise<Response>((_resolve, reject) => {
+          logoutRequest.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('The logout request was aborted.', 'AbortError')),
+            { once: true },
+          );
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider navigateToCentralLogout={navigateToCentralLogout}>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByText('Timeout Logout Owner')).toBeInTheDocument();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }));
+    expect(navigateToCentralLogout).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(logoutRequest.signal?.aborted).toBe(true);
+    expect(navigateToCentralLogout).toHaveBeenCalledWith(
+      `/sso/logout?rd=${encodeURIComponent(`${window.location.origin}/feelmyrythm/`)}`,
+    );
   });
 
   it('migrates a complete legacy pair into one atomic envelope and removes it on logout', async () => {

@@ -136,4 +136,6 @@ volumes:
   fmr_redis_data:
     name: feelmyrythm-fmr-redis-data
   fmr_uploads:
+    # Provision this durable volume outside Compose so `down -v` cannot remove score files.
+    external: true
     name: feelmyrythm-fmr-uploads

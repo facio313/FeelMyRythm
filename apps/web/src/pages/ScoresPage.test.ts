@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScoreRecord } from '../lib/scoreApi';
-import { mergeRemoteScoreMetadata } from './ScoresPage';
+import { mergeRemoteScoreMetadata, omrDraftCreationAvailableInCurrentBuild } from './ScoresPage';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('remote score normalization', () => {
   it('does not try to unzip an already-normalized MXL snapshot after metadata changes', async () => {
@@ -33,5 +37,19 @@ describe('remote score normalization', () => {
     expect(score.blob).toBe(normalized);
     expect(score.mimeType).toBe('application/vnd.recordare.musicxml+xml');
     expect(score.name).toBe('part.mxl');
+  });
+});
+
+describe('OMR build availability', () => {
+  it('keeps OMR draft creation out of the managed-local SSO build', () => {
+    vi.stubEnv('VITE_FMR_MANAGED_LOCAL_SSO', 'true');
+
+    expect(omrDraftCreationAvailableInCurrentBuild()).toBe(false);
+  });
+
+  it('keeps the future standard OMR path available', () => {
+    vi.stubEnv('VITE_FMR_MANAGED_LOCAL_SSO', 'false');
+
+    expect(omrDraftCreationAvailableInCurrentBuild()).toBe(true);
   });
 });

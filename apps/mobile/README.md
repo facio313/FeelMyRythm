@@ -43,7 +43,7 @@ adb shell am start -W -a android.intent.action.VIEW -d 'https://bonifacio.work/f
 - 브라우저 빌드는 기존 `localStorage` 키를 유지한다.
 - 네이티브 빌드는 인증 세션을 iOS Keychain의 `AfterFirstUnlockThisDeviceOnly` 항목과 Android Keystore AES-GCM 키로 암호화한 앱 전용 저장소에 보관한다.
 - Android 앱은 `allowBackup=false`와 Android 12+ `dataExtractionRules` 양쪽에서 cloud/D2D 전송을 차단하며, 네이티브 시작 시 이전 버전의 WebView `localStorage` 인증 키를 제거한다.
-- Capacitor WebView에서는 Google Identity Services 웹 버튼을 노출하지 않는다. 네이티브 Sign in with Apple/Google 흐름을 별도로 구현하기 전에는 이메일 소유권 인증만 사용한다.
+- Capacitor WebView에서는 Google Identity Services 웹 버튼을 노출하지 않는다. local-auth tool/feature build에서만 이메일 소유권 인증을 사용한다. `main`/`dev` production SSO server는 local login을 닫고 있으며 WebView가 browser의 중앙 cookie를 공유하지도 않으므로, system-browser login → 일회용 app credential → native callback 교환 bridge를 구현하기 전에는 signed mobile release를 승인하지 않는다.
 
 ## Release signing
 
@@ -78,11 +78,12 @@ pnpm generate:association-files -- --output-dir /safe/staging/well-known
 
 스토어 제출 전에는 실제 signing 설정을 로컬 또는 CI secret으로 주입하고 다음을 확인한다.
 
-1. iOS/Android에서 custom link와 verified HTTPS link가 같은 방을 열고, `/login` 인증 링크와 `/settings` 탈퇴 proof 링크가 정확한 화면을 연 뒤 fragment를 즉시 제거한다.
-2. iOS 무음 스위치가 켜져 있어도 클릭이 재생된다.
-3. 재생 중 Keep-Awake가 화면 잠금을 막고 정지 후 원상 복구된다.
-4. 잠금·백그라운드·전화 인터럽트 후 타임라인 동기 오차를 실기기에서 재측정한다.
-5. 마이크 거부·허용 상태 모두에서 튜너가 안전하게 동작한다.
-6. `https://bonifacio.work/feelmyrythm/privacy`를 App Store·Play Console 개인정보 처리방침 URL로 등록하고 실제 운영자 연락처가 수신되는지 확인한다.
-7. `https://bonifacio.work/feelmyrythm/delete-account`를 Play Console 외부 계정 삭제 URL로 등록하고 앱 안의 설정 경로와 웹 경로 모두에서 삭제를 완료한다.
-8. iOS에서 제3자 로그인을 다시 제공하려면 App Review Guideline 4.8을 충족하는 동등 로그인(일반적으로 Sign in with Apple)을 먼저 추가한다.
+1. production 중앙 SSO를 system browser에서 완료하고 일회용 credential callback으로 app session을 만든 뒤 account switch·logout까지 실제 설치 앱에서 검증한다. 이 bridge가 없으면 아래 항목과 무관하게 release하지 않는다.
+2. iOS/Android에서 custom link와 verified HTTPS link가 같은 방을 열고, `/login` 인증 링크와 `/settings` 탈퇴 proof 링크가 정확한 화면을 연 뒤 fragment를 즉시 제거한다.
+3. iOS 무음 스위치가 켜져 있어도 클릭이 재생된다.
+4. 재생 중 Keep-Awake가 화면 잠금을 막고 정지 후 원상 복구된다.
+5. 잠금·백그라운드·전화 인터럽트 후 타임라인 동기 오차를 실기기에서 재측정한다.
+6. 마이크 거부·허용 상태 모두에서 튜너가 안전하게 동작한다.
+7. `https://bonifacio.work/feelmyrythm/privacy`를 App Store·Play Console 개인정보 처리방침 URL로 등록하고 실제 운영자 연락처가 수신되는지 확인한다.
+8. `https://bonifacio.work/feelmyrythm/delete-account`를 Play Console 외부 계정 삭제 URL로 등록하고 앱 안의 설정 경로와 웹 경로 모두에서 삭제를 완료한다.
+9. iOS에서 제3자 로그인을 다시 제공하려면 App Review Guideline 4.8을 충족하는 동등 로그인(일반적으로 Sign in with Apple)을 먼저 추가한다.

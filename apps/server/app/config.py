@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import EmailStr, Field, SecretStr, model_validator
+from pydantic import EmailStr, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 UNSAFE_PRODUCTION_JWT_SECRETS = frozenset(
@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     redis_key_prefix: str = "fmr"
 
+    @field_validator("smtp_from_email", mode="before")
+    @classmethod
+    def normalize_optional_smtp_from_email(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
         normalized_branch = _normalize_portfolio_branch(
@@ -173,6 +180,9 @@ class Settings(BaseSettings):
 
         smtp_host_configured = bool(self.smtp_host and self.smtp_host.strip())
         smtp_from_configured = self.smtp_from_email is not None
+        smtp_username_configured = bool(self.smtp_username and self.smtp_username.strip())
+        smtp_password_configured = bool(self.smtp_password and self.smtp_password.get_secret_value().strip())
+        smtp_credentials_configured = smtp_username_configured or smtp_password_configured
         if self.sso_enabled:
             _ = self.resolved_sso_edge_secret
         elif self.deployment_profile == "managed_local_sso":
@@ -195,7 +205,9 @@ class Settings(BaseSettings):
                     raise ValueError("standard production requires FMR_STORAGE_BACKEND=s3")
                 if not self.s3_region or not self.s3_region.strip():
                     raise ValueError("FMR_S3_REGION is required for production S3 storage")
-                if not smtp_host_configured or not smtp_from_configured:
+                if self.public_email_workflows_enabled and (
+                    not smtp_host_configured or not smtp_from_configured
+                ):
                     raise ValueError(
                         "standard production requires FMR_SMTP_HOST and FMR_SMTP_FROM_EMAIL "
                         "for email verification"
@@ -209,8 +221,8 @@ class Settings(BaseSettings):
                     )
                 if smtp_host_configured or smtp_from_configured:
                     raise ValueError(
-                        "managed-local SSO production keeps SMTP disabled; use the standard "
-                        "profile after configuring email"
+                        "managed-local SSO production keeps SMTP disabled; central SSO owns "
+                        "account email workflows"
                     )
             web_app_url = urlsplit(self.web_app_base_url)
             if web_app_url.scheme != "https" or not web_app_url.netloc:
@@ -222,15 +234,20 @@ class Settings(BaseSettings):
                 raise ValueError("production FMR_PUBLIC_API_BASE_URL must be an absolute https URL")
             if public_api_url.query or public_api_url.fragment:
                 raise ValueError("production FMR_PUBLIC_API_BASE_URL cannot contain a query or fragment")
-            if self.smtp_starttls == self.smtp_use_ssl:
+            if self.public_email_workflows_enabled and self.smtp_starttls == self.smtp_use_ssl:
                 raise ValueError("production requires exactly one of FMR_SMTP_STARTTLS or FMR_SMTP_USE_SSL")
             if self.redis_url is None or not self.redis_url.strip():
                 raise ValueError("production requires FMR_REDIS_URL for multi-instance room state")
         if smtp_host_configured != smtp_from_configured:
             raise ValueError("FMR_SMTP_HOST and FMR_SMTP_FROM_EMAIL must be configured together")
-        if bool(self.smtp_username) != bool(self.smtp_password):
+        if self.sso_enabled and (smtp_host_configured or smtp_from_configured or smtp_credentials_configured):
+            raise ValueError(
+                "SSO mode delegates account email workflows to the central identity provider; "
+                "do not configure app SMTP"
+            )
+        if smtp_username_configured != smtp_password_configured:
             raise ValueError("FMR_SMTP_USERNAME and FMR_SMTP_PASSWORD must be configured together")
-        if self.smtp_starttls and self.smtp_use_ssl:
+        if smtp_host_configured and self.smtp_starttls and self.smtp_use_ssl:
             raise ValueError("FMR_SMTP_STARTTLS and FMR_SMTP_USE_SSL cannot both be enabled")
         if self.storage_backend == "s3" and (self.s3_bucket is None or not self.s3_bucket.strip()):
             raise ValueError("FMR_S3_BUCKET is required for S3 storage")
@@ -256,7 +273,7 @@ class Settings(BaseSettings):
 
     @property
     def public_email_workflows_enabled(self) -> bool:
-        return self.deployment_profile == "standard"
+        return self.deployment_profile == "standard" and not self.sso_enabled
 
     @cached_property
     def resolved_sso_edge_secret(self) -> str:

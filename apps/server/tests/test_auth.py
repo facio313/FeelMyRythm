@@ -337,7 +337,7 @@ def test_managed_sso_provisions_subject_first_and_fails_closed_on_collisions(
             assert all(user.password_hash is None and user.google_subject is None for user in users)
 
 
-def test_standard_sso_does_not_implicitly_provision_unknown_users(
+def test_standard_sso_provisions_unknown_central_users_without_app_email_workflows(
     settings: Settings,
     mail_sender: FakeMailSender,
 ) -> None:
@@ -354,7 +354,9 @@ def test_standard_sso_does_not_implicitly_provision_unknown_users(
             "/api/auth/sso",
             headers=sso_headers("unknown", "unknown@example.com"),
         )
-    assert response.status_code == 403
+    assert response.status_code == 200, response.text
+    assert response.json()["user"]["email"] == "unknown@example.com"
+    assert response.json()["user"]["emailVerifiedAt"] is not None
 
 
 def test_sso_bearer_refresh_and_logout_require_matching_edge_identity(
