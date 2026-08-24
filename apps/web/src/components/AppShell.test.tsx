@@ -1,11 +1,12 @@
-import { StrictMode } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { lazy, StrictMode, type ComponentType } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 import { PageHeader } from './PageHeader';
 
 const authState = vi.hoisted(() => ({ user: null as null | { displayName: string } }));
+const nativeState = vi.hoisted(() => ({ native: false }));
 
 function BackButton() {
   const navigate = useNavigate();
@@ -20,9 +21,14 @@ vi.mock('../lib/auth', () => ({
   useAuth: () => authState,
 }));
 
+vi.mock('@feelmyrythm/mobile', () => ({
+  nativeBridge: nativeState,
+}));
+
 describe('AppShell', () => {
   beforeEach(() => {
     authState.user = null;
+    nativeState.native = false;
   });
 
   afterEach(() => {
@@ -48,6 +54,11 @@ describe('AppShell', () => {
       'href',
       '#main-content',
     );
+    expect(screen.getByRole('link', { name: '← Bonifacio' })).toHaveAttribute(
+      'href',
+      'https://bonifacio.work/',
+    );
+    expect(screen.getByRole('link', { name: '← Bonifacio' })).not.toHaveAttribute('target');
 
     const mobileNavigation = screen.getByRole('navigation', { name: '모바일 주요 메뉴' });
     expect(within(mobileNavigation).getAllByRole('link')).toHaveLength(4);
@@ -74,6 +85,59 @@ describe('AppShell', () => {
 
     fireEvent(window, new PopStateEvent('popstate'));
     expect(screen.queryByRole('dialog', { name: '더보기' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the browser-only portfolio exit out of the native app shell', () => {
+    nativeState.native = true;
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<PageHeader title="메트로놈" description="테스트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('link', { name: '← Bonifacio' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the shell visible while a lazy route loads and focuses its heading when ready', async () => {
+    let resolveRoute: (() => void) | undefined;
+    const LazyRoute = lazy(
+      () =>
+        new Promise<{ default: ComponentType }>((resolve) => {
+          resolveRoute = () =>
+            resolve({
+              default: () => <PageHeader title="지연 화면" description="준비 완료" />,
+            });
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/lazy']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="lazy" element={<LazyRoute />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: '← Bonifacio' })).toHaveAttribute(
+      'href',
+      'https://bonifacio.work/',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('화면을 준비하는 중');
+
+    await act(async () => {
+      resolveRoute?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '지연 화면' })).toHaveFocus();
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('marks the score destination current on repertoire-scoped score routes', () => {

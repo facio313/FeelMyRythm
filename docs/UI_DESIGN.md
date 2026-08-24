@@ -165,6 +165,7 @@
 ### 7.6 앱 셀·설치 표면
 
 - 본문 scroller는 history entry별 좌표를 기억해 뒤로/앞으로 탐색에서 복원하고, 새 페이지는 맨 위와 `h1` focus에서 시작한다. browser POP은 모바일 더보기 overlay를 닫아 뒤 화면을 가리지 않는다.
+- 브라우저 AppShell 상단에는 최소 44px, coarse pointer에서는 48px인 `← Bonifacio` 링크를 두어 같은 탭에서 포트폴리오 홈으로 돌아간다. lazy route loading fallback은 AppShell 내부 본문에만 표시해 링크와 내비게이션을 유지하고, 준비된 새 화면의 `h1`으로 focus를 옮긴다. Capacitor 네이티브 shell에는 링크를 표시하지 않는다.
 - PWA는 별도의 `any` 192/512px·`maskable` 512px PNG와 180px Apple touch icon, 고정 app `id`·scope·start URL, 한국어·category metadata를 제공한다.
 - 테마 선택은 `data-theme`뿐 아니라 browser/PWA `theme-color`와 Capacitor SystemBars 스타일까지 같이 바꾼다. storage·native API 실패는 새 테마의 웹 표시를 되돌리지 않는다.
 

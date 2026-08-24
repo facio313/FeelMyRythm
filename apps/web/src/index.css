@@ -125,6 +125,43 @@ p {
   letter-spacing: 0.01em;
 }
 
+.topbar__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.bonifacio-return-link {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-left: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bonifacio-return-link:hover {
+  color: var(--text);
+}
+
+.bonifacio-return-link:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (any-pointer: coarse) {
+  .bonifacio-return-link {
+    min-width: var(--fmr-touch-target);
+    min-height: var(--fmr-touch-target);
+  }
+}
+
 .brand__mark {
   flex: 0 0 32px;
   width: 32px;
@@ -2405,10 +2442,17 @@ p {
       'content' minmax(0, 1fr)
       'bottom' var(--mobile-nav-height) / minmax(0, 1fr);
   }
-  .brand__name,
+  .brand,
   .account-link span,
   .sidebar {
     display: none;
+  }
+  .topbar__identity {
+    gap: 0;
+  }
+  .bonifacio-return-link {
+    padding-inline: 4px 10px;
+    border-left: 0;
   }
   .topbar {
     padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0

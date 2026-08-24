@@ -1,6 +1,6 @@
 import { ToastProvider } from '@feelmyrythm/ui';
 import { nativeBridge } from '@feelmyrythm/mobile';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, useEffect } from 'react';
 import {
   createBrowserRouter,
   createRoutesFromElements,
@@ -15,6 +15,8 @@ import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ROUTER_BASENAME } from './lib/paths';
 import { MetronomePage } from './pages/MetronomePage';
+
+export { RouteLoadingFallback } from './components/AppShell';
 
 const CalibrationPage = lazy(() =>
   import('./pages/CalibrationPage').then((module) => ({ default: module.CalibrationPage })),
@@ -51,14 +53,6 @@ const SettingsPage = lazy(() =>
 const TunerPage = lazy(() =>
   import('./pages/TunerPage').then((module) => ({ default: module.TunerPage })),
 );
-
-export function RouteLoadingFallback() {
-  return (
-    <div className="loading-panel" role="status" aria-live="polite" aria-busy="true">
-      화면을 준비하는 중…
-    </div>
-  );
-}
 
 export function localPracticeRedirect(
   authenticated: boolean,
@@ -106,9 +100,7 @@ function AppProviders() {
     <AuthProvider>
       <ToastProvider>
         <NativeLifecycle />
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <Outlet />
-        </Suspense>
+        <Outlet />
       </ToastProvider>
     </AuthProvider>
   );

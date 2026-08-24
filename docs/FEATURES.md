@@ -180,6 +180,7 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | --- | --- | --- |
 | 폭·높이 적응 | 256px 유효 폭부터 2560px 초광폭, 짧은 가로 화면, safe area와 `dvh`에 맞춰 1열·rail·sidebar 구조를 전환한다. | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md), [index.css](../apps/web/src/index.css), [responsive.spec.ts](../e2e/responsive.spec.ts) |
 | 모바일 내비게이션 | 메트로놈·악보·앙상블·연습과 더보기의 하단 내비게이션을 제공하고 더보기 dialog에 편집기·튜너·프로젝트·보정·설정을 둔다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx) |
+| 포트폴리오 복귀 | 브라우저의 모든 앱 화면 상단에서 같은 탭의 Bonifacio 홈으로 돌아간다. lazy route를 불러오는 동안에도 AppShell과 링크를 유지하며, Capacitor 네이티브 shell에서는 외부 웹 링크를 숨긴다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx), [AppShell.test.tsx](../apps/web/src/components/AppShell.test.tsx) |
 | 터치 타깃과 overflow | 핵심 조작은 최소 44px, `any-pointer: coarse`의 공용 input/select와 핵심 타깃은 48px이다. 문서 전체 가로 overflow는 허용하지 않고 넓은 편집 영역만 자체 스크롤한다. | [primitives.css](../packages/ui/src/primitives.css), [responsive.spec.ts](../e2e/responsive.spec.ts) |
 | 키보드 위젯 | 테마·튜너는 radiogroup, 악보 파트는 tablist, 편집기는 native table, dialog는 focus trap을 사용한다. 화살표/Home/End/Escape 경로를 제공한다. | [primitives.tsx](../packages/ui/src/primitives.tsx), [ux-accessibility.spec.ts](../e2e/ux-accessibility.spec.ts) |
 | 포커스·스크롤 | skip link를 제공하고 새 route의 `h1`으로 초점을 옮긴다. history POP은 entry별 본문 scroll을 복원하고 모바일 더보기 dialog를 닫는다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx), [AppShell.test.tsx](../apps/web/src/components/AppShell.test.tsx), [navigation.spec.ts](../e2e/navigation.spec.ts) |

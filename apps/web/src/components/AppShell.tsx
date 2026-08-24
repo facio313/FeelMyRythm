@@ -12,7 +12,7 @@ import {
   Tally4,
   UserRound,
 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Link,
   NavigationType,
@@ -22,6 +22,7 @@ import {
   useNavigationType,
 } from 'react-router-dom';
 import { cn, Modal } from '@feelmyrythm/ui';
+import { nativeBridge } from '@feelmyrythm/mobile';
 import { useAuth } from '../lib/auth';
 import { portfolioSsoEnabled } from '../lib/runtimeMode';
 import { TemporaryOperationsNotice } from './TemporaryOperationsNotice';
@@ -67,6 +68,24 @@ export function navigationDestination(destination: string, authenticated: boolea
   return destination === '/practice' && authenticated ? '/dashboard' : destination;
 }
 
+export function RouteLoadingFallback() {
+  return (
+    <div className="loading-panel" role="status" aria-live="polite" aria-busy="true">
+      화면을 준비하는 중…
+    </div>
+  );
+}
+
+function RouteOutlet({ onReady }: { onReady: () => void }) {
+  const location = useLocation();
+
+  useEffect(() => {
+    onReady();
+  }, [location.key, onReady]);
+
+  return <Outlet />;
+}
+
 export function AppShell() {
   const { user } = useAuth();
   const location = useLocation();
@@ -78,6 +97,7 @@ export function AppShell() {
     : legalNavigation;
   const scrollPositionsRef = useRef(new Map<string, { left: number; top: number }>());
   const activeLocationKeyRef = useRef<string | null>(null);
+  const focusHeadingWhenReadyRef = useRef(true);
   const moreActive =
     pathname.startsWith('/login') ||
     mobileMore.some(({ to }) => isNavigationPathActive(pathname, to)) ||
@@ -87,6 +107,18 @@ export function AppShell() {
     const closeTransientNavigation = () => setMoreOpen(false);
     window.addEventListener('popstate', closeTransientNavigation);
     return () => window.removeEventListener('popstate', closeTransientNavigation);
+  }, []);
+
+  const focusReadyRoute = useCallback(() => {
+    if (!focusHeadingWhenReadyRef.current) return;
+    const mainContent = document.getElementById('main-content');
+    const heading = mainContent?.querySelector<HTMLElement>('h1');
+    if (heading) {
+      if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    } else {
+      mainContent?.focus({ preventScroll: true });
+    }
   }, []);
 
   useLayoutEffect(() => {
@@ -99,6 +131,7 @@ export function AppShell() {
       navigationType === NavigationType.Pop && isEntryChange
         ? scrollPositions.get(location.key)
         : undefined;
+    focusHeadingWhenReadyRef.current = !restored;
     if (mainContent) {
       mainContent.scrollTop = restored?.top ?? 0;
       mainContent.scrollLeft = restored?.left ?? 0;
@@ -108,13 +141,7 @@ export function AppShell() {
         mainContent?.focus({ preventScroll: true });
         return;
       }
-      const heading = document.querySelector<HTMLElement>('#main-content h1');
-      if (heading) {
-        if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1;
-        heading.focus({ preventScroll: true });
-      } else {
-        mainContent?.focus({ preventScroll: true });
-      }
+      focusReadyRoute();
     });
     return () => {
       window.cancelAnimationFrame(frame);
@@ -125,7 +152,7 @@ export function AppShell() {
         });
       }
     };
-  }, [location.key, navigationType]);
+  }, [focusReadyRoute, location.key, navigationType]);
 
   return (
     <div className="app-shell">
@@ -133,12 +160,19 @@ export function AppShell() {
         본문으로 건너뛰기
       </a>
       <header className="topbar">
-        <NavLink className="brand" to="/" aria-label="FeelMyRythm 홈">
-          <span className="brand__mark" aria-hidden>
-            F
-          </span>
-          <span className="brand__name">FeelMyRythm</span>
-        </NavLink>
+        <div className="topbar__identity">
+          <NavLink className="brand" to="/" aria-label="FeelMyRythm 홈">
+            <span className="brand__mark" aria-hidden>
+              F
+            </span>
+            <span className="brand__name">FeelMyRythm</span>
+          </NavLink>
+          {!nativeBridge.native ? (
+            <a className="bonifacio-return-link" href="https://bonifacio.work/">
+              ← Bonifacio
+            </a>
+          ) : null}
+        </div>
         <nav className="topbar__actions" aria-label="계정과 설정">
           <TemporaryOperationsNotice />
           <NavLink className="icon-link" to="/settings" aria-label="설정">
@@ -179,7 +213,9 @@ export function AppShell() {
       </aside>
 
       <main id="main-content" className="app-content" tabIndex={-1}>
-        <Outlet />
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <RouteOutlet onReady={focusReadyRoute} />
+        </Suspense>
       </main>
 
       <nav className="bottom-nav" aria-label="모바일 주요 메뉴">
