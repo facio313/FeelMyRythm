@@ -262,6 +262,7 @@
     max-height: none;
     border-radius: 16px;
     transform: none;
+    animation: fmr-fade 160ms ease-out;
   }
 }
 
