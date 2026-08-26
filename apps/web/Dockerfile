@@ -31,7 +31,7 @@ RUN pnpm --filter @feelmyrythm/core build \
     && pnpm --filter @feelmyrythm/audio build \
     && pnpm --filter @feelmyrythm/web build
 
-FROM nginx:1.29.4-alpine@sha256:4870c12cd2ca986de501a804b4f506ad3875a0b1874940ba0a2c7f763f1855b2 AS runtime
+FROM nginx:1.31.4-alpine@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913 AS runtime
 ARG PORTFOLIO_BRANCH
 ARG PORTFOLIO_AUTH_MODE
 ENV PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH}
