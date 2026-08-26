@@ -3,13 +3,9 @@ import type { components } from '@feelmyrythm/protocol';
 import { BeatVisualizer, Button, Card, Modal, StatusBadge, useToast } from '@feelmyrythm/ui';
 import {
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Expand,
   Gauge,
-  Minus,
   Music2,
-  Plus,
   Settings2,
   Shrink,
   SlidersHorizontal,
@@ -418,23 +414,25 @@ export function MetronomePage() {
       </label>
       <label className="meter-select">
         <span className="fmr-field__label">박자</span>
-        <select
-          className="fmr-input"
-          disabled={!mapReadyForPlayback}
-          value={`${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`}
-          onChange={(event) => {
-            const [num, denom] = event.target.value.split('/').map(Number);
-            updateSection({
-              timeSignature: { num: num ?? 4, denom: denom ?? 4 },
-              beatUnit: denom === 8 && (num ?? 0) % 3 === 0 ? 'dottedQuarter' : 'quarter',
-            });
-          }}
-        >
-          {['2/4', '3/4', '4/4', '5/4', '6/8', '9/8', '12/8'].map((meter) => (
-            <option key={meter}>{meter}</option>
-          ))}
-        </select>
-        <ChevronDown size={16} aria-hidden />
+        <span className="meter-select__control">
+          <select
+            className="fmr-input"
+            disabled={!mapReadyForPlayback}
+            value={`${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`}
+            onChange={(event) => {
+              const [num, denom] = event.target.value.split('/').map(Number);
+              updateSection({
+                timeSignature: { num: num ?? 4, denom: denom ?? 4 },
+                beatUnit: denom === 8 && (num ?? 0) % 3 === 0 ? 'dottedQuarter' : 'quarter',
+              });
+            }}
+          >
+            {['2/4', '3/4', '4/4', '5/4', '6/8', '9/8', '12/8'].map((meter) => (
+              <option key={meter}>{meter}</option>
+            ))}
+          </select>
+          <ChevronDown size={18} aria-hidden />
+        </span>
       </label>
     </>
   );
@@ -451,7 +449,7 @@ export function MetronomePage() {
             ? 'downbeat'
             : 'beat'
       }
-      data-beat-parity={metronome.position.beatIndex % 2 === 0 ? 'even' : 'odd'}
+      data-playing={metronome.playing || undefined}
       onPointerUp={handleFullscreenTap}
     >
       <header className="metronome-heading">
@@ -604,7 +602,9 @@ export function MetronomePage() {
             disabled={!mapReadyForPlayback}
             onClick={() => setBpm(currentSection.bpm - 5)}
           >
-            <ChevronLeft size={20} />
+            <span className="bpm-stepper__amount" aria-hidden>
+              −5
+            </span>
           </Button>
           <Button
             size="icon"
@@ -612,7 +612,9 @@ export function MetronomePage() {
             disabled={!mapReadyForPlayback}
             onClick={() => setBpm(currentSection.bpm - 1)}
           >
-            <Minus size={18} />
+            <span className="bpm-stepper__amount" aria-hidden>
+              −1
+            </span>
           </Button>
           <Button className="tap-button" onClick={tapTempo} disabled={!mapReadyForPlayback}>
             <Gauge size={18} /> 탭 템포
@@ -623,7 +625,9 @@ export function MetronomePage() {
             disabled={!mapReadyForPlayback}
             onClick={() => setBpm(currentSection.bpm + 1)}
           >
-            <Plus size={18} />
+            <span className="bpm-stepper__amount" aria-hidden>
+              +1
+            </span>
           </Button>
           <Button
             size="icon"
@@ -631,7 +635,9 @@ export function MetronomePage() {
             disabled={!mapReadyForPlayback}
             onClick={() => setBpm(currentSection.bpm + 5)}
           >
-            <ChevronRight size={20} />
+            <span className="bpm-stepper__amount" aria-hidden>
+              +5
+            </span>
           </Button>
         </div>
 

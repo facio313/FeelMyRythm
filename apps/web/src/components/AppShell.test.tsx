@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 import { PageHeader } from './PageHeader';
+import { THEME_COLORS, THEME_STORAGE_KEY } from '../lib/theme';
 
 const authState = vi.hoisted(() => ({ user: null as null | { displayName: string } }));
 const nativeState = vi.hoisted(() => ({ native: false }));
@@ -29,6 +30,8 @@ describe('AppShell', () => {
   beforeEach(() => {
     authState.user = null;
     nativeState.native = false;
+    localStorage.removeItem(THEME_STORAGE_KEY);
+    document.documentElement.dataset.theme = 'dark';
   });
 
   afterEach(() => {
@@ -100,6 +103,29 @@ describe('AppShell', () => {
     );
 
     expect(screen.queryByRole('link', { name: '← Bonifacio' })).not.toBeInTheDocument();
+  });
+
+  it('exposes a persistent theme toggle that updates browser chrome and storage', () => {
+    const themeColorMeta = document.createElement('meta');
+    themeColorMeta.name = 'theme-color';
+    themeColorMeta.content = THEME_COLORS.dark;
+    document.head.append(themeColorMeta);
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<PageHeader title="메트로놈" description="테스트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '라이트 테마로 전환' }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(themeColorMeta.content).toBe(THEME_COLORS.light);
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    expect(screen.getByRole('button', { name: '다크 테마로 전환' })).toBeInTheDocument();
+    themeColorMeta.remove();
   });
 
   it('keeps the shell visible while a lazy route loads and focuses its heading when ready', async () => {

@@ -274,7 +274,7 @@ stateDiagram-v2
 | 네이티브 저장 | 플랫폼 adapter가 iOS Keychain의 ThisDeviceOnly 계열과 Android Keystore AES-GCM을 사용한다. Android cloud·device-transfer backup은 차단한다. |
 | REST 인증 | `Authorization: Bearer` → [`dependencies.py`](../apps/server/app/dependencies.py)의 `CurrentUser` → active·verified·현재 generation 확인. SSO mode에서는 앱별 edge secret, 현재 `Remote-User == User.sso_subject`, exact canonical `Remote-Groups`도 모든 bearer HTTP 요청에서 검사한다. |
 | WS 인증 | query/cookie가 아니라 첫 `JOIN_ROOM`/`JOIN_ANNOTATIONS` frame의 access token을 검증하고 membership을 확인한다. SSO mode에서는 같은 handshake의 trusted edge secret, `Remote-User == User.sso_subject`, exact canonical `Remote-Groups`도 요구하며, transport 명령마다 현재 domain role을 다시 읽는다. |
-| 역할 | 중앙 SSO는 `user < developer < admin`이며 일반 API, aggregate auth inventory, credential/session cleanup의 최소 경계를 정한다. 앱 도메인은 별도 `member < leader < owner`이고 중앙 admin도 이를 우회하지 않는다. owner는 그룹·멤버, leader 이상은 프로젝트·레퍼토리·템포맵·악보·방 transport를 관리한다. annotation은 작성자 또는 leader 이상의 별도 규칙을 적용한다. |
+| 역할 | 중앙 SSO는 `user < admin < chief-admin`이며 non-chief는 `access-feelmyrythm` grant가 있어야 앱에 들어온다. aggregate auth inventory와 credential/session cleanup은 admin 이상이다. 앱 도메인은 별도 `member < leader < owner`이고 중앙 admin도 이를 우회하지 않는다. owner는 그룹·멤버, leader 이상은 프로젝트·레퍼토리·템포맵·악보·방 transport를 관리한다. annotation은 작성자 또는 leader 이상의 별도 규칙을 적용한다. |
 
 앱 내부에는 IP 기반 rate limiter, CAPTCHA, trusted proxy IP parser가 없다. email별 cooldown과 bcrypt semaphore는 애플리케이션 보호층이고, 대규모 abuse 제한은 신뢰 가능한 nginx/CDN·메일 provider에서 별도로 구성해야 한다.
 

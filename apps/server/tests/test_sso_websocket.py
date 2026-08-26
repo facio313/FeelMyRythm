@@ -12,6 +12,7 @@ from app.config import Settings
 from .conftest import auth, tempo_map
 
 SSO_EDGE_SECRET = "test-fmr-websocket-edge-secret-with-at-least-32-characters"
+FMR_USER_GROUPS = "user,portfolio-v2,access-feelmyrythm"
 
 
 def _sso_headers(subject: str, email: str, *, edge_secret: str = SSO_EDGE_SECRET) -> dict[str, str]:
@@ -19,7 +20,7 @@ def _sso_headers(subject: str, email: str, *, edge_secret: str = SSO_EDGE_SECRET
         "Remote-User": subject,
         "Remote-Email": email,
         "Remote-Name": "Central musician",
-        "Remote-Groups": "user",
+        "Remote-Groups": FMR_USER_GROUPS,
         "X-Portfolio-Edge-Secret": edge_secret,
     }
 

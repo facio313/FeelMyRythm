@@ -10,10 +10,10 @@ from app.db import Database
 from app.main import create_app
 from app.models import RefreshSession, User, utcnow
 from app.security import hash_password
-from app.sso import SSO_EDGE_IDENTITY_INVALID, SSO_ROLE_FORBIDDEN
+from app.sso import SSO_APP_FORBIDDEN, SSO_EDGE_IDENTITY_INVALID, SSO_ROLE_FORBIDDEN
 
 from .conftest import FakeGoogleVerifier, FakeMailSender
-from .test_auth import managed_sso_settings, sso_headers
+from .test_auth import FMR_ADMIN_GROUPS, FMR_CHIEF_GROUPS, managed_sso_settings, sso_headers
 
 
 @pytest.mark.parametrize(
@@ -32,6 +32,11 @@ from .test_auth import managed_sso_settings, sso_headers
         " user",
         "user ",
         "user, developer",
+        "user,portfolio-v2,access-feelmyrythm,access-monitor",
+        "user,portfolio-v2,access-unknown",
+        "user,admin,chief-admin,portfolio-v2,access-feelmyrythm",
+        "user,portfolio-v2,access-feelmyrythm,portfolio-v2",
+        f"user,portfolio-v2,access-feelmyrythm,{'a' * 1000}",
     ],
 )
 def test_sso_group_contract_fails_closed(
@@ -66,7 +71,7 @@ def test_sso_roles_gate_aggregate_inventory_and_idempotent_cleanup(
         admin_headers = sso_headers(
             "central-admin",
             "admin@example.com",
-            groups="user,developer,admin",
+            groups=FMR_ADMIN_GROUPS,
         )
         exchange = client.post("/api/auth/sso", headers=admin_headers)
         assert exchange.status_code == 200, exchange.text
@@ -106,7 +111,7 @@ def test_sso_roles_gate_aggregate_inventory_and_idempotent_cleanup(
         assert denied.status_code == 403
         assert denied.json()["detail"] == SSO_ROLE_FORBIDDEN
 
-        developer_headers = {
+        legacy_developer_headers = {
             **bearer,
             **sso_headers(
                 "central-admin",
@@ -114,9 +119,16 @@ def test_sso_roles_gate_aggregate_inventory_and_idempotent_cleanup(
                 groups="user,developer",
             ),
         }
+        legacy_developer_inventory = client.get(
+            "/api/operations/auth-inventory",
+            headers=legacy_developer_headers,
+        )
+        assert legacy_developer_inventory.status_code == 403
+        assert legacy_developer_inventory.json()["detail"] == SSO_ROLE_FORBIDDEN
+
         inventory = client.get(
             "/api/operations/auth-inventory",
-            headers=developer_headers,
+            headers={**bearer, **admin_headers},
         )
         assert inventory.status_code == 200, inventory.text
         assert inventory.json() == {
@@ -131,13 +143,13 @@ def test_sso_roles_gate_aggregate_inventory_and_idempotent_cleanup(
             "staleRefreshSessions": 1,
         }
 
-        developer_cleanup = client.post(
+        legacy_developer_cleanup = client.post(
             "/api/admin/auth-cleanup",
-            headers=developer_headers,
+            headers=legacy_developer_headers,
             json={"confirmPurgeActiveRefreshSessions": True},
         )
-        assert developer_cleanup.status_code == 403
-        assert developer_cleanup.json()["detail"] == SSO_ROLE_FORBIDDEN
+        assert legacy_developer_cleanup.status_code == 403
+        assert legacy_developer_cleanup.json()["detail"] == SSO_ROLE_FORBIDDEN
 
         unconfirmed_cleanup = client.post(
             "/api/admin/auth-cleanup",
@@ -178,6 +190,57 @@ def test_sso_roles_gate_aggregate_inventory_and_idempotent_cleanup(
             assert legacy.auth_generation == 1
             assert db.scalar(select(func.count()).select_from(User)) == 2
             assert db.scalar(select(func.count()).select_from(RefreshSession)) == 0
+
+
+def test_sso_v2_requires_own_entitlement_and_accepts_chief_and_exact_legacy(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    with TestClient(
+        create_app(
+            managed_sso_settings(settings),
+            google_verifier=FakeGoogleVerifier(),
+            mail_sender=FakeMailSender(),
+        )
+    ) as client:
+        not_assigned = client.post(
+            "/api/auth/sso",
+            headers=sso_headers(
+                "central-unassigned",
+                "unassigned@example.com",
+                groups="user,portfolio-v2,access-monitor",
+            ),
+        )
+        assert not_assigned.status_code == 403
+        assert not_assigned.json()["detail"] == SSO_APP_FORBIDDEN
+
+        chief = client.post(
+            "/api/auth/sso",
+            headers=sso_headers(
+                "central-chief",
+                "chief@example.com",
+                groups=FMR_CHIEF_GROUPS,
+            ),
+        )
+        assert chief.status_code == 200, chief.text
+
+        legacy_user = client.post(
+            "/api/auth/sso",
+            headers=sso_headers(
+                "legacy-user",
+                "legacy-user@example.com",
+                groups="user",
+            ),
+        )
+        legacy_developer = client.post(
+            "/api/auth/sso",
+            headers=sso_headers(
+                "legacy-developer",
+                "legacy-developer@example.com",
+                groups="user,developer",
+            ),
+        )
+        assert legacy_user.status_code == 200, legacy_user.text
+        assert legacy_developer.status_code == 200, legacy_developer.text
 
 
 def test_sso_startup_removes_legacy_credentials_and_stale_sessions(

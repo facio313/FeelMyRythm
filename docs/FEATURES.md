@@ -44,7 +44,7 @@
 | 예비박과 위치 시작 | 1·2마디 예비박을 선택하고 특정 마디와 반복 pass에서 시작할 수 있다. | 템포맵을 먼저 완전 전개하고 `seekPoint`와 `buildCountIn`으로 같은 진입점을 계산한다. | [timeline.ts](../packages/core/src/timeline.ts), [useMetronome.ts](../apps/web/src/lib/useMetronome.ts) |
 | 결정론적 진행 | rit./accel., 못갖춘마디, 반복·volta, D.C., D.S., Fine, Coda를 실제 연주 순서로 재생한다. | 순수 TypeScript 코어가 마디 방문 순서와 절대 타임라인을 만들고 무한 진행을 상한으로 차단한다. | [timeline.ts](../packages/core/src/timeline.ts), [timeline.test.ts](../packages/core/test/timeline.test.ts) |
 | 오디오 우선 스케줄링 | UI 부하가 있어도 클릭을 Web Audio 시각에 미리 예약한다. 강박·평박·분할·예비박 음색이 구분된다. | 미리 만든 `AudioBuffer`와 Worker tick 기반 lookahead scheduler를 사용하며 예약된 source를 정지·교체할 수 있다. | [scheduler.ts](../packages/audio/src/scheduler.ts), [webAudioEngine.ts](../packages/audio/src/webAudioEngine.ts), [scheduler.test.ts](../packages/audio/test/scheduler.test.ts) |
-| 오디오 기준 시각화 | 박 표시와 현재 마디가 오디오 시계에 맞춰 움직이고 시각 오프셋만 별도 보정할 수 있다. | 예약 beat queue를 `requestAnimationFrame`에서 읽는다. 시각 오프셋은 클릭 시각을 바꾸지 않는다. | [useMetronome.ts](../apps/web/src/lib/useMetronome.ts), [BeatVisualizer.tsx](../packages/ui/src/BeatVisualizer.tsx) |
+| 오디오 기준 시각화 | 박 표시와 현재 마디가 오디오 시계에 맞춰 움직이고 시각 오프셋만 별도 보정할 수 있다. 창을 좁히거나 높여도 정지·재생 상태 모두 원과 진행 바가 새 크기에 맞는다. | 예약 beat queue를 `requestAnimationFrame`에서 읽고, idle 상태는 `ResizeObserver`/viewport resize와 테마 변경에 다시 그린다. canvas backing store를 실제 CSS 크기와 device pixel ratio에 맞추며 시각 오프셋은 클릭 시각을 바꾸지 않는다. | [useMetronome.ts](../apps/web/src/lib/useMetronome.ts), [BeatVisualizer.tsx](../packages/ui/src/BeatVisualizer.tsx), [BeatVisualizer.test.tsx](../packages/ui/test/BeatVisualizer.test.tsx) |
 | 보면대 모드 | 전체화면에서 핵심 박·BPM·마디를 크게 보고 버튼 또는 빈 영역 더블 탭으로 나간다. | Fullscreen API 오류를 사용자에게 알리고 터치 대상 위의 더블 탭은 종료 제스처로 오인하지 않는다. | [MetronomePage.tsx](../apps/web/src/pages/MetronomePage.tsx) |
 | 재생 전원 생명주기 | 재생 중 화면 꺼짐을 억제하고 정지·자연 종료·화면 이탈 때 해제한다. 네이티브에서는 박 햅틱도 제공한다. | 브라우저 Wake Lock과 native bridge를 하나의 재생 생명주기로 묶고 중복 해제를 방지한다. | [wakeLock.ts](../packages/audio/src/wakeLock.ts), [useMetronome.ts](../apps/web/src/lib/useMetronome.ts), [nativeBridge.ts](../apps/mobile/src/nativeBridge.ts) |
 
@@ -157,7 +157,7 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | 설치형 PWA | 고정 app id/scope/start URL, 한국어 metadata, 일반·maskable icon, Apple touch icon으로 설치한다. | Vite PWA manifest와 Workbox precache/runtime cache를 생성한다. PDF·OSMD chunk와 public image/font만 runtime cache한다. | [vite.config.ts](../apps/web/vite.config.ts), [public](../apps/web/public) |
 | 인증 API 비캐시 | Service Worker와 nginx가 `/api/*` 응답을 저장하지 않는다. | navigation fallback denylist와 origin/path runtime filter, nginx `no-store` 정책을 함께 둔다. | [vite.config.ts](../apps/web/vite.config.ts), [nginx.conf](../nginx/nginx.conf) |
 | 구형 PWA 안전 이행 | 앱을 보여주기 전에 과거 `fmr-api` 캐시를 삭제하고 안전 generation worker의 제어권과 구형 worker 종료를 확인한다. 증명할 수 없으면 시작을 중단하고 재시도 화면만 보인다. | 교체 전·후 두 번 민감 cache 부재를 확인하는 fail-closed bootstrap을 사용한다. | [pwaCache.ts](../apps/web/src/lib/pwaCache.ts), [main.tsx](../apps/web/src/main.tsx), [pwa-upgrade.pwa.ts](../e2e/pwa-upgrade.pwa.ts) |
-| 테마·저장 공간 | 다크/라이트 테마, 메트로놈 기본값, 시각 오프셋, 브라우저 저장 공간 사용량을 설정한다. | `data-theme`, theme-color, native SystemBars를 함께 갱신하고 Storage Estimate 미지원·오류를 구분한다. | [SettingsPage.tsx](../apps/web/src/pages/SettingsPage.tsx), [theme.ts](../apps/web/src/lib/theme.ts) |
+| 테마·저장 공간 | 모든 route의 상단 해/달 버튼에서 다크/라이트를 즉시 바꾸고 설정 화면에서도 같은 값을 선택한다. 메트로놈 기본값, 시각 오프셋, 브라우저 저장 공간 사용량도 설정한다. | `data-theme`, 고정 하단 UI, theme-color, native SystemBars와 localStorage를 함께 갱신하고 Storage Estimate 미지원·오류를 구분한다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx), [SettingsPage.tsx](../apps/web/src/pages/SettingsPage.tsx), [theme.ts](../apps/web/src/lib/theme.ts) |
 
 ### Capacitor 모바일 경계
 
@@ -178,7 +178,7 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 
 | 기능 | 구현된 동작 | 근거 |
 | --- | --- | --- |
-| 폭·높이 적응 | 256px 유효 폭부터 2560px 초광폭, 짧은 가로 화면, safe area와 `dvh`에 맞춰 1열·rail·sidebar 구조를 전환한다. | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md), [index.css](../apps/web/src/index.css), [responsive.spec.ts](../e2e/responsive.spec.ts) |
+| 폭·높이 적응 | 256px 유효 폭부터 2560px 초광폭, 짧은 가로 화면, safe area와 `dvh`에 맞춰 1열·rail·sidebar 구조를 전환한다. 긴 화면의 메트로놈은 박 원·진행 바를 키우고 표시 묶음 바로 아래에 조작을 둔다. | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md), [index.css](../apps/web/src/index.css), [responsive.spec.ts](../e2e/responsive.spec.ts) |
 | 모바일 내비게이션 | 메트로놈·악보·앙상블·연습과 더보기의 하단 내비게이션을 제공하고 더보기 dialog에 편집기·튜너·프로젝트·보정·설정을 둔다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx) |
 | 포트폴리오 복귀 | 브라우저의 모든 앱 화면 상단에서 같은 탭의 Bonifacio 홈으로 돌아간다. lazy route를 불러오는 동안에도 AppShell과 링크를 유지하며, Capacitor 네이티브 shell에서는 외부 웹 링크를 숨긴다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx), [AppShell.test.tsx](../apps/web/src/components/AppShell.test.tsx) |
 | 터치 타깃과 overflow | 핵심 조작은 최소 44px, `any-pointer: coarse`의 공용 input/select와 핵심 타깃은 48px이다. 문서 전체 가로 overflow는 허용하지 않고 넓은 편집 영역만 자체 스크롤한다. | [primitives.css](../packages/ui/src/primitives.css), [responsive.spec.ts](../e2e/responsive.spec.ts) |
@@ -186,7 +186,7 @@ Google 로그인과 실제 메일 발송은 각각 OAuth client ID와 SMTP 설�
 | 포커스·스크롤 | skip link를 제공하고 새 route의 `h1`으로 초점을 옮긴다. history POP은 entry별 본문 scroll을 복원하고 모바일 더보기 dialog를 닫는다. | [AppShell.tsx](../apps/web/src/components/AppShell.tsx), [AppShell.test.tsx](../apps/web/src/components/AppShell.test.tsx), [navigation.spec.ts](../e2e/navigation.spec.ts) |
 | 상태 전달 | loading은 status/`aria-busy`, 오류는 alert와 재시도, 동적 값은 필요한 범위에 `aria-live`를 사용한다. 색 외에 text·icon·badge로 상태를 구분한다. | [PageHeader.tsx](../apps/web/src/components/PageHeader.tsx), [primitives.tsx](../packages/ui/src/primitives.tsx), [responsive.spec.ts](../e2e/responsive.spec.ts) |
 | 펜·멀티포인터 안전 | 악보 매핑·펜 입력은 capture한 하나의 `pointerId`만 처리하고 `pointercancel`에서 초안을 버린다. | [ScoresPage.tsx](../apps/web/src/pages/ScoresPage.tsx), [scores.spec.ts](../e2e/scores.spec.ts) |
-| 사용자 모션·테마 | `prefers-reduced-motion`에서 장식 애니메이션을 줄이고 다크·라이트 색 토큰과 focus ring을 유지한다. | [index.css](../apps/web/src/index.css), [tokens.css](../packages/ui/src/tokens.css) |
+| 사용자 모션·테마 | 일반 재생 배경은 마디당 한 번인 다운비트와 연속 상태인 예비박에만 낮은 채도로 반응하고 일반박별 flash는 만들지 않는다. `prefers-reduced-motion`에서는 배경 반응과 연속 진행 채움을 끄되 진행 track과 기능 박 원은 유지한다. 다크·라이트는 본문뿐 아니라 고정 하단 UI, browser/PWA chrome과 native SystemBars까지 같은 상태로 맞춘다. | [index.css](../apps/web/src/index.css), [tokens.css](../packages/ui/src/tokens.css), [theme.ts](../apps/web/src/lib/theme.ts) |
 
 ## 10. 백엔드, 저장소와 데이터 무결성
 

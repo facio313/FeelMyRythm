@@ -49,13 +49,8 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def get_sso_developer(request: Request, settings: AppSettings) -> TrustedSsoIdentity:
-    return require_sso_role(request, settings, "developer")
-
-
 def get_sso_admin(request: Request, settings: AppSettings) -> TrustedSsoIdentity:
     return require_sso_role(request, settings, "admin")
 
 
-SsoDeveloper = Annotated[TrustedSsoIdentity, Depends(get_sso_developer)]
 SsoAdmin = Annotated[TrustedSsoIdentity, Depends(get_sso_admin)]

@@ -258,6 +258,97 @@ for (const viewport of viewports) {
   });
 }
 
+test('idle metronome geometry follows width and height changes before playback', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/feelmyrythm/');
+  await expect(page.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled();
+  const canvas = page.locator('.metronome-visualizer canvas');
+  const stagePage = page.locator('.metronome-page');
+
+  await stagePage.evaluate((element) => {
+    element.setAttribute('data-playing', 'true');
+    element.setAttribute('data-beat-tone', 'downbeat');
+  });
+  await expect(stagePage).toHaveCSS('background-image', /radial-gradient/);
+  await stagePage.evaluate((element) => element.setAttribute('data-beat-tone', 'beat'));
+  await expect(stagePage).toHaveCSS('background-image', 'none');
+  await stagePage.evaluate((element) => element.removeAttribute('data-playing'));
+
+  const canvasMatchesCssSize = () =>
+    canvas.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      return {
+        heightError: Math.abs(element.height - Math.round(bounds.height * ratio)),
+        widthError: Math.abs(element.width - Math.round(bounds.width * ratio)),
+      };
+    });
+  await expect.poll(canvasMatchesCssSize).toEqual({ heightError: 0, widthError: 0 });
+  const regularHeight = await canvas.evaluate((element) => element.getBoundingClientRect().height);
+
+  await page.setViewportSize({ width: 1_440, height: 1_200 });
+  await expect.poll(canvasMatchesCssSize).toEqual({ heightError: 0, widthError: 0 });
+  const tallHeight = await canvas.evaluate((element) => element.getBoundingClientRect().height);
+  expect(tallHeight).toBeGreaterThan(regularHeight + 40);
+
+  const verticalRhythm = await page.evaluate(() => {
+    const stage = document.querySelector('.metronome-stage')?.getBoundingClientRect();
+    const controls = document.querySelector('.metronome-controls')?.getBoundingClientRect();
+    return stage && controls
+      ? {
+          gap: controls.top - stage.bottom,
+          stageBottom: stage.bottom,
+          controlsTop: controls.top,
+        }
+      : null;
+  });
+  expect(verticalRhythm).not.toBeNull();
+  expect(verticalRhythm!.gap).toBeGreaterThanOrEqual(0);
+  expect(verticalRhythm!.gap).toBeLessThanOrEqual(20);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect.poll(canvasMatchesCssSize).toEqual({ heightError: 0, widthError: 0 });
+  const meterGeometry = await page.locator('.meter-select__control').evaluate((control) => {
+    const select = control.querySelector('select');
+    const icon = control.querySelector('svg');
+    if (!select || !icon) return null;
+    const selectBounds = select.getBoundingClientRect();
+    const iconBounds = icon.getBoundingClientRect();
+    return {
+      appearance: getComputedStyle(select).appearance,
+      centerDelta: Math.abs(
+        selectBounds.top + selectBounds.height / 2 - (iconBounds.top + iconBounds.height / 2),
+      ),
+    };
+  });
+  expect(meterGeometry).not.toBeNull();
+  expect(meterGeometry!.appearance).toBe('none');
+  expect(meterGeometry!.centerDelta).toBeLessThanOrEqual(1);
+  expect((await auditLayout(page)).documentOverflow).toBeLessThanOrEqual(1);
+});
+
+test('short-screen metronome settings stay aligned in a centered dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 667, height: 375 });
+  await page.goto('/feelmyrythm/');
+  const settings = page.getByRole('button', { name: '세부 설정' });
+  await expect(settings).toBeVisible();
+  await settings.click();
+
+  const dialog = page.getByRole('dialog', { name: '메트로놈 세부 설정' });
+  await expect(dialog).toBeVisible();
+  const alignment = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      horizontalDelta: Math.abs(bounds.left + bounds.width / 2 - window.innerWidth / 2),
+      verticalDelta: Math.abs(bounds.top + bounds.height / 2 - window.innerHeight / 2),
+    };
+  });
+  expect(alignment.horizontalDelta).toBeLessThanOrEqual(1);
+  expect(alignment.verticalDelta).toBeLessThanOrEqual(1);
+});
+
 test('coarse pointer, large text, keyboard and reduced motion keep controls usable', async ({
   browser,
 }) => {
@@ -299,5 +390,11 @@ test('coarse pointer, large text, keyboard and reduced motion keep controls usab
     .locator('.play-button')
     .evaluate((element) => getComputedStyle(element, '::after').animationName);
   expect(playAnimation).toBe('none');
+  const reducedMotionBackground = await page.locator('.metronome-page').evaluate((element) => {
+    element.setAttribute('data-playing', 'true');
+    element.setAttribute('data-beat-tone', 'downbeat');
+    return getComputedStyle(element).backgroundImage;
+  });
+  expect(reducedMotionBackground).toBe('none');
   await context.close();
 });

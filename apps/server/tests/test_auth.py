@@ -28,6 +28,9 @@ from app.security import (
 from .conftest import FakeGoogleVerifier, FakeMailSender, auth, register
 
 SSO_EDGE_SECRET = "test-fmr-edge-secret-with-at-least-32-characters"
+FMR_USER_GROUPS = "user,portfolio-v2,access-feelmyrythm"
+FMR_ADMIN_GROUPS = "user,admin,portfolio-v2,access-feelmyrythm"
+FMR_CHIEF_GROUPS = "user,admin,chief-admin,portfolio-v2"
 
 
 def sso_headers(
@@ -36,7 +39,7 @@ def sso_headers(
     *,
     display_name: str = "Portfolio user",
     edge_secret: str = SSO_EDGE_SECRET,
-    groups: str = "user",
+    groups: str = FMR_USER_GROUPS,
 ) -> dict[str, str]:
     return {
         "Remote-User": subject,

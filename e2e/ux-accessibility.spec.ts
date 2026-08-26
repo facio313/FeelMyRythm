@@ -123,6 +123,9 @@ test('saved light theme is applied at boot and login errors stay field-linked at
   expect(
     await page.locator('.topbar').evaluate((node) => getComputedStyle(node).backgroundColor),
   ).toBe('rgba(250, 248, 243, 0.94)');
+  expect(
+    await page.locator('.bottom-nav').evaluate((node) => getComputedStyle(node).backgroundColor),
+  ).toBe('rgba(250, 248, 243, 0.96)');
 
   await page.goto('/feelmyrythm/login');
   await expect(page).toHaveTitle('로그인 · FeelMyRythm');
@@ -136,4 +139,26 @@ test('saved light theme is applied at boot and login errors stay field-linked at
     Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test('the persistent topbar control switches to light at micro width and survives reload', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 256, height: 568 });
+  await page.goto('/feelmyrythm/');
+
+  const toggle = page.getByRole('button', { name: '라이트 테마로 전환' });
+  await expect(toggle).toBeVisible();
+  const toggleBounds = await toggle.boundingBox();
+  expect(toggleBounds).not.toBeNull();
+  expect(toggleBounds!.width).toBeGreaterThanOrEqual(44);
+  expect(toggleBounds!.height).toBeGreaterThanOrEqual(44);
+  await toggle.click();
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#FAF8F3');
+  expect(await page.evaluate(() => localStorage.getItem('fmr.theme'))).toBe('light');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByRole('button', { name: '다크 테마로 전환' })).toBeVisible();
 });

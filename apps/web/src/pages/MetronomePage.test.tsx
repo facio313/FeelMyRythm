@@ -299,4 +299,21 @@ describe('MetronomePage contracts', () => {
     expect(dialog.querySelector('input[type="range"]')).toBeEnabled();
     expect(dialog.querySelector('select')).toHaveValue('4/4');
   });
+
+  it('uses explicit tempo-step labels and keeps the meter chevron inside its select control', async () => {
+    const { container } = renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled(),
+    );
+
+    for (const name of ['BPM 5 낮추기', 'BPM 1 낮추기', 'BPM 1 높이기', 'BPM 5 높이기']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('button', { name: 'BPM 5 낮추기' })).toHaveTextContent('−5');
+    expect(screen.getByRole('button', { name: 'BPM 5 높이기' })).toHaveTextContent('+5');
+
+    const meterControl = container.querySelector('.meter-select__control');
+    expect(meterControl?.querySelector('select')).toHaveAccessibleName('박자');
+    expect(meterControl?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
 });

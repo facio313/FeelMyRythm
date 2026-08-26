@@ -127,6 +127,9 @@
 
 - 풀스크린 모드(보면대): 조작 UI 페이드아웃, 박 슬롯+마디 번호만 남기고 배경 전체가 은은히 플래시.
 - 예비박 중: 배경이 `--count-in` 톤으로 바뀌고 대형 카운트다운 숫자.
+- 박 슬롯 canvas는 CSS 표시 크기와 device pixel ratio에 backing store를 맞춘다. 재생 중 rAF뿐 아니라 정지 상태의 element resize와 테마 변경에도 다시 그려, 창을 좁힌 직후 늘어난 원이 남지 않게 한다.
+- 가용 높이가 커지면 박 원 반지름은 최대 52px, 진행 track은 최대 12px까지 보간하고 canvas 높이도 함께 늘린다. 남는 세로 공간은 시각화 위쪽에 흡수해 현재 마디와 조작 사이에 큰 공백을 만들지 않는다.
+- 일반 화면 재생 배경은 마디당 한 번인 다운비트에서만 저채도 radial glow로 반응하고 예비박은 하나의 연속된 낮은 채도 상태로 표시한다. 일반박마다 배경을 바꾸지 않아 빠른 BPM에서도 고빈도 flash를 만들지 않는다. 원·진행 바·마디 텍스트가 주 신호이고, `prefers-reduced-motion`에서는 fullscreen을 포함해 이 장식 배경 반응을 완전히 끈다.
 
 ### 7.2 템포맵 편집기
 
@@ -167,7 +170,7 @@
 - 본문 scroller는 history entry별 좌표를 기억해 뒤로/앞으로 탐색에서 복원하고, 새 페이지는 맨 위와 `h1` focus에서 시작한다. browser POP은 모바일 더보기 overlay를 닫아 뒤 화면을 가리지 않는다.
 - 브라우저 AppShell 상단에는 최소 44px, coarse pointer에서는 48px인 `← Bonifacio` 링크를 두어 같은 탭에서 포트폴리오 홈으로 돌아간다. lazy route loading fallback은 AppShell 내부 본문에만 표시해 링크와 내비게이션을 유지하고, 준비된 새 화면의 `h1`으로 focus를 옮긴다. Capacitor 네이티브 shell에는 링크를 표시하지 않는다.
 - PWA는 별도의 `any` 192/512px·`maskable` 512px PNG와 180px Apple touch icon, 고정 app `id`·scope·start URL, 한국어·category metadata를 제공한다.
-- 테마 선택은 `data-theme`뿐 아니라 browser/PWA `theme-color`와 Capacitor SystemBars 스타일까지 같이 바꾼다. storage·native API 실패는 새 테마의 웹 표시를 되돌리지 않는다.
+- 테마는 모든 route 상단의 44px 이상 해/달 버튼과 설정 radiogroup 양쪽에서 바꿀 수 있다. 두 경로 모두 `data-theme`뿐 아니라 고정 하단 UI, browser/PWA `theme-color`와 Capacitor SystemBars 스타일까지 같이 바꾼다. storage·native API 실패는 새 테마의 웹 표시를 되돌리지 않는다.
 
 ## 8. 접근성 기준
 

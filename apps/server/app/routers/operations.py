@@ -5,7 +5,7 @@ from dataclasses import asdict
 from fastapi import APIRouter
 
 from ..auth_cleanup import cleanup_legacy_auth, inventory_legacy_auth
-from ..dependencies import CurrentUser, DbSession, SsoAdmin, SsoDeveloper
+from ..dependencies import CurrentUser, DbSession, SsoAdmin
 from ..schemas import AuthCleanupIn, AuthCleanupOut, AuthInventoryOut
 
 router = APIRouter(prefix="/api", tags=["operations"])
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api", tags=["operations"])
 def auth_inventory(
     db: DbSession,
     _user: CurrentUser,
-    _identity: SsoDeveloper,
+    _identity: SsoAdmin,
 ) -> AuthInventoryOut:
     return AuthInventoryOut.model_validate(asdict(inventory_legacy_auth(db)))
 

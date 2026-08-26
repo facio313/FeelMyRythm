@@ -5,10 +5,12 @@ import {
   LayoutDashboard,
   ListMusic,
   Menu,
+  Moon,
   Radio,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Sun,
   Tally4,
   UserRound,
 } from 'lucide-react';
@@ -25,6 +27,7 @@ import { cn, Modal } from '@feelmyrythm/ui';
 import { nativeBridge } from '@feelmyrythm/mobile';
 import { useAuth } from '../lib/auth';
 import { portfolioSsoEnabled } from '../lib/runtimeMode';
+import { applyTheme, readStoredTheme, type AppTheme } from '../lib/theme';
 import { TemporaryOperationsNotice } from './TemporaryOperationsNotice';
 
 const navigation = [
@@ -92,6 +95,7 @@ export function AppShell() {
   const navigationType = useNavigationType();
   const { pathname } = location;
   const [moreOpen, setMoreOpen] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme());
   const visibleLegalNavigation = portfolioSsoEnabled()
     ? legalNavigation.filter(({ to }) => to !== '/delete-account')
     : legalNavigation;
@@ -107,6 +111,19 @@ export function AppShell() {
     const closeTransientNavigation = () => setMoreOpen(false);
     window.addEventListener('popstate', closeTransientNavigation);
     return () => window.removeEventListener('popstate', closeTransientNavigation);
+  }, []);
+
+  useEffect(() => {
+    const syncTheme = () => {
+      setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
   }, []);
 
   const focusReadyRoute = useCallback(() => {
@@ -168,13 +185,33 @@ export function AppShell() {
             <span className="brand__name">FeelMyRythm</span>
           </NavLink>
           {!nativeBridge.native ? (
-            <a className="bonifacio-return-link" href="https://bonifacio.work/">
-              ← Bonifacio
+            <a
+              className="bonifacio-return-link"
+              href="https://bonifacio.work/"
+              aria-label="← Bonifacio"
+            >
+              <span aria-hidden>←</span>
+              <span className="bonifacio-return-link__label" aria-hidden>
+                Bonifacio
+              </span>
             </a>
           ) : null}
         </div>
-        <nav className="topbar__actions" aria-label="계정과 설정">
+        <nav className="topbar__actions" aria-label="계정과 화면 설정">
           <TemporaryOperationsNotice />
+          <button
+            type="button"
+            className="icon-link app-theme-toggle"
+            aria-label={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
+            title={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
+            onClick={() => {
+              const nextTheme = theme === 'dark' ? 'light' : 'dark';
+              setTheme(nextTheme);
+              applyTheme(nextTheme);
+            }}
+          >
+            {theme === 'dark' ? <Sun size={20} aria-hidden /> : <Moon size={20} aria-hidden />}
+          </button>
           <NavLink className="icon-link" to="/settings" aria-label="설정">
             <Settings size={20} aria-hidden />
           </NavLink>

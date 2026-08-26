@@ -53,7 +53,7 @@ graph LR
 |---|---|
 | core: 타임라인 | 단일 구간 한정 `TempoMap` → `expandTimeline`, `locate`, `buildCountIn` (§4.3) — **반복(jumps)은 이 단계에선 미구현, 타입만 정의** |
 | audio: 엔진 | `AudioEngine` 인터페이스 + `WebAudioEngine`: Worker 타이머 + 룩어헤드 스케줄러 (§5.2), 클릭 샘플 4종 |
-| UI: 비주얼 메트로놈 | 박 슬롯 + 채움 예측 큐 + 다운비트 강조 (§9), rAF는 오디오 클럭 기준. [UI 디자인 시스템](./UI_DESIGN.md) 적용 |
+| UI: 비주얼 메트로놈 | 박 슬롯 + 채움 예측 큐 + 다운비트 강조 (§9), rAF는 오디오 클럭 기준. idle resize/theme redraw, DPR backing store, 높이 기반 원·track 보간을 적용한다. 보조 background glow는 다운비트/연속 예비박으로 빈도를 제한하고 reduced motion에서 끈다. [UI 디자인 시스템](./UI_DESIGN.md) 적용 |
 | 기본 조작 | BPM·박자표 설정, 탭 템포, 예비박 on/off, 볼륨, 강세 패턴, 설정 localStorage 저장 |
 | 스모크 테스트 | **Capacitor 빈 셸에 웹 빌드를 넣고 iPhone 실기기에서 오디오 지연·화면꺼짐 동작 확인** (리스크 조기 검증) |
 
@@ -173,7 +173,7 @@ graph LR
 | 앱 셀·대규모 workspace | history POP scroll 복원·새 탐색 top·overlay close, leaf 동시성 6 상한, 일부 503에서 건강한 곡 유지·재시도를 단위/UI 테스트로 검증 |
 | 악보 동시성 | Score parent lock, 최초 MeasureMap insert 경합, stale settings 409와 metadata/map transaction rollback을 PostgreSQL + API 테스트로 검증 |
 | 악보 cache/UX | network error와 HTTP error 분기, IndexedDB v3 user partition/migration/snapshot, Service Worker 인증 API cache 부재, zoom 좌표, manual page resume, compact fixed overlay를 단위·Playwright 테스트로 검증 |
-| 반응형·접근성 | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md)의 viewport 매트릭스에서 route별 overflow·고정 UI 비가림·터치 타깃·키보드 순서 검증 |
+| 반응형·접근성 | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md)의 viewport 매트릭스에서 route별 overflow·고정 UI 비가림·터치 타깃·키보드 순서를 검증하고, 메트로놈은 정지 상태의 연속 viewport resize에서 canvas backing store 일치·tall-height 확대·select indicator 중앙 정렬을 추가 확인 |
 | 런타임 이미지 | tag+digest로 고정한 base로 ARM64 image를 빌드한 뒤 exact publish tag의 server default CMD/Alembic/health/non-root/read-only 경계와 nginx config/SPA/header/API proxy를 실제 container로 smoke |
 | SSO·provider 운영 계약 | SSO session 재사용·거부 후 재교환·오류 차단 UI와 local form 비노출을 단위 테스트한다. preflight는 인증, SMTP, storage, mobile association을 독립 조건으로 판정하고 runtime image의 현재 운영 안내 문구를 확인한다. |
 

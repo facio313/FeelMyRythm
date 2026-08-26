@@ -93,6 +93,13 @@ p {
   background: rgb(250 248 243 / 94%);
 }
 
+[data-theme='light'] .bottom-nav,
+[data-theme='light'] .editor-save-bar,
+[data-theme='light'] .session-mobile-bar {
+  background: rgb(250 248 243 / 96%);
+  box-shadow: 0 -10px 32px rgb(61 51 34 / 10%);
+}
+
 .skip-link {
   position: fixed;
   z-index: 200;
@@ -145,6 +152,10 @@ p {
   white-space: nowrap;
 }
 
+.bonifacio-return-link__label {
+  margin-left: 4px;
+}
+
 .bonifacio-return-link:hover {
   color: var(--text);
 }
@@ -187,11 +198,21 @@ p {
 
 .icon-link,
 .account-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   min-width: 44px;
   min-height: 44px;
   justify-content: center;
   border-radius: 10px;
   color: var(--text-secondary);
+}
+
+button.icon-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .icon-link:hover,
@@ -200,7 +221,7 @@ p {
   background: var(--surface);
 }
 
-.temporary-operations-trigger {
+button.temporary-operations-trigger {
   border: 1px solid color-mix(in srgb, var(--info) 38%, var(--border));
   color: var(--info);
   background: color-mix(in srgb, var(--info) 10%, transparent);
@@ -2044,10 +2065,11 @@ p {
 }
 
 .metronome-page {
-  min-height: calc(100vh - 128px);
+  min-height: calc(100dvh - 128px);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 12px;
+  gap: clamp(8px, 1.2dvh, 16px);
+  border-radius: 24px;
 }
 .metronome-page:has(> .metronome-map-status) {
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
@@ -2083,18 +2105,20 @@ p {
   background: var(--surface);
 }
 .metronome-stage {
-  min-height: 400px;
+  min-height: clamp(360px, 50dvh, 760px);
   display: grid;
   grid-template-rows: minmax(180px, 1fr) auto auto;
+  row-gap: clamp(4px, 1dvh, 12px);
   place-items: center;
 }
 .metronome-visualizer {
   width: min(100%, 820px);
-  height: auto;
-  align-self: stretch;
+  height: 100%;
+  max-height: clamp(220px, 38dvh, 520px);
+  align-self: end;
 }
 .metronome-visualizer .fmr-beat-canvas {
-  height: clamp(180px, 25dvh, 280px);
+  height: 100%;
   min-height: 180px;
 }
 .bpm-display {
@@ -2144,8 +2168,8 @@ p {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto minmax(260px, 1fr);
   align-items: center;
-  gap: 24px;
-  padding: 12px 0;
+  gap: clamp(12px, 2vw, 24px);
+  padding: 8px 0;
 }
 .bpm-steppers {
   display: flex;
@@ -2155,6 +2179,12 @@ p {
 }
 .tap-button {
   min-width: 112px;
+}
+.bpm-stepper__amount {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 .play-button {
   position: relative;
@@ -2256,18 +2286,38 @@ p {
   font-weight: 700;
 }
 .meter-select {
-  position: relative;
   display: grid;
   gap: 4px;
 }
-.meter-select svg {
-  position: absolute;
-  right: 10px;
-  bottom: 14px;
-  pointer-events: none;
+.meter-select__control {
+  position: relative;
+  display: grid;
 }
-.metronome-page[data-count-in='true'] {
-  background: radial-gradient(circle, rgb(111 191 158 / 16%), transparent 60%);
+.meter-select__control select {
+  appearance: none;
+  padding-inline-end: 40px;
+}
+.meter-select__control svg {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.metronome-page:where([data-playing='true'][data-beat-tone='downbeat']) {
+  background: radial-gradient(
+    circle at 50% 40%,
+    color-mix(in srgb, var(--accent) 15%, transparent),
+    transparent 64%
+  );
+}
+.metronome-page:where([data-playing='true'][data-beat-tone='count-in']) {
+  background: radial-gradient(
+    circle at 50% 40%,
+    color-mix(in srgb, var(--count-in) 16%, transparent),
+    transparent 64%
+  );
 }
 .metronome-page--fullscreen {
   position: fixed;
@@ -2282,17 +2332,8 @@ p {
 .metronome-page--fullscreen[data-beat-tone='downbeat'] {
   background: color-mix(in srgb, var(--accent) 13%, var(--bg));
 }
-.metronome-page--fullscreen[data-beat-tone='beat'] {
-  background: color-mix(in srgb, var(--beat) 7%, var(--bg));
-}
-.metronome-page--fullscreen[data-beat-tone='beat'][data-beat-parity='odd'] {
-  background: color-mix(in srgb, var(--beat) 3%, var(--bg));
-}
 .metronome-page--fullscreen[data-beat-tone='count-in'] {
   background: color-mix(in srgb, var(--count-in) 15%, var(--bg));
-}
-.metronome-page--fullscreen[data-beat-tone='count-in'][data-beat-parity='odd'] {
-  background: color-mix(in srgb, var(--count-in) 8%, var(--bg));
 }
 .metronome-page--fullscreen .metronome-settings,
 .metronome-page--fullscreen .bpm-steppers,
@@ -3217,7 +3258,7 @@ input[type='range']::-webkit-slider-thumb {
 
   .metronome-settings {
     grid-template-columns: minmax(0, 1fr);
-    margin-top: var(--mobile-nav-height);
+    margin-top: 0;
   }
 
   .meter-select {
@@ -3327,6 +3368,15 @@ input[type='range']::-webkit-slider-thumb {
     gap: 8px;
   }
 
+  .bpm-steppers {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .bpm-steppers .fmr-button:nth-child(2),
+  .bpm-steppers .fmr-button:nth-child(4) {
+    display: none;
+  }
+
   .quick-settings {
     align-items: stretch;
   }
@@ -3347,6 +3397,28 @@ input[type='range']::-webkit-slider-thumb {
 
   .quick-settings > * {
     flex: 1;
+  }
+
+  .metronome-heading__short-settings {
+    width: var(--fmr-touch-target, 44px);
+    min-width: var(--fmr-touch-target, 44px);
+    padding: 0;
+    font-size: 0;
+  }
+
+  .topbar .account-link {
+    display: none;
+  }
+
+  .bonifacio-return-link {
+    width: var(--fmr-touch-target, 44px);
+    min-width: var(--fmr-touch-target, 44px);
+    justify-content: center;
+    padding: 0;
+  }
+
+  .bonifacio-return-link__label {
+    display: none;
   }
 }
 
@@ -3416,6 +3488,13 @@ input[type='range']::-webkit-slider-thumb {
 
   .metronome-heading__short-settings {
     display: inline-flex;
+  }
+
+  .metronome-heading__fullscreen {
+    width: var(--fmr-touch-target, 44px);
+    min-width: var(--fmr-touch-target, 44px);
+    padding: 0;
+    font-size: 0;
   }
 
   .metronome-page--fullscreen .metronome-heading__short-settings {
@@ -3724,6 +3803,14 @@ input[type='range']::-webkit-slider-thumb {
 
   .play-button--playing::after {
     opacity: 0.6;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen)[data-playing='true'] {
+    background: none;
+  }
+
+  .metronome-page.metronome-page--fullscreen[data-playing='true'] {
+    background: var(--bg);
   }
 }
 

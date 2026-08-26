@@ -15,23 +15,30 @@ const context = {
 
 describe('BeatVisualizer announcements', () => {
   let nextFrame: FrameRequestCallback | null;
+  let boundsWidth: number;
+  let boundsHeight: number;
+  let reducedMotion: boolean;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     nextFrame = null;
+    boundsWidth = 640;
+    boundsHeight = 180;
+    reducedMotion = false;
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       context as unknown as CanvasRenderingContext2D,
     );
-    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      bottom: 180,
-      height: 180,
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      bottom: boundsHeight,
+      height: boundsHeight,
       left: 0,
-      right: 640,
+      right: boundsWidth,
       top: 0,
-      width: 640,
+      width: boundsWidth,
       x: 0,
       y: 0,
       toJSON: () => ({}),
-    });
+    }));
     vi.stubGlobal(
       'requestAnimationFrame',
       vi.fn((callback: FrameRequestCallback) => {
@@ -46,7 +53,7 @@ describe('BeatVisualizer announcements', () => {
         addEventListener: vi.fn(),
         addListener: vi.fn(),
         dispatchEvent: vi.fn(),
-        matches: false,
+        matches: reducedMotion,
         media: '',
         onchange: null,
         removeEventListener: vi.fn(),
@@ -144,5 +151,69 @@ describe('BeatVisualizer announcements', () => {
 
     rerender(<BeatVisualizer frameSource={() => frame} running />);
     expect(screen.getByText('1마디 시작')).toBeInTheDocument();
+  });
+
+  it('redraws an idle frame when its responsive canvas changes size', async () => {
+    const frame: BeatFrame = {
+      accent: 2,
+      beatCount: 4,
+      beatIndex: 0,
+      measureNumber: 1,
+      progress: 0,
+    };
+    const { container } = render(<BeatVisualizer frameSource={() => frame} running={false} />);
+    const firstSecondBeatX = Number(context.arc.mock.calls[1]?.[0]);
+
+    context.arc.mockClear();
+    boundsWidth = 280;
+    boundsHeight = 96;
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    expect(context.arc).toHaveBeenCalledTimes(4);
+    expect(Number(context.arc.mock.calls[1]?.[0])).not.toBe(firstSecondBeatX);
+    const canvas = container.querySelector('canvas');
+    expect(canvas?.width).toBe(Math.round(280 * (window.devicePixelRatio || 1)));
+    expect(canvas?.height).toBe(Math.round(96 * (window.devicePixelRatio || 1)));
+  });
+
+  it('scales circles and the progress track for a tall performance surface', () => {
+    boundsWidth = 1_000;
+    boundsHeight = 500;
+    render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 2,
+          beatCount: 4,
+          beatIndex: 0,
+          measureNumber: 1,
+          progress: 0.5,
+        })}
+        running={false}
+      />,
+    );
+
+    expect(Number(context.arc.mock.calls[1]?.[2])).toBeGreaterThan(34);
+    expect(Number(context.fillRect.mock.calls[0]?.[3])).toBeGreaterThan(5);
+  });
+
+  it('keeps a visible progress track while suppressing its moving fill for reduced motion', () => {
+    reducedMotion = true;
+    render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 1,
+          beatCount: 4,
+          beatIndex: 1,
+          measureNumber: 1,
+          progress: 0.5,
+        })}
+        running={false}
+      />,
+    );
+
+    expect(context.fillRect).toHaveBeenCalledTimes(1);
+    expect(Number(context.fillRect.mock.calls[0]?.[2])).toBeGreaterThan(0);
   });
 });

@@ -33,38 +33,43 @@ function drawFrame(
   context.clearRect(0, 0, width, height);
 
   const count = Math.max(1, frame.beatCount);
-  const gap = Math.min(28, width * 0.04);
-  const usableWidth = width - gap * (count - 1);
-  const radius = Math.max(12, Math.min(34, usableWidth / count / 2));
+  const horizontalPadding = Math.max(12, Math.min(40, width * 0.06));
+  const gap = Math.max(8, Math.min(32, width * 0.035));
+  const usableWidth = Math.max(1, width - horizontalPadding * 2 - gap * (count - 1));
+  const radius = Math.max(9, Math.min(52, usableWidth / count / 2, height * 0.2));
   const totalWidth = radius * 2 * count + gap * (count - 1);
   const startX = (width - totalWidth) / 2 + radius;
-  const y = height * 0.48;
+  const barHeight = Math.max(6, Math.min(12, height * 0.025));
+  const lowestCircleY = height - barHeight - 8 - radius * 1.72;
+  const y = Math.max(radius * 1.2 + 4, Math.min(height * 0.7, lowestCircleY));
 
   for (let index = 0; index < count; index += 1) {
     const current = index === frame.beatIndex;
     const x = startX + index * (radius * 2 + gap);
     const downbeat = index === 0;
+    const emphasized = downbeat || frame.accent === 2;
+    const currentRadius = current && downbeat ? Math.min(radius * 1.16, radius + 8) : radius;
     context.beginPath();
-    context.arc(x, y, current && downbeat ? radius * 1.2 : radius, 0, Math.PI * 2);
+    context.arc(x, y, currentRadius, 0, Math.PI * 2);
     context.fillStyle = current
-      ? downbeat
+      ? emphasized
         ? css('--accent', '#d4a853')
         : css('--beat', '#f4f1e8')
       : css('--surface-raised', '#1c1f26');
     context.fill();
-    context.lineWidth = current ? 3 : 1;
+    context.lineWidth = current ? Math.max(3, Math.min(5, radius * 0.1)) : 2;
     context.strokeStyle = current ? css('--text', '#f4f1e8') : css('--border', '#2a2e37');
     context.stroke();
   }
 
+  const barWidth = Math.min(width * 0.78, 720);
+  const barX = (width - barWidth) / 2;
+  const barY = Math.min(height - barHeight - 8, y + radius * 1.72);
+  context.fillStyle = css('--surface-raised', '#1c1f26');
+  context.fillRect(barX, barY, barWidth, barHeight);
   if (!reducedMotion) {
-    const barWidth = Math.min(width * 0.7, 540);
-    const barX = (width - barWidth) / 2;
-    const barY = y + radius * 1.8;
-    context.fillStyle = css('--surface-raised', '#1c1f26');
-    context.fillRect(barX, barY, barWidth, 5);
     context.fillStyle = frame.isCountIn ? css('--count-in', '#6fbf9e') : css('--accent', '#d4a853');
-    context.fillRect(barX, barY, barWidth * Math.min(1, Math.max(0, frame.progress)), 5);
+    context.fillRect(barX, barY, barWidth * Math.min(1, Math.max(0, frame.progress)), barHeight);
   }
 
   if (frame.isCountIn && frame.countInValue) {
@@ -101,7 +106,7 @@ export function BeatVisualizer({
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let animationFrame = 0;
 
-    const render = () => {
+    const render = (scheduleNext: boolean) => {
       const bounds = canvas.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(1, Math.round(bounds.width));
@@ -148,11 +153,36 @@ export function BeatVisualizer({
       } else {
         boundaryActiveRef.current = false;
       }
-      if (running) animationFrame = requestAnimationFrame(render);
+      if (scheduleNext) animationFrame = requestAnimationFrame(() => render(true));
     };
 
-    render();
-    return () => cancelAnimationFrame(animationFrame);
+    const renderWhenIdle = () => {
+      if (!running) render(false);
+    };
+    render(running);
+
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(renderWhenIdle);
+    resizeObserver?.observe(canvas);
+    window.addEventListener('resize', renderWhenIdle);
+
+    const themeObserver =
+      typeof MutationObserver === 'undefined'
+        ? undefined
+        : new MutationObserver((records) => {
+            if (records.some((record) => record.attributeName === 'data-theme')) renderWhenIdle();
+          });
+    themeObserver?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+      themeObserver?.disconnect();
+      window.removeEventListener('resize', renderWhenIdle);
+    };
   }, [running]);
 
   return (
