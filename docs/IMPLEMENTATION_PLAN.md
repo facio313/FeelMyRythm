@@ -53,8 +53,8 @@ graph LR
 |---|---|
 | core: 타임라인 | 단일 구간 한정 `TempoMap` → `expandTimeline`, `locate`, `buildCountIn` (§4.3) — **반복(jumps)은 이 단계에선 미구현, 타입만 정의** |
 | audio: 엔진 | `AudioEngine` 인터페이스 + `WebAudioEngine`: Worker 타이머 + 룩어헤드 스케줄러 (§5.2), 클릭 샘플 4종 |
-| UI: 비주얼 메트로놈 | 박 슬롯 + 채움 예측 큐 + 다운비트 강조 (§9), rAF는 오디오 클럭 기준. idle resize/theme redraw, DPR backing store, 높이 기반 원·track 보간을 적용한다. 보조 background glow는 다운비트/연속 예비박으로 빈도를 제한하고 reduced motion에서 끈다. [UI 디자인 시스템](./UI_DESIGN.md) 적용 |
-| 기본 조작 | BPM·박자표 설정, 탭 템포, 예비박 on/off, 볼륨, 강세 패턴, 설정 localStorage 저장 |
+| UI: 비주얼 메트로놈 | 번호가 있는 박 슬롯 + 채움 예측 큐 + 다운비트 강조 (§9), rAF는 오디오 클럭 기준. idle resize/theme redraw, DPR backing store, 폭·높이 기반 기본 원(반지름 최대 72px)·현재 다운비트(최대 82px)·track(최대 14px) 보간을 적용한다. 고박자는 현재 박을 포함한 번호 window와 생략 표시로 전환한다. compact 내용 겹침과 tall 중앙 공백을 geometry E2E로 막고, primary/secondary/muted/accent text의 실제 표면 조합 4.5:1·control/고정 track 윤곽 3:1을 자동 계산한다. 보조 background glow는 다운비트/연속 예비박으로 빈도를 제한하고 reduced motion에서 끈다. [UI 디자인 시스템](./UI_DESIGN.md) 적용 |
+| 기본 조작 | BPM·박자표 설정, 탭 템포, 예비박 on/off, 볼륨, 강세 패턴, 설정 localStorage 저장. BPM 단계는 20/400 경계로 clamp하고 끝 방향을 잠그며, 강세·예비박 상태를 색과 이름으로 중복 부호화한다. 압축 예비박도 `예비 켬/끔`을 보존하고 탭 feedback은 시각 라벨과 polite status에 함께 제공한다. 빠른 시작 마디가 숨는 압축 화면은 설정 dialog에 같은 field를 제공하며, 열린 dialog 중 trigger가 숨기는 높이 경계를 넘으면 인라인 시작 마디로 focus를 복구한다. |
 | 스모크 테스트 | **Capacitor 빈 셸에 웹 빌드를 넣고 iPhone 실기기에서 오디오 지연·화면꺼짐 동작 확인** (리스크 조기 검증) |
 
 **DoD**:
@@ -173,7 +173,7 @@ graph LR
 | 앱 셀·대규모 workspace | history POP scroll 복원·새 탐색 top·overlay close, leaf 동시성 6 상한, 일부 503에서 건강한 곡 유지·재시도를 단위/UI 테스트로 검증 |
 | 악보 동시성 | Score parent lock, 최초 MeasureMap insert 경합, stale settings 409와 metadata/map transaction rollback을 PostgreSQL + API 테스트로 검증 |
 | 악보 cache/UX | network error와 HTTP error 분기, IndexedDB v3 user partition/migration/snapshot, Service Worker 인증 API cache 부재, zoom 좌표, manual page resume, compact fixed overlay를 단위·Playwright 테스트로 검증 |
-| 반응형·접근성 | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md)의 viewport 매트릭스에서 route별 overflow·고정 UI 비가림·터치 타깃·키보드 순서를 검증하고, 메트로놈은 정지 상태의 연속 viewport resize에서 canvas backing store 일치·tall-height 확대·select indicator 중앙 정렬을 추가 확인 |
+| 반응형·접근성 | [RESPONSIVE_UX.md](./RESPONSIVE_UX.md)의 52개 viewport × 12개 주요 route 기본 상태에서 overflow·고정 UI 비가림·44px 타깃·CTA 도달성과 route heading focus를 검증한다. 메트로놈의 기본 상태/조작 비겹침은 이 전체 matrix에서 확인하고 recovery banner는 폭별 압축 구간, 375–390px 초단축 landscape와 `420/421`, `820/821`, `900/901`, `640/641` 경계 표본에 주입한다. `359/390 × 420` recovery는 실제 status·stage·controls rect가 scrollport 안에 있는지 직접 비교한다. Medium의 `1180/1181`은 더 이상 배치 전환점이 아니며 연속성 표본으로 비교한다. Fullscreen 상태 유무와 뒤 AppShell focus 차단, `390 × 600`·`256 × 480`의 32px root font 확대, 32px root font에서 `256/320/359/390/419 × 480`과 `599 × 700`의 내비게이션 상한·focus reveal, coarse pointer 48px target과 예비박 식별자, compact/Medium의 시작 마디 가용성, 열린 설정 dialog의 `820→821`·`900→901` focus 복구, dialog focus·키보드 경로와 테마별 선택 text/control 대비는 별도 대표 시나리오에서 검증한다. |
 | 런타임 이미지 | tag+digest로 고정한 base로 ARM64 image를 빌드한 뒤 exact publish tag의 server default CMD/Alembic/health/non-root/read-only 경계와 nginx config/SPA/header/API proxy를 실제 container로 smoke |
 | SSO·provider 운영 계약 | SSO session 재사용·거부 후 재교환·오류 차단 UI와 local form 비노출을 단위 테스트한다. preflight는 인증, SMTP, storage, mobile association을 독립 조건으로 판정하고 runtime image의 현재 운영 안내 문구를 확인한다. |
 

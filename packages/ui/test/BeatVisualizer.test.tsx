@@ -9,6 +9,8 @@ const context = {
   fill: vi.fn(),
   fillRect: vi.fn(),
   fillText: vi.fn(),
+  fillStyle: '',
+  font: '',
   setTransform: vi.fn(),
   stroke: vi.fn(),
 };
@@ -21,6 +23,7 @@ describe('BeatVisualizer announcements', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    context.fillStyle = '';
     nextFrame = null;
     boundsWidth = 640;
     boundsHeight = 180;
@@ -194,9 +197,159 @@ describe('BeatVisualizer announcements', () => {
       />,
     );
 
-    expect(Number(context.arc.mock.calls[1]?.[2])).toBeGreaterThan(34);
-    expect(Number(context.fillRect.mock.calls[0]?.[3])).toBeGreaterThan(5);
+    expect(Number(context.arc.mock.calls[0]?.[2])).toBe(82);
+    expect(Number(context.arc.mock.calls[1]?.[2])).toBe(72);
+    expect(Number(context.fillRect.mock.calls[0]?.[3])).toBe(14);
+    expect(context.fillText.mock.calls.map(([label]) => String(label))).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
   });
+
+  it('keeps numbered beats legible on a compact phone surface', () => {
+    boundsWidth = 390;
+    boundsHeight = 127;
+    render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 1,
+          beatCount: 4,
+          beatIndex: 1,
+          measureNumber: 1,
+          progress: 0.25,
+        })}
+        running={false}
+      />,
+    );
+
+    expect(Number(context.arc.mock.calls[2]?.[2])).toBeGreaterThan(28);
+    expect(context.fillText).toHaveBeenCalledTimes(4);
+    expect(context.fillText.mock.calls.map(([label]) => String(label))).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+  });
+
+  it('keeps approximately 40px numbered beats clear of the track in a compact status surface', () => {
+    boundsWidth = 390;
+    boundsHeight = 64;
+    render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 1,
+          beatCount: 4,
+          beatIndex: 1,
+          measureNumber: 1,
+          progress: 0.25,
+        })}
+        running={false}
+      />,
+    );
+
+    const inactiveRadius = Number(context.arc.mock.calls[0]?.[2]);
+    const currentY = Number(context.arc.mock.calls[1]?.[1]);
+    const currentRadius = Number(context.arc.mock.calls[1]?.[2]);
+    const trackY = Number(context.fillRect.mock.calls[0]?.[1]);
+    expect(inactiveRadius * 2).toBeGreaterThanOrEqual(38);
+    expect(currentRadius * 2).toBeGreaterThanOrEqual(42);
+    expect(currentY - currentRadius).toBeGreaterThanOrEqual(0);
+    expect(trackY).toBeGreaterThanOrEqual(currentY + currentRadius);
+    expect(context.fillText.mock.calls.map(([label]) => String(label))).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+  });
+
+  it('keeps the count-in numeral inside a 64px recovery canvas', () => {
+    boundsWidth = 390;
+    boundsHeight = 64;
+    render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 2,
+          beatCount: 4,
+          beatIndex: 0,
+          countInValue: 4,
+          isCountIn: true,
+          progress: 0,
+        })}
+        running={false}
+      />,
+    );
+
+    const fontSize = Number.parseFloat(context.font.match(/([\d.]+)px/)?.[1] ?? '0');
+    expect(fontSize).toBeGreaterThanOrEqual(24);
+    expect(fontSize).toBeLessThanOrEqual(boundsHeight * 0.8);
+    expect(context.fillText.mock.calls.at(-1)?.[0]).toBe('4');
+  });
+
+  it.each([
+    { width: 256, count: 12, beatIndex: 11 },
+    { width: 390, count: 16, beatIndex: 15 },
+    { width: 256, count: 32, beatIndex: 31 },
+  ])('windows $count beats inside a $width px canvas', ({ width, count, beatIndex }) => {
+    boundsWidth = width;
+    boundsHeight = 96;
+    const { unmount } = render(
+      <BeatVisualizer
+        frameSource={() => ({
+          accent: 1,
+          beatCount: count,
+          beatIndex,
+          measureNumber: 1,
+          progress: 0.75,
+        })}
+        running={false}
+      />,
+    );
+
+    const circles = context.arc.mock.calls.map(([x, , radius]) => ({
+      left: Number(x) - Number(radius),
+      right: Number(x) + Number(radius),
+    }));
+    expect(circles.length).toBeGreaterThan(0);
+    expect(circles.length).toBeLessThan(count);
+    for (const circle of circles) {
+      expect(circle.left).toBeGreaterThanOrEqual(0);
+      expect(circle.right).toBeLessThanOrEqual(width);
+    }
+    const labels = context.fillText.mock.calls.map(([label]) => String(label));
+    expect(labels).toContain(String(beatIndex + 1));
+    expect(labels).toContain('…');
+    unmount();
+  });
+
+  it.each([
+    { beatIndex: -4, expectedLabel: '1' },
+    { beatIndex: 99, expectedLabel: '32' },
+  ])(
+    'clamps an out-of-range beat index $beatIndex before choosing its visible window',
+    ({ beatIndex, expectedLabel }) => {
+      boundsWidth = 256;
+      boundsHeight = 96;
+      render(
+        <BeatVisualizer
+          frameSource={() => ({
+            accent: 1,
+            beatCount: 32,
+            beatIndex,
+            measureNumber: 1,
+            progress: 0.75,
+          })}
+          running={false}
+        />,
+      );
+
+      expect(context.arc.mock.calls.length).toBeGreaterThan(0);
+      expect(context.fillText.mock.calls.map(([label]) => String(label))).toContain(expectedLabel);
+    },
+  );
 
   it('keeps a visible progress track while suppressing its moving fill for reduced motion', () => {
     reducedMotion = true;
@@ -215,5 +368,6 @@ describe('BeatVisualizer announcements', () => {
 
     expect(context.fillRect).toHaveBeenCalledTimes(1);
     expect(Number(context.fillRect.mock.calls[0]?.[2])).toBeGreaterThan(0);
+    expect(context.fillStyle).toBe('#626a78');
   });
 });

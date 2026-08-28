@@ -167,10 +167,19 @@ describe('MetronomePage contracts', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '보면대 모드' }));
     await screen.findByRole('button', { name: '나가기' });
-    for (const selector of ['.bpm-steppers', '.quick-settings', '.metronome-settings']) {
+    for (const selector of [
+      '.metronome-heading__editor',
+      '.bpm-steppers',
+      '.quick-settings',
+      '.metronome-settings',
+    ]) {
       expect(container.querySelector(selector)).toHaveAttribute('inert');
       expect(container.querySelector(selector)).toHaveAttribute('aria-hidden', 'true');
     }
+    expect(container.querySelector('.metronome-heading__context')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
 
     const stage = container.querySelector('.metronome-stage');
     if (!stage) throw new Error('Metronome stage was not rendered');
@@ -278,7 +287,7 @@ describe('MetronomePage contracts', () => {
 
   it('synchronizes the requested start measure after a search-param change', async () => {
     renderNavigablePage('/?measure=3');
-    const startMeasure = await screen.findByRole('spinbutton', { name: '시작' });
+    const startMeasure = await screen.findByRole('spinbutton', { name: '시작 마디' });
     expect(startMeasure).toHaveValue(3);
 
     fireEvent.click(screen.getByRole('button', { name: '12마디로 이동' }));
@@ -298,6 +307,59 @@ describe('MetronomePage contracts', () => {
     expect(dialog).toHaveTextContent('강세 패턴');
     expect(dialog.querySelector('input[type="range"]')).toBeEnabled();
     expect(dialog.querySelector('select')).toHaveValue('4/4');
+    const startMeasure = dialog.querySelector<HTMLInputElement>('input[type="number"]');
+    expect(startMeasure).toHaveAccessibleName('시작 마디');
+    expect(startMeasure).toHaveAttribute('min', '1');
+    fireEvent.change(startMeasure!, { target: { value: '4' } });
+    expect(startMeasure).toHaveValue(4);
+
+    expect(dialog.querySelector('button[aria-label^="1박, 강박"]')).toHaveAccessibleName(
+      '1박, 강박. 누르면 무음으로 변경',
+    );
+  });
+
+  it('edits BPM in an accessible bounded number dialog', async () => {
+    renderPage();
+    const trigger = await screen.findByRole('button', {
+      name: '현재 BPM 100, 눌러서 직접 입력',
+    });
+    await waitFor(() => expect(trigger).toBeEnabled());
+
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'BPM 직접 입력' });
+    const input = screen.getByRole('spinbutton', { name: 'BPM' });
+    expect(dialog).toBeInTheDocument();
+    expect(input).toHaveAttribute('inputmode', 'numeric');
+    expect(input).toHaveAttribute('min', '20');
+    expect(input).toHaveAttribute('max', '400');
+
+    fireEvent.change(input, { target: { value: '19' } });
+    fireEvent.click(screen.getByRole('button', { name: '적용' }));
+    expect(input).toHaveAccessibleDescription('20에서 400 사이의 정수를 입력해 주세요.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.change(input, { target: { value: '20.5' } });
+    fireEvent.click(screen.getByRole('button', { name: '적용' }));
+    expect(input).toHaveAccessibleDescription('20에서 400 사이의 정수를 입력해 주세요.');
+    expect(screen.getByRole('dialog', { name: 'BPM 직접 입력' })).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: '132' } });
+    fireEvent.click(screen.getByRole('button', { name: '적용' }));
+    expect(screen.queryByRole('dialog', { name: 'BPM 직접 입력' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '현재 BPM 132, 눌러서 직접 입력' })).toHaveFocus(),
+    );
+
+    const updatedTrigger = screen.getByRole('button', {
+      name: '현재 BPM 132, 눌러서 직접 입력',
+    });
+    fireEvent.click(updatedTrigger);
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    await waitFor(() => expect(updatedTrigger).toHaveFocus());
+
+    fireEvent.click(updatedTrigger);
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+    await waitFor(() => expect(updatedTrigger).toHaveFocus());
   });
 
   it('uses explicit tempo-step labels and keeps the meter chevron inside its select control', async () => {
@@ -312,8 +374,84 @@ describe('MetronomePage contracts', () => {
     expect(screen.getByRole('button', { name: 'BPM 5 낮추기' })).toHaveTextContent('−5');
     expect(screen.getByRole('button', { name: 'BPM 5 높이기' })).toHaveTextContent('+5');
 
+    const controlOrder = [
+      ...container.querySelectorAll<HTMLButtonElement>('.metronome-controls button'),
+    ].map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim());
+    expect(controlOrder[0]).toBe('메트로놈 재생');
+
     const meterControl = container.querySelector('.meter-select__control');
     expect(meterControl?.querySelector('select')).toHaveAccessibleName('박자');
     expect(meterControl?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('clamps tempo steps at the supported range and exposes non-color setting states', async () => {
+    renderPage();
+    const bpmTrigger = await screen.findByRole('button', {
+      name: '현재 BPM 100, 눌러서 직접 입력',
+    });
+    await waitFor(() => expect(bpmTrigger).toBeEnabled());
+
+    fireEvent.click(bpmTrigger);
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'BPM' }), {
+      target: { value: '398' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '적용' }));
+    fireEvent.click(screen.getByRole('button', { name: 'BPM 5 높이기' }));
+    expect(screen.getByRole('button', { name: '현재 BPM 400, 눌러서 직접 입력' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'BPM 1 높이기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'BPM 5 높이기' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '현재 BPM 400, 눌러서 직접 입력' }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'BPM' }), {
+      target: { value: '21' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '적용' }));
+    fireEvent.click(screen.getByRole('button', { name: 'BPM 5 낮추기' }));
+    expect(screen.getByRole('button', { name: '현재 BPM 20, 눌러서 직접 입력' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'BPM 1 낮추기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'BPM 5 낮추기' })).toBeDisabled();
+
+    const countIn = screen.getByRole('button', { name: '예비박' });
+    expect(countIn).toHaveTextContent('켬');
+    expect(countIn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(countIn);
+    expect(countIn).toHaveTextContent('끔');
+    expect(countIn).toHaveAttribute('aria-pressed', 'false');
+
+    const firstBeat = screen.getByRole('button', {
+      name: '1박, 강박. 누르면 무음으로 변경',
+    });
+    fireEvent.click(firstBeat);
+    expect(
+      screen.getByRole('button', { name: '1박, 무음. 누르면 보통으로 변경' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows immediate tap-tempo progress before calculating the next BPM', async () => {
+    let now = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    renderPage();
+    const tapTempo = await screen.findByRole('button', { name: '탭 템포' });
+    await waitFor(() => expect(tapTempo).toBeEnabled());
+
+    fireEvent.click(tapTempo);
+    expect(tapTempo).toHaveAttribute('data-feedback', '다시 탭');
+    expect(tapTempo).toHaveTextContent('다시 탭');
+    const feedbackStatus = document.querySelector('.tap-tempo-feedback');
+    expect(feedbackStatus).toHaveAttribute('role', 'status');
+    expect(feedbackStatus).toHaveAttribute('aria-live', 'polite');
+    expect(feedbackStatus).toHaveTextContent('첫 탭을 인식했습니다. 다시 탭하세요.');
+
+    now = 1_500;
+    fireEvent.click(tapTempo);
+    expect(tapTempo).toHaveAttribute('data-feedback', '2회');
+    expect(tapTempo).toHaveTextContent('2회');
+    expect(feedbackStatus).toHaveTextContent('탭 템포 2회 입력했습니다.');
+    expect(screen.getByRole('button', { name: '현재 BPM 120, 눌러서 직접 입력' })).toBeEnabled();
   });
 });

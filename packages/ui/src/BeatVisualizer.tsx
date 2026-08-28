@@ -33,22 +33,38 @@ function drawFrame(
   context.clearRect(0, 0, width, height);
 
   const count = Math.max(1, frame.beatCount);
+  const activeBeatIndex = Math.min(count - 1, Math.max(0, Math.floor(frame.beatIndex)));
   const horizontalPadding = Math.max(12, Math.min(40, width * 0.06));
   const gap = Math.max(8, Math.min(32, width * 0.035));
-  const usableWidth = Math.max(1, width - horizontalPadding * 2 - gap * (count - 1));
-  const radius = Math.max(9, Math.min(52, usableWidth / count / 2, height * 0.2));
-  const totalWidth = radius * 2 * count + gap * (count - 1);
+  const minimumSlotWidth = 24 + gap;
+  const visibleCapacity = Math.max(
+    1,
+    Math.min(count, Math.floor((width - horizontalPadding * 2 + gap) / minimumSlotWidth)),
+  );
+  const pageStart = Math.floor(activeBeatIndex / visibleCapacity) * visibleCapacity;
+  const pageEnd = Math.min(count, pageStart + visibleCapacity);
+  const visibleIndexes = Array.from(
+    { length: pageEnd - pageStart },
+    (_, index) => pageStart + index,
+  );
+  const usableWidth = Math.max(1, width - horizontalPadding * 2 - gap * (visibleCapacity - 1));
+  const radius = Math.max(9, Math.min(72, usableWidth / visibleCapacity / 2, height * 0.3));
+  const totalWidth =
+    radius * 2 * visibleIndexes.length + gap * Math.max(0, visibleIndexes.length - 1);
   const startX = (width - totalWidth) / 2 + radius;
-  const barHeight = Math.max(6, Math.min(12, height * 0.025));
+  const barHeight = Math.max(6, Math.min(14, height * 0.03));
   const lowestCircleY = height - barHeight - 8 - radius * 1.72;
-  const y = Math.max(radius * 1.2 + 4, Math.min(height * 0.7, lowestCircleY));
+  const y = Math.max(radius * 1.2 + 4, Math.min(height * 0.54, lowestCircleY));
 
-  for (let index = 0; index < count; index += 1) {
-    const current = index === frame.beatIndex;
-    const x = startX + index * (radius * 2 + gap);
-    const downbeat = index === 0;
+  for (let slot = 0; slot < visibleIndexes.length; slot += 1) {
+    const beatIndex = visibleIndexes[slot]!;
+    const current = beatIndex === activeBeatIndex;
+    const x = startX + slot * (radius * 2 + gap);
+    const downbeat = beatIndex === 0;
     const emphasized = downbeat || frame.accent === 2;
-    const currentRadius = current && downbeat ? Math.min(radius * 1.16, radius + 8) : radius;
+    const currentRadius = current
+      ? Math.min(radius * (downbeat ? 1.18 : 1.1), radius + (downbeat ? 10 : 7))
+      : radius;
     context.beginPath();
     context.arc(x, y, currentRadius, 0, Math.PI * 2);
     context.fillStyle = current
@@ -58,14 +74,31 @@ function drawFrame(
       : css('--surface-raised', '#1c1f26');
     context.fill();
     context.lineWidth = current ? Math.max(3, Math.min(5, radius * 0.1)) : 2;
-    context.strokeStyle = current ? css('--text', '#f4f1e8') : css('--border', '#2a2e37');
+    context.strokeStyle = current ? css('--text', '#f4f1e8') : css('--control-border', '#626a78');
     context.stroke();
+
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = current
+      ? css('--on-accent', '#0c0d10')
+      : css('--text-secondary', '#a8adb8');
+    context.font = `600 ${Math.max(12, Math.min(26, radius * 0.52))}px 'Pretendard Variable', sans-serif`;
+    context.fillText(String(beatIndex + 1), x, y + 1);
   }
 
-  const barWidth = Math.min(width * 0.78, 720);
+  if (pageStart > 0 || pageEnd < count) {
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = css('--text-secondary', '#a8adb8');
+    context.font = `700 ${Math.max(12, Math.min(18, radius * 0.7))}px 'Pretendard Variable', sans-serif`;
+    if (pageStart > 0) context.fillText('…', horizontalPadding / 2, y);
+    if (pageEnd < count) context.fillText('…', width - horizontalPadding / 2, y);
+  }
+
+  const barWidth = Math.min(width * 0.82, 920);
   const barX = (width - barWidth) / 2;
   const barY = Math.min(height - barHeight - 8, y + radius * 1.72);
-  context.fillStyle = css('--surface-raised', '#1c1f26');
+  context.fillStyle = css('--control-border', '#626a78');
   context.fillRect(barX, barY, barWidth, barHeight);
   if (!reducedMotion) {
     context.fillStyle = frame.isCountIn ? css('--count-in', '#6fbf9e') : css('--accent', '#d4a853');
@@ -73,10 +106,11 @@ function drawFrame(
   }
 
   if (frame.isCountIn && frame.countInValue) {
+    const countInFontSize = Math.max(24, Math.min(160, height * 0.62));
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillStyle = css('--count-in', '#6fbf9e');
-    context.font = `300 ${Math.max(96, height * 0.42)}px 'Pretendard Variable', sans-serif`;
+    context.font = `300 ${countInFontSize}px 'Pretendard Variable', sans-serif`;
     context.fillText(String(frame.countInValue), width / 2, height / 2);
   }
 }
