@@ -15,6 +15,9 @@ services:
     networks:
       - feelmyrythm-backend
     restart: always
+    cpus: 0.75
+    cpu_shares: 512
+    mem_limit: 256m
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -87,6 +90,9 @@ services:
       - feelmyrythm-backend
       - cksDB
     restart: always
+    cpus: 1.5
+    cpu_shares: 768
+    mem_limit: 384m
     healthcheck:
       test:
         - CMD
@@ -113,6 +119,9 @@ services:
     networks:
       - feelmyrythm
     restart: always
+    cpus: 0.75
+    cpu_shares: 512
+    mem_limit: 64m
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/healthz']
       interval: 15s

@@ -14,6 +14,7 @@
 - SSO startup은 password 또는 Google subject가 남은 User의 credential을 비우고 auth generation을 올린 뒤 해당 refresh row를 제거한다. revoked/expired refresh row도 멱등 제거하며 User/domain row는 보존한다. bearer와 trusted admin headers를 함께 요구하는 `GET /api/operations/auth-inventory`는 aggregate count만 반환한다. admin을 요구하는 `POST /api/admin/auth-cleanup`은 `{ "confirmPurgeActiveRefreshSessions": true }`가 있어야 credential 연관·stale row에 이어 남은 active refresh row도 모두 제거하고 처리 count만 반환한다. 기존 access JWT는 자체 만료까지 유효하고 다음 refresh부터 실패한다. 운영에서 실행 전 inventory를 기록하고 response나 log에 email, subject, token hash를 추가하지 않는다.
 - target preflight는 SMTP를 명시적으로 skipped로 기록하고 local upload root의 runtime 접근성을 확인한다. 이 결과는 off-host object backup 완료를 뜻하지 않는다.
 - web release는 `VITE_FMR_MANAGED_LOCAL_SSO=true`로 빌드한다. topbar 정보 버튼의 `현재 운영 구성` dialog는 자동으로 열리지 않으며 적용된 local volume/SSO와 조건부 S3·backup·mobile association·OMR 범위를 구분한다.
+- 운영 Compose는 `fmrRedis`에 0.75 CPU·CPU share 512·256 MiB, `fmrServer`에 1.5 CPU·CPU share 768·384 MiB, `fmrWeb`에 0.75 CPU·CPU share 512·64 MiB 상한을 둔다. `cpus`와 `mem_limit`은 실행 상한이고 `cpu_shares`는 경합 시 상대 가중치이며, RAM을 선점하는 `mem_reservation`은 설정하지 않는다. 제한을 바꿀 때는 배포 전 OOM·health probe·API 지연을 함께 검증한다.
 
 새 운영 계정은 중앙 관리자 화면에서 만들고 trusted exchange로 앱에 투영한다. 앱 DB에 운영 비밀번호를 만들거나 비밀번호·edge secret을 채팅·CI log·shell argument로 넘기지 않는다.
 
