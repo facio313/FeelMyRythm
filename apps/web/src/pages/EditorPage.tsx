@@ -13,11 +13,13 @@ import {
 import type { components } from '@feelmyrythm/protocol';
 import { Button, Card, Field, Modal, StatusBadge, useToast } from '@feelmyrythm/ui';
 import {
+  BookOpen,
   Braces,
   ChevronDown,
   ChevronUp,
   Download,
   GitMerge,
+  Play,
   Plus,
   RotateCcw,
   Save,
@@ -39,7 +41,14 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { useBeforeUnload, useBlocker, useParams, type BlockerFunction } from 'react-router-dom';
+import {
+  useBeforeUnload,
+  useBlocker,
+  useNavigate,
+  useParams,
+  useSearchParams,
+  type BlockerFunction,
+} from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -694,6 +703,10 @@ function JumpFields({
 export function EditorPage() {
   const { tempoMapId } = useParams();
   const { user, client } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const localSource = searchParams.get('source') === 'local';
+  const scoreId = searchParams.get('score');
   const { notify } = useToast();
   const [map, setMap] = useState<TempoMap>(() => createDefaultTempoMap());
   const [selectedId, setSelectedId] = useState(map.sections[0]?.id ?? '');
@@ -710,6 +723,7 @@ export function EditorPage() {
   }>();
   const [reloadKey, setReloadKey] = useState(0);
   const [serverSnapshot, setServerSnapshot] = useState<TempoMap>();
+  const [remoteRole, setRemoteRole] = useState<'owner' | 'leader' | 'member'>();
   const [loadConflict, setLoadConflict] = useState<LoadConflict>();
   const [saveConflict, setSaveConflict] = useState<SaveConflict>();
   const [rebasedPending, setRebasedPending] = useState(false);
@@ -720,17 +734,21 @@ export function EditorPage() {
   const [tapStatus, setTapStatus] = useState('두 번 이상 일정하게 두드리세요.');
   const tapTimesRef = useRef<number[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
-  const remoteCacheScope = useMemo(() => (user ? { userId: user.id } : undefined), [user]);
+  const remoteCacheScope = useMemo(
+    () => (user && !localSource ? { userId: user.id } : undefined),
+    [localSource, user],
+  );
   const isOfflineReadOnly =
     offlineReadOnlyFor !== undefined &&
     offlineReadOnlyFor.tempoMapId === tempoMapId &&
     offlineReadOnlyFor.userId === user?.id;
+  const isReadOnly = isOfflineReadOnly || remoteRole === 'member';
 
   const editMap = useCallback(
     (next: SetStateAction<TempoMap>) => {
-      if (!isOfflineReadOnly) setMap(next);
+      if (!isReadOnly) setMap(next);
     },
-    [isOfflineReadOnly],
+    [isReadOnly],
   );
 
   const cacheMap = useCallback(
@@ -771,6 +789,7 @@ export function EditorPage() {
       setSaveConflict(undefined);
       setRebasedPending(false);
       setServerSnapshot(undefined);
+      setRemoteRole(undefined);
       setSplitOpen(false);
       setUndoDelete(undefined);
 
@@ -813,7 +832,7 @@ export function EditorPage() {
           return;
         }
 
-        if (!user) {
+        if (!user || localSource) {
           const { map: local, error } = await readCachedMap();
           if (cancelled) return;
           if (error) {
@@ -826,7 +845,7 @@ export function EditorPage() {
             setLoadState('ready');
             return;
           }
-          const next = createDefaultTempoMap(tempoMapId, user ? 0 : 1);
+          const next = { ...createDefaultTempoMap(), id: tempoMapId };
           setMap(next);
           setSelectedId(next.sections[0]?.id ?? '');
           setSavedFingerprint('');
@@ -843,16 +862,49 @@ export function EditorPage() {
         });
 
         try {
-          const server = await fetchServerMap(tempoMapId);
+          const access = await client.get<components['schemas']['RepertoireAccessOut']>(
+            `/repertoire/${encodeURIComponent(tempoMapId)}/access`,
+          );
+          if (cancelled) return;
+          setRemoteRole(access.role);
+          let server: TempoMap;
+          try {
+            server = await fetchServerMap(tempoMapId);
+          } catch (error) {
+            if (!(error instanceof ApiError) || error.status !== 404) throw error;
+            const revisions = await client
+              .get<ServerTempoMap[]>(
+                `/repertoire/${encodeURIComponent(tempoMapId)}/tempomap/revisions`,
+              )
+              .catch((verificationError: unknown) => {
+                if (!isNetworkFailure(verificationError)) throw verificationError;
+                throw new Error(
+                  '첫 템포맵을 만들 수 있는지 확인하지 못했습니다. 다시 시도해 주세요.',
+                  {
+                    cause: verificationError,
+                  },
+                );
+              });
+            if (revisions.length !== 0) throw error;
+            if (access.role === 'member') {
+              throw new Error(
+                '아직 템포맵이 없습니다. 프로젝트 리더에게 첫 템포맵 작성을 요청하세요.',
+                { cause: error },
+              );
+            }
+            server = createDefaultTempoMap(tempoMapId, 0);
+          }
           if (cancelled) return;
           setMap(server);
           setSelectedId(server.sections[0]?.id ?? '');
           setServerSnapshot(server);
-          setSavedFingerprint(fingerprint(server));
+          setSavedFingerprint(server.revision === 0 ? '' : fingerprint(server));
           setLoadState('ready');
-          void cacheMap(server).then((cached) => {
-            if (!cancelled && !cached) setCacheFailureNotice();
-          });
+          if (server.revision > 0) {
+            void cacheMap(server).then((cached) => {
+              if (!cancelled && !cached) setCacheFailureNotice();
+            });
+          }
         } catch (serverError) {
           if (!isNetworkFailure(serverError)) throw serverError;
           const { map: cached, error } = await cachedMap;
@@ -882,7 +934,16 @@ export function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [cacheMap, fetchServerMap, reloadKey, remoteCacheScope, tempoMapId, user]);
+  }, [
+    cacheMap,
+    client,
+    fetchServerMap,
+    localSource,
+    reloadKey,
+    remoteCacheScope,
+    tempoMapId,
+    user,
+  ]);
 
   const selectedIndex = map.sections.findIndex((section) => section.id === selectedId);
   const selected = map.sections[selectedIndex] ?? map.sections[0];
@@ -903,7 +964,15 @@ export function EditorPage() {
       };
     }
   }, [map, validation]);
-  const isRemote = Boolean(user && map.repertoireItemId !== 'local');
+  const isRemote = Boolean(user && !localSource && map.repertoireItemId !== 'local');
+  const playbackPath = isRemote
+    ? `/?repertoire=${encodeURIComponent(map.repertoireItemId)}`
+    : `/?tempoMap=${encodeURIComponent(map.id)}`;
+  const scorePath = isRemote
+    ? `/repertoire/${encodeURIComponent(map.repertoireItemId)}/scores${scoreId ? `/${encodeURIComponent(scoreId)}` : ''}`
+    : scoreId
+      ? `/scores/${encodeURIComponent(scoreId)}`
+      : undefined;
   const isDirty = fingerprint(map) !== savedFingerprint;
   const shouldWarnAboutUnsavedChanges = loadState === 'ready' && isDirty;
   const shouldBlockNavigation = useCallback<BlockerFunction>(
@@ -957,9 +1026,11 @@ export function EditorPage() {
   );
 
   const save = async (): Promise<boolean> => {
-    if (isOfflineReadOnly) {
+    if (isReadOnly) {
       notify({
-        title: '오프라인 읽기 전용 상태에서는 저장할 수 없습니다.',
+        title: isOfflineReadOnly
+          ? '오프라인 읽기 전용 상태에서는 저장할 수 없습니다.'
+          : '프로젝트 리더만 템포맵을 저장할 수 있습니다.',
         tone: 'info',
       });
       return false;
@@ -989,6 +1060,7 @@ export function EditorPage() {
       } else {
         const saved = { ...draft, revision: draft.revision + 1 };
         await localDb.putTempoMap(saved);
+        localStorage.setItem('fmr.activeTempoMap', saved.id);
         setMap(saved);
         setSavedFingerprint(fingerprint(saved));
         setUndoDelete(undefined);
@@ -1097,16 +1169,21 @@ export function EditorPage() {
   const importJson = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (isOfflineReadOnly) {
+    if (isReadOnly) {
       event.target.value = '';
-      notify({ title: '오프라인 읽기 전용 상태에서는 가져올 수 없습니다.', tone: 'info' });
+      notify({ title: '읽기 전용 상태에서는 가져올 수 없습니다.', tone: 'info' });
       return;
     }
     try {
       const imported: unknown = JSON.parse(await file.text());
       assertValidTempoMap(imported);
       expandTimeline(imported);
-      editMap({ ...imported, id: imported.id || crypto.randomUUID() });
+      editMap({
+        ...imported,
+        id: map.id,
+        repertoireItemId: map.repertoireItemId,
+        revision: map.revision,
+      });
       setSelectedId(imported.sections[0]?.id ?? '');
       notify({ title: '템포맵을 가져왔습니다.', tone: 'success' });
     } catch (error) {
@@ -1129,22 +1206,26 @@ export function EditorPage() {
           type="file"
           accept="application/json,.json"
           hidden
-          disabled={isOfflineReadOnly}
+          disabled={isReadOnly}
           onChange={(event) => void importJson(event)}
         />
-        <Button onClick={() => importRef.current?.click()} disabled={isOfflineReadOnly}>
+        <Button onClick={() => importRef.current?.click()} disabled={isReadOnly}>
           <Upload size={17} aria-hidden /> 가져오기
         </Button>
         <Button onClick={exportJson}>
           <Download size={17} aria-hidden /> 내보내기
         </Button>
-        <Button
-          variant="primary"
-          onClick={() => void save()}
-          disabled={isSaving || isOfflineReadOnly}
-        >
+        <Button variant="primary" onClick={() => void save()} disabled={isSaving || isReadOnly}>
           <Save size={17} aria-hidden /> {saveLabel}
         </Button>
+        <Button onClick={() => void navigate(playbackPath)} disabled={isSaving}>
+          <Play size={17} aria-hidden /> 메트로놈에서 열기
+        </Button>
+        {scorePath ? (
+          <Button onClick={() => void navigate(scorePath)} disabled={isSaving}>
+            <BookOpen size={17} aria-hidden /> 악보로 돌아가기
+          </Button>
+        ) : null}
       </>
     ) : undefined;
 
@@ -1187,9 +1268,14 @@ export function EditorPage() {
               {cacheNotice}
             </div>
           ) : null}
+          {remoteRole === 'member' && !isOfflineReadOnly ? (
+            <Card role="status">
+              프로젝트 멤버는 템포맵을 읽고 재생할 수 있습니다. 구간 편집은 리더에게 요청하세요.
+            </Card>
+          ) : null}
           <fieldset
-            disabled={isOfflineReadOnly}
-            aria-label={isOfflineReadOnly ? '오프라인 읽기 전용 편집기' : undefined}
+            disabled={isReadOnly}
+            aria-label={isReadOnly ? '읽기 전용 편집기' : undefined}
             style={{ border: 0, margin: 0, minWidth: 0, padding: 0 }}
           >
             <Card className="map-settings" aria-label="곡 전체 설정">
@@ -1845,7 +1931,7 @@ export function EditorPage() {
               <Button
                 variant="primary"
                 onClick={() => void save()}
-                disabled={isSaving || isOfflineReadOnly}
+                disabled={isSaving || isReadOnly}
               >
                 <Save size={17} aria-hidden /> {saveLabel}
               </Button>

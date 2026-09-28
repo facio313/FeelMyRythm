@@ -57,6 +57,57 @@ def test_role_boundaries_and_immutable_tempo_map_revisions(
     )
 
 
+@pytest.mark.parametrize("optional_values", ["omitted", "null", "populated"])
+def test_tempo_map_responses_preserve_the_optional_field_contract(
+    client: TestClient,
+    ensemble: dict[str, Any],
+    optional_values: str,
+) -> None:
+    repertoire_id = ensemble["repertoire"]["id"]
+    headers = auth(ensemble["leader"]["accessToken"])
+    payload = tempo_map(repertoire_id)
+    payload["jumps"] = [
+        {"type": "repeat", "startMeasure": 1, "endMeasure": 4, "times": 2},
+        {"type": "dc", "atMeasure": 8},
+        {"type": "ds", "atMeasure": 16, "segnoMeasure": 9},
+        {"type": "coda", "toCodaMeasure": 24, "codaMeasure": 28},
+    ]
+    if optional_values != "omitted":
+        populated = optional_values == "populated"
+        payload["anacrusis"] = {"beats": 1} if populated else None
+        payload["sections"][0].update(
+            label="" if populated else None,
+            tempoChange={"type": "rit", "targetBpm": 80} if populated else None,
+            accentPattern=[2, 1, 0, 1] if populated else None,
+            subdivision=2 if populated else None,
+        )
+        payload["jumps"][0]["endings"] = [{"measures": [3, 4], "forPass": [2]}] if populated else None
+        payload["jumps"][1].update(alFine=8 if populated else None, alCoda=False if populated else None)
+        payload["jumps"][2].update(alFine=16 if populated else None, alCoda=True if populated else None)
+
+    expected = tempo_map(repertoire_id, 1)
+    expected["jumps"] = [
+        {"type": "repeat", "startMeasure": 1, "endMeasure": 4, "times": 2},
+        {"type": "dc", "atMeasure": 8},
+        {"type": "ds", "atMeasure": 16, "segnoMeasure": 9},
+        {"type": "coda", "toCodaMeasure": 24, "codaMeasure": 28},
+    ]
+    if optional_values == "populated":
+        expected = {**payload, "revision": 1}
+
+    path = f"/api/repertoire/{repertoire_id}/tempomap"
+    written = client.put(path, headers=headers, json={"expectedRevision": 0, "data": payload})
+    assert written.status_code == 200, written.text
+    latest = client.get(path, headers=headers)
+    revision = client.get(f"{path}/revisions/1", headers=headers)
+    history = client.get(f"{path}/revisions", headers=headers)
+    for response in (latest, revision, history):
+        assert response.status_code == 200, response.text
+    assert len(history.json()) == 1
+    for response in (written.json(), latest.json(), revision.json(), history.json()[0]):
+        assert response["data"] == expected
+
+
 def test_group_owner_controls_members_and_owner_cannot_be_removed(
     client: TestClient, ensemble: dict[str, Any]
 ) -> None:

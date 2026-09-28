@@ -267,6 +267,7 @@ NOTE_VALUE_QUARTER_LENGTHS: dict[NoteValue, float] = {
 
 
 class TempoMapContractModel(ApiModel):
+    # Core optional fields are omitted on the wire; nullable inputs remain compatible with old data.
     model_config = ConfigDict(strict=True)
 
 
@@ -282,15 +283,17 @@ class TempoMapTempoChange(TempoMapContractModel):
 
 class TempoMapSection(TempoMapContractModel):
     id: NonEmpty
-    label: str | None = None
+    label: str | None = Field(default=None, exclude_if=lambda value: value is None)
     start_measure: int = Field(ge=1)
     end_measure: int = Field(ge=1)
     time_signature: TempoMapTimeSignature
     bpm: float = Field(gt=0)
     beat_unit: NoteValue
-    tempo_change: TempoMapTempoChange | None = None
-    accent_pattern: list[Literal[0, 1, 2]] | None = None
-    subdivision: Literal[1, 2, 3, 4] | None = None
+    tempo_change: TempoMapTempoChange | None = Field(default=None, exclude_if=lambda value: value is None)
+    accent_pattern: list[Literal[0, 1, 2]] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    subdivision: Literal[1, 2, 3, 4] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TempoMapVoltaEnding(TempoMapContractModel):
@@ -303,22 +306,22 @@ class TempoMapRepeat(TempoMapContractModel):
     start_measure: int = Field(ge=1)
     end_measure: int = Field(ge=1)
     times: int = Field(ge=1)
-    endings: list[TempoMapVoltaEnding] | None = None
+    endings: list[TempoMapVoltaEnding] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TempoMapDaCapo(TempoMapContractModel):
     type: Literal["dc"]
     at_measure: int = Field(ge=1)
-    al_fine: int | None = Field(default=None, ge=1)
-    al_coda: bool | None = None
+    al_fine: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+    al_coda: bool | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TempoMapDalSegno(TempoMapContractModel):
     type: Literal["ds"]
     at_measure: int = Field(ge=1)
     segno_measure: int = Field(ge=1)
-    al_fine: int | None = Field(default=None, ge=1)
-    al_coda: bool | None = None
+    al_fine: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+    al_coda: bool | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TempoMapCoda(TempoMapContractModel):
@@ -347,7 +350,7 @@ class TempoMapData(TempoMapContractModel):
     repertoire_item_id: NonEmpty
     revision: int = Field(ge=0)
     total_measures: int = Field(ge=1)
-    anacrusis: TempoMapAnacrusis | None = None
+    anacrusis: TempoMapAnacrusis | None = Field(default=None, exclude_if=lambda value: value is None)
     sections: list[TempoMapSection] = Field(min_length=1)
     jumps: list[TempoMapJump]
     count_in: TempoMapCountIn
@@ -869,7 +872,7 @@ class PracticeSessionOut(ApiModel):
 class MusicXmlDraftOut(ApiModel):
     title: str | None
     total_measures: int
-    anacrusis: TempoMapAnacrusis | None = None
+    anacrusis: TempoMapAnacrusis | None = Field(default=None, exclude_if=lambda value: value is None)
     sections: list[dict[str, Any]]
     jumps: list[dict[str, Any]]
     count_in: dict[str, Any]

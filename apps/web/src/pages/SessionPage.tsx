@@ -1,8 +1,9 @@
 import { BeatVisualizer, Button, Card, Field, Modal, StatusBadge, useToast } from '@feelmyrythm/ui';
-import { assertValidTempoMap, type TempoMap } from '@feelmyrythm/core';
+import { assertValidTempoMap, expandTimeline, type TempoMap } from '@feelmyrythm/core';
 import type { components } from '@feelmyrythm/protocol';
 import {
   Bluetooth,
+  BookOpen,
   CheckCircle2,
   Copy,
   LogIn,
@@ -10,6 +11,7 @@ import {
   Radio,
   RotateCw,
   Square,
+  SlidersHorizontal,
   UsersRound,
   Wifi,
   WifiOff,
@@ -23,6 +25,8 @@ import { useMetronome } from '../lib/useMetronome';
 import { loadWorkspace } from '../lib/workspace';
 import { createDefaultTempoMap } from '../lib/defaultTempoMap';
 import { RoomClient, type RoomConnectionState, type RoomSnapshot } from '../lib/roomClient';
+import { sessionInviteUrl } from '../lib/paths';
+import { ScoresPage } from './ScoresPage';
 
 type CreatedRoom = components['schemas']['RoomOut'];
 type ServerTempoMap = components['schemas']['TempoMapOut'];
@@ -110,6 +114,9 @@ function ParticipantList({ participants }: { participants: Participant[] }) {
             <small>{participant.role}</small>
           </span>
           <div className="participant-signals">
+            <StatusBadge tone={participant.ready ? 'success' : 'neutral'}>
+              {participant.ready ? '준비 완료' : '준비 중'}
+            </StatusBadge>
             {participant.calibrated ? (
               <CheckCircle2 size={16} aria-label="출력 지연 보정됨" />
             ) : (
@@ -217,6 +224,11 @@ export function SessionPage() {
   const [roomLoadError, setRoomLoadError] = useState<string>();
   const [roomLoadAttempt, setRoomLoadAttempt] = useState(0);
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scoreOpen, setScoreOpen] = useState(false);
+  const [audioPrepared, setAudioPrepared] = useState(false);
+  const [preparingAudio, setPreparingAudio] = useState(false);
+  const preparingAudioRef = useRef(false);
   const [inviteFallbackUrl, setInviteFallbackUrl] = useState<string>();
   const [pendingCommand, setPendingCommand] = useState<PendingSessionCommand['kind']>();
   const pendingCommandRef = useRef<PendingSessionCommand | null>(null);
@@ -236,7 +248,8 @@ export function SessionPage() {
   );
   const repertoireId = selectedRepertoireId || availableRepertoire[0]?.id || '';
   const metronome = useMetronome(tempoMap);
-  const { playing, startSynchronized, stop: stopMetronome } = metronome;
+  const { playing, prepareAudio, startSynchronized, stop: stopMetronome } = metronome;
+  const timeline = useMemo(() => expandTimeline(tempoMap), [tempoMap]);
   const scheduledStartRef = useRef<number | undefined>(undefined);
   const previousLocalPlayingRef = useRef(playing);
   const hasAuthSession = Boolean(user && tokens);
@@ -406,50 +419,48 @@ export function SessionPage() {
     tokens,
   ]);
 
-  useEffect(() => {
-    if (!roomMetadata) return;
-    const reloadTempoMap = (event: Event) => {
-      const detail = (event as CustomEvent<Record<string, unknown>>).detail;
-      if (detail.repertoireId !== roomMetadata.repertoireId) return;
-      const revision = Number(detail.revision);
-      if (!Number.isInteger(revision)) return;
-      void api
-        .get<ServerTempoMap>(
-          `/repertoire/${roomMetadata.repertoireId}/tempomap/revisions/${revision}`,
-        )
-        .then((response) => {
-          const data: unknown = response.data;
-          assertValidTempoMap(data);
-          setRoomMetadata((current) =>
-            current ? { ...current, tempoMapRevision: response.revision } : current,
-          );
-          setTempoMap({
-            ...data,
-            repertoireItemId: roomMetadata.repertoireId,
-            revision: response.revision,
-          });
-        })
-        .catch((error: unknown) => {
-          notify({
-            title: '최신 템포맵을 불러오지 못했습니다.',
-            description: error instanceof Error ? error.message : String(error),
-            tone: 'danger',
-          });
-        });
-    };
-    window.addEventListener('fmr:tempomap-updated', reloadTempoMap);
-    return () => window.removeEventListener('fmr:tempomap-updated', reloadTempoMap);
-  }, [api, notify, roomMetadata]);
-
   const me = snapshot.roster.find((participant) => participant.userId === user?.id);
   const canControl = me?.role === 'owner' || me?.role === 'leader';
-  const controlsEnabled = snapshot.connectionState === 'joined' && !pendingCommand;
+  const controlsEnabled =
+    snapshot.connectionState === 'joined' && !pendingCommand && !preparingAudio;
   const connection = describeRoomConnection(snapshot.connectionState);
   const bluetoothDetectionStatus = readBluetoothDetectionStatus(localStorage);
   const transport = snapshot.transport;
 
-  const sendStart = useCallback(() => {
+  const prepareLocalAudio = useCallback(async () => {
+    if (preparingAudioRef.current) return false;
+    preparingAudioRef.current = true;
+    setPreparingAudio(true);
+    try {
+      await prepareAudio();
+      setAudioPrepared(true);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return false;
+      notify({
+        title: '소리를 켜지 못했습니다.',
+        description: '기기의 오디오 출력을 확인한 뒤 다시 눌러 주세요.',
+        tone: 'danger',
+      });
+      return false;
+    } finally {
+      preparingAudioRef.current = false;
+      setPreparingAudio(false);
+    }
+  }, [notify, prepareAudio]);
+
+  const sendStart = useCallback(async () => {
     if (pendingCommandRef.current || snapshot.connectionState !== 'joined') return;
+    if (
+      !timeline.entries.some(
+        (entry) => entry.measureNumber === anchorMeasure && entry.pass === anchorPass,
+      )
+    ) {
+      setSettingsOpen(true);
+      notify({ title: '곡에 있는 시작 마디와 반복 차수를 선택해 주세요.', tone: 'danger' });
+      return;
+    }
+    if (!(await prepareLocalAudio())) return;
     const sent = roomClientRef.current?.start(
       { measure: anchorMeasure, pass: anchorPass },
       withCountIn,
@@ -459,8 +470,11 @@ export function SessionPage() {
     anchorMeasure,
     anchorPass,
     beginPendingCommand,
+    notify,
+    prepareLocalAudio,
     snapshot.connectionState,
     snapshot.transport,
+    timeline,
     withCountIn,
   ]);
 
@@ -470,12 +484,13 @@ export function SessionPage() {
     if (sent) beginPendingCommand({ kind: 'transport', baseline: snapshot.transport });
   }, [beginPendingCommand, snapshot.connectionState, snapshot.transport]);
 
-  const toggleReady = useCallback(() => {
+  const toggleReady = useCallback(async () => {
     if (pendingCommandRef.current || snapshot.connectionState !== 'joined') return;
     const targetReady = !me?.ready;
+    if (targetReady && !(await prepareLocalAudio())) return;
     const sent = roomClientRef.current?.setReady(targetReady);
     if (sent) beginPendingCommand({ kind: 'ready', targetReady });
-  }, [beginPendingCommand, me?.ready, snapshot.connectionState]);
+  }, [beginPendingCommand, me?.ready, prepareLocalAudio, snapshot.connectionState]);
 
   useEffect(() => {
     if (!window.matchMedia) return;
@@ -509,10 +524,12 @@ export function SessionPage() {
 
   useEffect(() => {
     if (
+      audioPrepared &&
       (transport?.status === 'armed' || transport?.status === 'playing') &&
       transport.serverStartTime &&
       transport.anchor &&
-      snapshot.offsetMs &&
+      Number.isFinite(snapshot.rttMs) &&
+      Number.isFinite(snapshot.offsetMs) &&
       transport.revision === tempoMap.revision &&
       scheduledStartRef.current !== transport.serverStartTime
     ) {
@@ -524,6 +541,8 @@ export function SessionPage() {
         serverOffsetMs: snapshot.offsetMs,
         withCountIn: transport.countIn,
       }).catch((error: unknown) => {
+        scheduledStartRef.current = undefined;
+        setAudioPrepared(false);
         notify({
           title: '동기 재생을 예약하지 못했습니다.',
           description: error instanceof Error ? error.message : String(error),
@@ -536,9 +555,11 @@ export function SessionPage() {
       scheduledStartRef.current = undefined;
     }
   }, [
+    audioPrepared,
     notify,
     playing,
     snapshot.offsetMs,
+    snapshot.rttMs,
     startSynchronized,
     stopMetronome,
     tempoMap.revision,
@@ -565,7 +586,7 @@ export function SessionPage() {
   }
 
   const copyInvite = async () => {
-    const inviteUrl = window.location.href;
+    const inviteUrl = sessionInviteUrl(roomId!);
     try {
       if (!navigator.clipboard?.writeText) throw new Error('클립보드 API를 사용할 수 없습니다.');
       await navigator.clipboard.writeText(inviteUrl);
@@ -693,16 +714,56 @@ export function SessionPage() {
     );
   }
 
+  const currentMeasure = playing
+    ? metronome.position.measureNumber
+    : (transport?.anchor?.measure ?? anchorMeasure);
+  const currentSection =
+    tempoMap.sections.find(
+      (section) => currentMeasure >= section.startMeasure && currentMeasure <= section.endMeasure,
+    ) ?? tempoMap.sections[0];
+  const transportActive = transport?.status === 'playing' || transport?.status === 'armed';
+  const readyCount = snapshot.roster.filter((participant) => participant.ready).length;
+  const previewEntry = timeline.entries.find((entry) => entry.measureNumber === currentMeasure);
+  const previewBeatCount = Math.max(
+    1,
+    ...(previewEntry?.beats.map((beat) => beat.beatIndex + 1) ?? [4]),
+  );
+  const sessionFrameSource = playing
+    ? metronome.frameSource
+    : () => ({
+        beatIndex: 0,
+        beatCount: previewBeatCount,
+        accent: 2 as const,
+        progress: 0,
+        measureNumber: currentMeasure,
+      });
+
   return (
-    <div className="page session-page">
+    <div className={`page session-page${scoreOpen ? ' session-page--score' : ''}`}>
       <PageHeader
-        eyebrow={`Room · ${roomId}`}
         title="앙상블 세션"
-        description="박을 스트리밍하지 않고, 합의한 시작 시각부터 각 기기가 같은 타임라인을 재생합니다."
         actions={
-          <Button onClick={() => void copyInvite()}>
-            <Copy size={17} aria-hidden /> 초대 링크
-          </Button>
+          <>
+            <Button
+              aria-pressed={scoreOpen}
+              disabled={!roomMetadata}
+              onClick={() => setScoreOpen((open) => !open)}
+            >
+              <BookOpen size={17} aria-hidden /> {scoreOpen ? '박자 크게' : '악보 보기'}
+            </Button>
+            {canControl ? (
+              <Button
+                aria-label="재생 설정"
+                title="재생 설정"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <SlidersHorizontal size={18} aria-hidden />
+              </Button>
+            ) : null}
+            <Button aria-label="초대 링크" title="초대 링크" onClick={() => void copyInvite()}>
+              <Copy size={17} aria-hidden />
+            </Button>
+          </>
         }
       />
       {inviteFallbackUrl ? (
@@ -761,111 +822,85 @@ export function SessionPage() {
           방 정보와 고정된 템포맵 revision을 불러오는 중…
         </div>
       ) : null}
-      {bluetoothDetectionStatus === 'unknown' ? (
-        <div className="bluetooth-warning" role="status">
-          <Bluetooth aria-hidden />
-          <div>
-            <strong>무선 오디오 상태 미확인</strong>
-            <span>
-              출력 보정에서 무선 오디오를 확인해 주세요. 확인 전에는 동기 오차가 커질 수 있습니다.
-            </span>
-          </div>
-        </div>
-      ) : null}
-
       <div className="session-layout">
         <Card className="session-stage">
-          <div className="session-status" aria-live="polite">
+          <div className="session-status">
             <StatusBadge tone={connection.tone}>
               {snapshot.connectionState === 'joined' ? (
-                <Wifi size={13} />
-              ) : snapshot.connectionState === 'connecting' ||
-                snapshot.connectionState === 'authenticating' ||
-                snapshot.connectionState === 'reconnecting' ? (
-                <RotateCw className="spin" size={13} />
+                <Wifi size={13} aria-hidden />
               ) : (
-                <WifiOff size={13} />
+                <WifiOff size={13} aria-hidden />
               )}
               {connection.label}
             </StatusBadge>
-            <span className="fmr-tabular">
-              RTT {Number.isFinite(snapshot.rttMs) ? snapshot.rttMs.toFixed(1) : '—'}ms · offset{' '}
-              {snapshot.offsetMs ? (snapshot.offsetMs - performance.timeOrigin).toFixed(1) : '—'}ms
+            <span role="status">
+              준비 {readyCount}/{snapshot.roster.length}명
             </span>
           </div>
           <BeatVisualizer
             className="session-visualizer"
-            running={metronome.playing}
-            frameSource={metronome.frameSource}
+            running={playing}
+            frameSource={sessionFrameSource}
+            label="앙상블 동기 박자"
           />
           <div className="session-transport-state">
             <strong>
-              {playing || transport?.status === 'playing'
-                ? '연주 중'
-                : transport?.status === 'armed'
-                  ? '예비박 대기'
-                  : '대기'}
+              {metronome.position.isWaiting && playing
+                ? '시작 대기'
+                : metronome.position.isCountIn && playing
+                  ? '예비박'
+                  : playing
+                    ? '연주 중'
+                    : transportActive
+                      ? '합류 대기'
+                      : '대기'}
             </strong>
-            <span>
-              {metronome.playing
-                ? metronome.position.measureNumber
-                : (transport?.anchor?.measure ?? anchorMeasure)}
-              마디 · pass {transport?.anchor?.pass ?? anchorPass} · revision{' '}
-              {transport?.revision ?? 1}
+            <span className="fmr-tabular">
+              {currentMeasure}마디 · {currentSection?.bpm} BPM · {currentSection?.timeSignature.num}
+              /{currentSection?.timeSignature.denom}
             </span>
           </div>
+          {transportActive && !audioPrepared ? (
+            <Button
+              className="session-audio-resume"
+              variant="primary"
+              disabled={preparingAudio}
+              onClick={() => void prepareLocalAudio()}
+            >
+              <Play size={18} aria-hidden /> {preparingAudio ? '소리 준비 중…' : '소리 켜고 합류'}
+            </Button>
+          ) : null}
           {canControl ? (
-            <div className="session-controls">
-              <Field
-                label="시작 마디"
-                type="number"
-                min={1}
-                value={anchorMeasure}
-                onChange={(event) => setAnchorMeasure(Number(event.target.value))}
-                disabled={!controlsEnabled}
-              />
-              <Field
-                label="Pass"
-                type="number"
-                min={1}
-                value={anchorPass}
-                onChange={(event) => setAnchorPass(Number(event.target.value))}
-                disabled={!controlsEnabled}
-              />
-              <label className="session-count-in-toggle">
-                <input
-                  type="checkbox"
-                  checked={withCountIn}
-                  onChange={(event) => setWithCountIn(event.target.checked)}
-                  disabled={!controlsEnabled}
-                />
-                예비박
-              </label>
-              {transport?.status === 'playing' || transport?.status === 'armed' ? (
-                <Button
-                  className="session-controls__desktop-transport"
-                  variant="primary"
-                  disabled={!controlsEnabled}
-                  onClick={sendStop}
-                >
-                  <Square size={18} fill="currentColor" /> 정지
-                </Button>
+            <Button
+              className="session-controls__desktop-transport"
+              variant="primary"
+              disabled={!controlsEnabled}
+              onClick={transportActive ? sendStop : () => void sendStart()}
+            >
+              {transportActive ? (
+                <>
+                  <Square size={18} fill="currentColor" aria-hidden /> 정지
+                </>
               ) : (
-                <Button
-                  className="session-controls__desktop-transport"
-                  variant="primary"
-                  disabled={!controlsEnabled}
-                  onClick={sendStart}
-                >
-                  <Play size={18} fill="currentColor" /> 3초 뒤 시작
-                </Button>
+                <>
+                  <Play size={18} fill="currentColor" aria-hidden /> 3초 뒤 시작
+                </>
               )}
-            </div>
-          ) : (
-            <p className="member-readonly">리더가 시작하면 같은 예비박부터 자동으로 재생됩니다.</p>
-          )}
+            </Button>
+          ) : null}
+          <SessionMobileControls
+            participantCount={snapshot.roster.length}
+            rosterOpen={rosterOpen}
+            ready={Boolean(me?.ready)}
+            canControl={canControl}
+            controlsEnabled={controlsEnabled}
+            transportActive={transportActive}
+            onOpenRoster={() => setRosterOpen(true)}
+            onToggleReady={() => void toggleReady()}
+            onStart={() => void sendStart()}
+            onStop={sendStop}
+          />
         </Card>
-
         <Card className="roster-panel roster-panel--desktop">
           <header>
             <h2>참가자</h2>
@@ -873,7 +908,7 @@ export function SessionPage() {
           </header>
           <ParticipantList participants={snapshot.roster} />
           <Button
-            onClick={toggleReady}
+            onClick={() => void toggleReady()}
             variant={me?.ready ? 'secondary' : 'primary'}
             disabled={!controlsEnabled}
           >
@@ -881,19 +916,75 @@ export function SessionPage() {
           </Button>
         </Card>
       </div>
-
-      <SessionMobileControls
-        participantCount={snapshot.roster.length}
-        rosterOpen={rosterOpen}
-        ready={Boolean(me?.ready)}
-        canControl={canControl}
-        controlsEnabled={controlsEnabled}
-        transportActive={transport?.status === 'playing' || transport?.status === 'armed'}
-        onOpenRoster={() => setRosterOpen(true)}
-        onToggleReady={toggleReady}
-        onStart={sendStart}
-        onStop={sendStop}
-      />
+      {scoreOpen && roomMetadata ? (
+        <ScoresPage
+          repertoireItemId={roomMetadata.repertoireId}
+          synchronizedPlayback={{
+            tempoMap,
+            playing,
+            position: metronome.position,
+            frameSource: metronome.frameSource,
+          }}
+        />
+      ) : null}
+      <details className="session-details">
+        <summary>
+          연결 정보{bluetoothDetectionStatus === 'unknown' ? ' · 무선 오디오 미확인' : ''}
+        </summary>
+        <p>방 코드: {roomId}</p>
+        <p>
+          고정 템포맵 revision {roomMetadata?.tempoMapRevision ?? '—'} · RTT{' '}
+          {Number.isFinite(snapshot.rttMs) ? snapshot.rttMs.toFixed(1) : '—'}ms
+        </p>
+        <p>
+          준비 버튼으로 이 기기의 소리를 켜세요. 재생 중 합류하면 다음 마디부터 따라갑니다. 템포맵
+          수정은 새 세션부터 적용됩니다.
+        </p>
+        {bluetoothDetectionStatus === 'unknown' ? (
+          <p>
+            <Bluetooth size={16} aria-hidden /> 무선 오디오 상태가 확인되지 않았습니다. 출력
+            보정에서 확인해 주세요. 확인 전에는 동기 오차가 커질 수 있습니다.
+          </p>
+        ) : null}
+      </details>
+      <Modal
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        title="재생 설정"
+        description="모든 참가자가 시작할 마디와 반복 차수, 예비박을 정합니다."
+      >
+        <div className="session-settings">
+          <Field
+            label="시작 마디"
+            type="number"
+            min={1}
+            max={tempoMap.totalMeasures}
+            step={1}
+            value={anchorMeasure}
+            onChange={(event) => setAnchorMeasure(Number(event.target.value))}
+            disabled={!controlsEnabled}
+          />
+          <Field
+            label="반복 차수"
+            type="number"
+            min={1}
+            step={1}
+            value={anchorPass}
+            onChange={(event) => setAnchorPass(Number(event.target.value))}
+            disabled={!controlsEnabled}
+          />
+          <label className="session-count-in-toggle">
+            <input
+              type="checkbox"
+              checked={withCountIn}
+              onChange={(event) => setWithCountIn(event.target.checked)}
+              disabled={!controlsEnabled}
+            />
+            예비박
+          </label>
+          <Button onClick={() => setSettingsOpen(false)}>설정 완료</Button>
+        </div>
+      </Modal>
 
       <Modal
         open={rosterOpen}
@@ -904,7 +995,7 @@ export function SessionPage() {
         <div className="session-roster-sheet">
           <ParticipantList participants={snapshot.roster} />
           <Button
-            onClick={toggleReady}
+            onClick={() => void toggleReady()}
             variant={me?.ready ? 'secondary' : 'primary'}
             disabled={!controlsEnabled}
           >

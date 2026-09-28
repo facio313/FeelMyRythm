@@ -3,6 +3,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
+  --color-control-border: var(--control-border);
   --color-foreground: var(--text);
   --color-secondary: var(--text-secondary);
   --color-muted: var(--text-muted);
@@ -24,9 +25,10 @@
   --surface: #14161b;
   --surface-raised: #1c1f26;
   --border: #2a2e37;
+  --control-border: #626a78;
   --text: #f4f1e8;
   --text-secondary: #a8adb8;
-  --text-muted: #6c7280;
+  --text-muted: #858b98;
   --accent: #d4a853;
   --accent-hover: #e2bc6c;
   --beat: #f4f1e8;
@@ -50,11 +52,12 @@
   --surface: #ffffff;
   --surface-raised: #f3efe6;
   --border: #d9d3c7;
+  --control-border: #8c867a;
   --text: #1c1a15;
   --text-secondary: #5d5a53;
-  --text-muted: #7d786e;
-  --accent: #a97e2c;
-  --accent-hover: #8f681f;
+  --text-muted: #706b62;
+  --accent: #916c24;
+  --accent-hover: #7d5917;
   --beat: #1c1a15;
   --beat-sub: #7d786e;
   --count-in: #347b61;

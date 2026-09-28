@@ -61,7 +61,7 @@ p {
 .app-shell {
   --topbar-content-height: 64px;
   --topbar-height: calc(var(--topbar-content-height) + env(safe-area-inset-top));
-  --mobile-nav-height: calc(max(64px, 4rem) + env(safe-area-inset-bottom));
+  --mobile-nav-height: calc(clamp(64px, 4rem, 96px) + env(safe-area-inset-bottom));
   height: 100vh;
   height: 100dvh;
   min-height: 100vh;
@@ -1684,7 +1684,7 @@ button.temporary-operations-trigger {
 .annotation-pen {
   fill: none;
   stroke: #b3261e;
-  stroke-width: 0.004;
+  stroke-width: 3px;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
@@ -1957,44 +1957,231 @@ button.temporary-operations-trigger {
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 16px;
 }
-.session-stage {
-  min-height: 620px;
+.session-page {
   display: grid;
-  grid-template-rows: auto minmax(260px, 1fr) auto auto;
+  gap: 16px;
+}
+.session-page > .page-header {
+  margin-bottom: 0;
+  align-items: center;
+}
+.session-page .page-header__actions {
+  flex-wrap: nowrap;
+  width: auto;
+}
+.session-page .page-header__actions > * {
+  flex: 0 0 auto;
+  min-width: var(--fmr-touch-target, 44px);
+}
+.session-stage {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
 }
 .session-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
   color: var(--text-secondary);
   font-size: 0.8125rem;
 }
 .session-visualizer {
-  min-height: 300px;
+  height: clamp(144px, 27dvh, 280px);
+  min-height: 0;
+}
+.session-visualizer canvas {
+  height: 100%;
+  min-height: 0;
 }
 .session-transport-state {
-  display: grid;
-  justify-items: center;
-  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 .session-transport-state strong {
-  font-size: 2rem;
-  font-weight: 300;
+  font-size: 1.5rem;
+  font-weight: 500;
 }
 .session-transport-state span {
   color: var(--text-secondary);
 }
-.session-controls {
+.session-settings {
   display: grid;
-  grid-template-columns: 1fr 100px auto;
-  align-items: end;
+  gap: 16px;
+}
+.session-details {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+.session-details summary {
+  cursor: pointer;
+  min-height: var(--fmr-touch-target, 44px);
+  padding-block: 12px;
+}
+.session-page--score .session-visualizer {
+  height: 80px;
+}
+.session-page--score .session-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.session-page--score .roster-panel--desktop,
+.session-page--score .session-controls__desktop-transport {
+  display: none;
+}
+.session-page--score .session-mobile-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.session-page--score .session-mobile-bar--leader {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (min-width: 520px) {
+  .session-page--score .session-stage {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 0.85fr);
+    padding-block: 12px;
+    gap: 6px 16px;
+  }
+  .session-page--score .session-visualizer {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    align-self: center;
+  }
+  .session-page--score .session-status,
+  .session-page--score .session-transport-state,
+  .session-page--score .session-mobile-bar,
+  .session-page--score .session-audio-resume {
+    grid-column: 2;
+  }
+}
+.score-page--embedded {
+  padding: 0;
+  min-width: 0;
+}
+.score-embedded-header,
+.score-playback__status,
+.score-playback__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
-.member-readonly {
+.score-embedded-header h2 {
   margin: 0;
-  color: var(--text-secondary);
-  text-align: center;
+}
+.score-playback {
+  display: grid;
+  gap: 8px;
+}
+.score-page:has(> .score-playback) > .page-header {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.score-page:has(> .score-playback) > .page-header .eyebrow,
+.score-page:has(> .score-playback) > .page-header p {
+  display: none;
+}
+.score-page:has(> .score-playback) .page-header__actions {
+  width: auto;
+}
+.session-page--score > .session-layout,
+.score-page:not(.score-page--embedded) > .score-playback[data-playing='true'][data-mode='view'] {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.score-playback__visualizer {
+  height: 112px;
+}
+.score-playback__visualizer canvas {
+  height: 100%;
+  min-height: 0;
+}
+.score-tempo-link summary {
+  cursor: pointer;
+  min-height: var(--fmr-touch-target, 44px);
+  padding-block: 12px;
+}
+.score-tempo-link select {
+  max-width: 100%;
+}
+.score-playback[data-playing='true'] .score-tempo-link {
+  display: none;
+}
+@media (min-width: 600px) {
+  .score-playback {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr);
+    padding: 12px 16px;
+  }
+  .score-playback__status,
+  .score-playback__visualizer {
+    grid-column: 1;
+  }
+  .score-playback__visualizer {
+    height: 88px;
+  }
+  .score-playback__actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .score-tempo-link {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+@media (max-width: 599px) {
+  .score-playback {
+    gap: 4px;
+    padding: 12px;
+  }
+  .score-playback__status {
+    gap: 4px 8px;
+    font-size: 0.875rem;
+  }
+  .score-playback__visualizer {
+    height: 72px;
+  }
+  .score-playback__actions {
+    gap: 4px;
+  }
+}
+@media (min-width: 520px) and (max-height: 480px) {
+  .score-playback {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr);
+    padding: 8px 12px;
+  }
+  .score-playback__status,
+  .score-playback__visualizer {
+    grid-column: 1;
+  }
+  .score-playback__visualizer {
+    height: 64px;
+  }
+  .score-playback__actions {
+    grid-column: 2;
+    grid-row: 1;
+    gap: 4px;
+  }
+  .score-tempo-link {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+.score-page--embedded .score-toolbar {
+  position: static;
+  width: auto;
+  margin: 0;
+  transform: none;
 }
 .roster-panel {
   align-self: start;
@@ -2067,12 +2254,13 @@ button.temporary-operations-trigger {
 .metronome-page {
   min-height: calc(100dvh - 128px);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
   gap: clamp(8px, 1.2dvh, 16px);
   border-radius: 24px;
 }
-.metronome-page:has(> .metronome-map-status) {
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+.metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+  grid-template-rows: auto auto auto auto auto;
 }
 .metronome-heading {
   display: flex;
@@ -2105,17 +2293,17 @@ button.temporary-operations-trigger {
   background: var(--surface);
 }
 .metronome-stage {
-  min-height: clamp(360px, 50dvh, 760px);
+  min-height: clamp(360px, 46dvh, 640px);
   display: grid;
-  grid-template-rows: minmax(180px, 1fr) auto auto;
+  grid-template-rows: auto auto auto;
+  align-content: center;
   row-gap: clamp(4px, 1dvh, 12px);
   place-items: center;
 }
 .metronome-visualizer {
   width: min(100%, 820px);
-  height: 100%;
-  max-height: clamp(220px, 38dvh, 520px);
-  align-self: end;
+  height: clamp(180px, 28dvh, 340px);
+  align-self: center;
 }
 .metronome-visualizer .fmr-beat-canvas {
   height: 100%;
@@ -2138,14 +2326,14 @@ button.temporary-operations-trigger {
 .bpm-display > button > span {
   display: block;
   font-size: clamp(6rem, 15vw, 8rem);
-  font-weight: 200;
+  font-weight: 400;
   line-height: 1;
   letter-spacing: -0.06em;
 }
 .bpm-display > div {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   color: var(--text-secondary);
 }
 .bpm-display > div strong {
@@ -2167,11 +2355,13 @@ button.temporary-operations-trigger {
 .metronome-controls {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto minmax(260px, 1fr);
+  grid-template-areas: 'steppers play quick';
   align-items: center;
   gap: clamp(12px, 2vw, 24px);
   padding: 8px 0;
 }
 .bpm-steppers {
+  grid-area: steppers;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -2179,6 +2369,13 @@ button.temporary-operations-trigger {
 }
 .tap-button {
   min-width: 112px;
+  white-space: nowrap;
+}
+
+@media (max-width: 419px) {
+  .tap-button__optional-label {
+    display: none;
+  }
 }
 .bpm-stepper__amount {
   font-variant-numeric: tabular-nums;
@@ -2187,6 +2384,7 @@ button.temporary-operations-trigger {
   letter-spacing: -0.02em;
 }
 .play-button {
+  grid-area: play;
   position: relative;
   width: 76px;
   height: 76px;
@@ -2222,6 +2420,7 @@ button.temporary-operations-trigger {
   border-left: 21px solid currentColor;
 }
 .quick-settings {
+  grid-area: quick;
   display: flex;
   align-items: end;
   gap: 8px;
@@ -2235,11 +2434,18 @@ button.temporary-operations-trigger {
 .quick-settings input {
   width: 72px;
   min-height: 44px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: 10px;
   padding: 4px 8px;
   color: var(--text);
   background: var(--surface);
+}
+.count-in-button__state {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.count-in-button__compact-label {
+  display: none;
 }
 .metronome-settings {
   display: grid;
@@ -2254,12 +2460,34 @@ button.temporary-operations-trigger {
   align-items: center;
   gap: 20px;
 }
+.bpm-entry-form {
+  display: grid;
+  gap: 20px;
+}
+.bpm-entry-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
 .metronome-settings-dialog .meter-select {
   grid-column: 1 / -1;
+}
+.metronome-settings-dialog .start-measure-field {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+}
+.metronome-settings-dialog .start-measure-field input {
+  width: 100%;
 }
 .accent-editor {
   display: grid;
   gap: 8px;
+}
+.accent-editor__hint {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.3;
 }
 .accent-editor > div {
   display: flex;
@@ -2268,7 +2496,7 @@ button.temporary-operations-trigger {
 .accent-dot {
   width: 44px;
   height: 44px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: 50%;
   color: var(--text-muted);
   background: var(--surface-raised);
@@ -2319,28 +2547,70 @@ button.temporary-operations-trigger {
     transparent 64%
   );
 }
-.metronome-page--fullscreen {
+.metronome-page.metronome-page--fullscreen {
   position: fixed;
   z-index: 100;
   inset: 0;
   min-height: 100vh;
+  border-radius: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
   padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
     max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background: var(--bg);
   touch-action: manipulation;
 }
-.metronome-page--fullscreen[data-beat-tone='downbeat'] {
+.metronome-page.metronome-page--fullscreen:has(> .metronome-map-status) {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+.metronome-page--fullscreen[data-playing='true'][data-beat-tone='downbeat'] {
   background: color-mix(in srgb, var(--accent) 13%, var(--bg));
 }
-.metronome-page--fullscreen[data-beat-tone='count-in'] {
+.metronome-page--fullscreen[data-playing='true'][data-beat-tone='count-in'] {
   background: color-mix(in srgb, var(--count-in) 15%, var(--bg));
 }
-.metronome-page--fullscreen .metronome-settings,
-.metronome-page--fullscreen .bpm-steppers,
-.metronome-page--fullscreen .quick-settings,
+.metronome-page--fullscreen .metronome-heading__context,
+.metronome-page--fullscreen .metronome-heading__editor,
 .metronome-page--fullscreen .brand {
   opacity: 0;
   pointer-events: none;
+}
+.metronome-page--fullscreen .metronome-settings,
+.metronome-page--fullscreen .bpm-steppers,
+.metronome-page--fullscreen .quick-settings {
+  display: none;
+}
+.metronome-page--fullscreen .metronome-heading {
+  grid-column: 1;
+  grid-row: 1;
+}
+.metronome-page--fullscreen .metronome-map-status {
+  grid-column: 1;
+  grid-row: 2;
+}
+.metronome-page--fullscreen .metronome-stage {
+  grid-column: 1;
+  grid-row: 2;
+}
+.metronome-page--fullscreen:has(> .metronome-map-status) .metronome-stage {
+  grid-row: 3;
+}
+.metronome-page--fullscreen .metronome-controls {
+  grid-column: 1;
+  grid-row: 3;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'play';
+  justify-items: center;
+}
+.metronome-page--fullscreen:has(> .metronome-map-status) .metronome-controls {
+  grid-row: 4;
+}
+.metronome-page--fullscreen .play-button {
+  justify-self: center;
+}
+.metronome-page--fullscreen .bpm-display > button > small {
+  display: none;
 }
 
 .tuner-card {
@@ -2529,7 +2799,7 @@ button.temporary-operations-trigger {
     gap: 2px;
     color: var(--text-muted);
     padding: 4px 1px;
-    font-size: clamp(0.5625rem, 1.6vw, 0.6875rem);
+    font-size: clamp(0.6875rem, 2.8vw, 0.75rem);
     line-height: 1.15;
     text-align: center;
   }
@@ -2587,15 +2857,12 @@ button.temporary-operations-trigger {
   .score-toolbar__group > span {
     grid-column: 1 / -1;
   }
-  .session-stage {
-    min-height: calc(100vh - 160px);
-  }
   .roster-panel {
     order: -1;
   }
   .metronome-page {
     min-height: calc(100svh - 132px);
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto auto auto;
   }
   .metronome-heading__editor {
     display: none;
@@ -2611,8 +2878,7 @@ button.temporary-operations-trigger {
     justify-content: flex-end;
   }
   .bpm-steppers .fmr-button:nth-child(2),
-  .bpm-steppers .fmr-button:nth-child(4),
-  .bpm-steppers .tap-button {
+  .bpm-steppers .fmr-button:nth-child(4) {
     display: none;
   }
   .quick-settings .fmr-button {
@@ -2854,6 +3120,7 @@ input[type='range']::-webkit-slider-thumb {
 
   .metronome-visualizer {
     width: min(100%, 1100px);
+    height: clamp(220px, 28dvh, 380px);
   }
 }
 
@@ -2886,6 +3153,7 @@ input[type='range']::-webkit-slider-thumb {
 
   .score-toolbar {
     position: fixed;
+    top: auto;
     z-index: 45;
     right: max(8px, env(safe-area-inset-right));
     bottom: calc(var(--mobile-nav-height) + max(8px, env(safe-area-inset-bottom)));
@@ -2909,7 +3177,18 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .session-page {
-    padding-bottom: 84px;
+    padding-bottom: 24px;
+    gap: 12px;
+  }
+
+  .session-page > .page-header {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .session-page h1 {
+    font-size: clamp(1.125rem, 3.4vw, 1.5rem);
   }
 
   .session-controls__desktop-transport {
@@ -2917,25 +3196,10 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .session-mobile-bar {
-    position: fixed;
-    z-index: 55;
-    right: max(8px, env(safe-area-inset-right));
-    bottom: calc(var(--mobile-nav-height) + 8px);
-    left: max(8px, env(safe-area-inset-left));
-    min-height: 60px;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 7px;
-    background: rgb(20 22 27 / 96%);
-    box-shadow: 0 -10px 32px rgb(0 0 0 / 32%);
-    backdrop-filter: blur(18px);
-  }
-
-  [data-theme='light'] .session-mobile-bar {
-    background: rgb(250 248 243 / 96%);
+    min-width: 0;
   }
 
   .session-mobile-bar--leader {
@@ -2957,7 +3221,13 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .session-stage {
-    min-height: min(620px, calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - 32px));
+    min-height: 0;
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .session-visualizer {
+    height: clamp(96px, 23dvh, 240px);
   }
 
   .session-status,
@@ -3038,6 +3308,8 @@ input[type='range']::-webkit-slider-thumb {
 @media (max-width: 599px) {
   .app-content {
     padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    scroll-padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
 
   .page-header {
@@ -3179,7 +3451,6 @@ input[type='range']::-webkit-slider-thumb {
 
   .session-stage {
     min-height: auto;
-    grid-template-rows: auto minmax(220px, 42dvh) auto auto;
   }
 
   .session-controls {
@@ -3218,15 +3489,19 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .metronome-stage {
-    height: clamp(196px, 34dvh, 300px);
-    min-height: 0;
-    grid-template-rows: minmax(70px, 1fr) auto auto;
+    height: auto;
+    min-height: clamp(210px, 37dvh, 324px);
+    grid-template-rows: minmax(84px, 1fr) auto auto;
+  }
+
+  .metronome-visualizer {
+    height: clamp(84px, 15dvh, 148px);
   }
 
   .metronome-visualizer .fmr-beat-canvas,
   .metronome-visualizer.fmr-beat-canvas {
     height: 100%;
-    min-height: 70px;
+    min-height: 84px;
   }
 
   .bpm-display > button {
@@ -3281,7 +3556,7 @@ input[type='range']::-webkit-slider-thumb {
 @media (max-width: 359px) {
   .app-shell {
     --topbar-content-height: 56px;
-    --mobile-nav-height: calc(max(60px, 3.75rem) + env(safe-area-inset-bottom));
+    --mobile-nav-height: calc(clamp(60px, 3.75rem, 88px) + env(safe-area-inset-bottom));
   }
 
   .topbar {
@@ -3293,7 +3568,7 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .app-content {
-    padding: 12px max(8px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    padding: 12px max(8px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
       max(8px, env(safe-area-inset-left));
   }
 
@@ -3309,14 +3584,11 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .bottom-nav__link {
-    font-size: 0.5625rem;
+    font-size: 0.6875rem;
   }
 
   .session-mobile-bar {
-    right: max(4px, env(safe-area-inset-right));
-    left: max(4px, env(safe-area-inset-left));
     gap: 4px;
-    padding: 5px;
   }
 
   .session-mobile-bar__button {
@@ -3480,7 +3752,7 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .metronome-visualizer {
-    max-height: clamp(120px, 20dvh, 164px);
+    height: clamp(120px, 20dvh, 164px);
   }
 
   .metronome-visualizer .fmr-beat-canvas,
@@ -3538,6 +3810,10 @@ input[type='range']::-webkit-slider-thumb {
     display: inline-flex;
   }
 
+  .bpm-display > button > small {
+    display: none;
+  }
+
   .metronome-heading__fullscreen {
     width: var(--fmr-touch-target, 44px);
     min-width: var(--fmr-touch-target, 44px);
@@ -3554,10 +3830,11 @@ input[type='range']::-webkit-slider-thumb {
   }
 }
 
-@media (min-width: 600px) and (max-height: 539px) and (orientation: landscape) {
+@media (min-width: 840px) and (max-height: 640px) {
   .metronome-page {
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 34vw);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 34vw);
+    grid-template-rows: auto auto;
+    align-content: start;
     gap: 8px 16px;
   }
 
@@ -3566,19 +3843,376 @@ input[type='range']::-webkit-slider-thumb {
     margin: 0;
   }
 
-  .metronome-page:has(> .metronome-map-status) .metronome-map-status {
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+    grid-template-rows: auto auto auto;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-map-status {
+    grid-column: 1 / -1;
     grid-row: 2;
   }
 
-  .metronome-page:has(> .metronome-map-status) .metronome-stage,
-  .metronome-page:has(> .metronome-map-status) .metronome-controls {
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-controls {
     grid-row: 3;
   }
 
   .metronome-stage {
     grid-column: 1;
     grid-row: 2;
-    grid-template-rows: minmax(88px, 1fr) auto auto;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+  }
+
+  .metronome-controls {
+    grid-column: 2;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'play'
+      'steppers'
+      'quick';
+    justify-items: center;
+    align-content: center;
+    gap: 8px;
+    padding: 0;
+  }
+
+  .bpm-steppers {
+    justify-content: center;
+  }
+
+  .play-button {
+    justify-self: center;
+  }
+
+  .quick-settings label {
+    display: none;
+  }
+
+  .count-in-button > svg,
+  .count-in-button__label {
+    display: none;
+  }
+
+  .count-in-button__compact-label {
+    display: inline;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 900px),
+  (min-width: 600px) and (max-width: 839px) and (max-height: 820px),
+  (min-width: 840px) and (max-height: 640px) {
+  .metronome-heading .eyebrow,
+  .metronome-settings {
+    display: none;
+  }
+
+  .metronome-heading__short-settings {
+    display: inline-flex;
+  }
+
+  .metronome-page--fullscreen .metronome-heading__short-settings {
+    display: none;
+  }
+
+  .count-in-button > svg,
+  .count-in-button__label {
+    display: none;
+  }
+
+  .count-in-button__compact-label {
+    display: inline;
+  }
+
+  .metronome-map-status {
+    min-height: var(--fmr-touch-target, 44px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 0.75rem;
+    line-height: 1.25;
+  }
+
+  .metronome-map-status > span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .metronome-map-status .fmr-button {
+    min-height: var(--fmr-touch-target, 44px);
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 900px) {
+  .metronome-controls {
+    grid-template-columns: 64px minmax(188px, 1fr) minmax(44px, 1fr);
+    grid-template-areas: 'play steppers quick';
+    gap: 8px;
+  }
+
+  .bpm-steppers {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 44px minmax(92px, 1fr) 44px;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .bpm-steppers .fmr-button:nth-child(2),
+  .bpm-steppers .fmr-button:nth-child(4) {
+    display: none;
+  }
+
+  .bpm-steppers .tap-button {
+    min-width: 0;
+    display: inline-flex;
+  }
+
+  .quick-settings {
+    justify-content: start;
+    flex-wrap: nowrap;
+  }
+
+  .quick-settings label {
+    display: none;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 700px) {
+  .metronome-page {
+    gap: 4px;
+  }
+
+  .metronome-stage {
+    grid-template-rows: clamp(84px, 16dvh, 112px) auto auto;
+    row-gap: 0;
+  }
+
+  .metronome-visualizer,
+  .metronome-visualizer .fmr-beat-canvas,
+  .metronome-visualizer.fmr-beat-canvas {
+    height: clamp(84px, 16dvh, 112px);
+    min-height: 84px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage {
+    grid-template-rows: clamp(64px, 12dvh, 84px) auto auto;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer
+    .fmr-beat-canvas,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer.fmr-beat-canvas {
+    height: clamp(64px, 12dvh, 84px);
+    min-height: 64px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .bpm-display
+    > button {
+    min-height: var(--fmr-touch-target, 44px);
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .bpm-display
+    > button
+    > span {
+    font-size: clamp(2.75rem, 14vw, 3.5rem);
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .performance-context
+    span {
+    display: none;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .play-button {
+    width: 56px;
+    height: 56px;
+  }
+
+  .bpm-display > button {
+    min-height: 48px;
+  }
+
+  .bpm-display > button > span {
+    font-size: clamp(3rem, 16vw, 4rem);
+  }
+
+  .performance-context strong {
+    font-size: 1.125rem;
+  }
+
+  .performance-context span {
+    font-size: 0.75rem;
+  }
+
+  .metronome-controls {
+    grid-template-columns: 64px minmax(188px, 1fr) minmax(44px, 1fr);
+    grid-template-areas: 'play steppers quick';
+    gap: 8px;
+  }
+
+  .bpm-steppers {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 44px minmax(92px, 1fr) 44px;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .bpm-steppers .fmr-button:nth-child(2),
+  .bpm-steppers .fmr-button:nth-child(4) {
+    display: none;
+  }
+
+  .bpm-steppers .tap-button {
+    min-width: 0;
+    display: inline-flex;
+  }
+
+  .quick-settings {
+    justify-content: start;
+    flex-wrap: nowrap;
+  }
+
+  .quick-settings label {
+    display: none;
+  }
+}
+
+@media (max-width: 359px) and (max-height: 900px) {
+  .metronome-controls {
+    grid-template-columns: 56px 132px minmax(44px, 1fr);
+    gap: 4px;
+  }
+
+  .bpm-steppers {
+    grid-template-columns: repeat(3, 44px);
+    gap: 0;
+  }
+
+  .bpm-steppers .tap-button {
+    gap: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .bpm-steppers .tap-button[data-feedback] {
+    font-size: 0.6875rem;
+    line-height: 1;
+  }
+
+  .bpm-steppers .tap-button[data-feedback] > svg {
+    display: none;
+  }
+
+  .play-button {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+@media (max-width: 839px) and (any-pointer: coarse) {
+  .bpm-steppers .fmr-button--icon {
+    width: var(--fmr-touch-target, 48px);
+    min-width: var(--fmr-touch-target, 48px);
+  }
+
+  .bpm-steppers .tap-button,
+  .quick-settings .fmr-button {
+    min-width: var(--fmr-touch-target, 48px);
+  }
+}
+
+@media (min-width: 360px) and (max-width: 599px) and (max-height: 900px) and (any-pointer: coarse) {
+  .metronome-controls {
+    grid-template-columns: 64px minmax(196px, 1fr) minmax(48px, 1fr);
+  }
+
+  .bpm-steppers {
+    grid-template-columns: 48px minmax(92px, 1fr) 48px;
+  }
+}
+
+@media (max-width: 359px) and (max-height: 900px) and (any-pointer: coarse) {
+  .metronome-controls {
+    grid-template-columns: 56px 144px minmax(48px, 1fr);
+  }
+
+  .bpm-steppers {
+    grid-template-columns: repeat(3, 48px);
+  }
+}
+
+@media (max-width: 279px) and (max-height: 900px) and (any-pointer: coarse) {
+  .metronome-controls {
+    grid-template-columns: 48px 144px 48px;
+    gap: 0;
+  }
+
+  .play-button,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .play-button {
+    width: 48px;
+    height: 48px;
+  }
+
+  .count-in-button {
+    flex-direction: column;
+    gap: 0;
+    padding-inline: 2px;
+    font-size: 0.6875rem;
+    line-height: 1;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 839px) {
+  .metronome-page {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 34vw);
+    grid-template-rows: auto auto;
+    align-content: start;
+    gap: 8px 16px;
+  }
+
+  .metronome-heading {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-map-status {
+    grid-row: 2;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+    grid-template-rows: auto auto auto;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-controls {
+    grid-row: 3;
+  }
+
+  .metronome-stage {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+  }
+
+  .metronome-visualizer {
+    height: clamp(88px, 24dvh, 116px);
   }
 
   .metronome-visualizer .fmr-beat-canvas,
@@ -3611,6 +4245,7 @@ input[type='range']::-webkit-slider-thumb {
       'play'
       'steppers'
       'quick';
+    justify-items: center;
     align-content: center;
     gap: 8px;
     padding: 0;
@@ -3626,6 +4261,10 @@ input[type='range']::-webkit-slider-thumb {
   }
 
   .quick-settings label {
+    display: none;
+  }
+
+  .tap-button__optional-label {
     display: none;
   }
 
@@ -3714,18 +4353,267 @@ input[type='range']::-webkit-slider-thumb {
   }
 }
 
-@media (min-width: 760px) and (max-height: 539px) and (orientation: landscape) {
-  .session-layout {
-    grid-template-columns: minmax(0, 1fr) 260px;
+@media (min-width: 600px) and (max-width: 839px) and (min-height: 821px) {
+  .metronome-page {
+    grid-template-rows: auto auto auto;
   }
 
-  .session-stage {
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .metronome-stage {
+    min-height: clamp(378px, 46dvh, 544px);
+  }
+
+  .metronome-visualizer {
+    height: clamp(148px, 20dvh, 220px);
+  }
+
+  .metronome-settings {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: grid;
+    margin-top: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-settings {
+    grid-row: 4;
+  }
+
+  .metronome-heading__short-settings {
+    display: none;
+  }
+
+  .quick-settings label {
+    display: grid;
+  }
+
+  .count-in-button > svg,
+  .count-in-button__label {
+    display: initial;
+  }
+}
+
+@media (max-height: 420px) {
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage {
     min-height: 0;
-    grid-template-rows: auto minmax(144px, 1fr) auto auto;
+    grid-template-rows: 80px auto auto;
+    align-content: start;
+    row-gap: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer
+    .fmr-beat-canvas,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer.fmr-beat-canvas {
+    height: 80px;
+    min-height: 80px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .bpm-display
+    > button {
+    min-height: 48px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .bpm-display
+    > button
+    > span {
+    font-size: clamp(3rem, 14dvh, 3.5rem);
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .performance-context {
+    margin-top: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .performance-context
+    strong {
+    font-size: 1.125rem;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .performance-context
+    span {
+    display: none;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-controls {
+    align-content: start;
+    gap: 4px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .play-button {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 420px) {
+  .app-content {
+    padding-top: 8px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+    gap: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage {
+    grid-template-rows: 64px auto auto;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer
+    .fmr-beat-canvas,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer.fmr-beat-canvas {
+    height: 64px;
+    min-height: 64px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .bpm-display > div {
+    display: none;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .play-button {
+    width: var(--fmr-touch-target, 48px);
+    height: var(--fmr-touch-target, 48px);
+  }
+}
+
+@media (max-height: 640px) {
+  .metronome-page.metronome-page--fullscreen {
+    gap: 4px;
+    padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  .metronome-page.metronome-page--fullscreen .metronome-stage {
+    min-height: 0;
+    grid-template-rows: minmax(64px, 1fr) auto auto;
+    row-gap: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .metronome-visualizer,
+  .metronome-page.metronome-page--fullscreen .metronome-visualizer .fmr-beat-canvas,
+  .metronome-page.metronome-page--fullscreen .metronome-visualizer.fmr-beat-canvas {
+    height: clamp(64px, 21dvh, 144px);
+    min-height: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .bpm-display > button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .bpm-display > button > span {
+    font-size: clamp(2.75rem, 14dvh, 5rem);
+  }
+
+  .metronome-page.metronome-page--fullscreen .bpm-display {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .metronome-page.metronome-page--fullscreen .bpm-display > div {
+    gap: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .bpm-display > div > span {
+    display: none;
+  }
+
+  .metronome-page.metronome-page--fullscreen .performance-context {
+    margin-top: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .performance-context strong {
+    font-size: clamp(1.125rem, 4dvh, 1.5rem);
+  }
+
+  .metronome-page.metronome-page--fullscreen .performance-context span {
+    display: none;
+  }
+
+  .metronome-page.metronome-page--fullscreen .metronome-controls {
+    gap: 0;
+    padding: 0;
+  }
+
+  .metronome-page.metronome-page--fullscreen .play-button {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+@media (max-height: 320px) {
+  .metronome-page.metronome-page--fullscreen {
+    grid-template-rows: auto auto auto;
+    align-content: start;
+    overflow-y: auto;
+  }
+
+  .metronome-page.metronome-page--fullscreen:has(> .metronome-map-status) {
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .metronome-page.metronome-page--fullscreen .metronome-stage {
+    min-height: 152px;
+  }
+}
+
+@media (max-height: 620px) {
+  .session-page {
+    gap: 8px;
   }
 
   .session-visualizer {
-    min-height: 144px;
+    height: 96px;
+  }
+
+  .session-transport-state strong {
+    font-size: 1.125rem;
+  }
+}
+
+@media (min-width: 520px) and (max-height: 480px) {
+  .session-stage {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 0.8fr);
+    grid-template-rows: auto auto auto;
+    column-gap: 12px;
+    padding-block: 8px;
+  }
+
+  .session-visualizer {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    height: 112px;
+    align-self: center;
+  }
+
+  .session-status,
+  .session-transport-state,
+  .session-mobile-bar,
+  .session-controls__desktop-transport,
+  .session-audio-resume {
+    grid-column: 2;
+  }
+
+  .session-transport-state {
+    font-size: 0.8125rem;
   }
 }
 
@@ -3837,6 +4725,456 @@ input[type='range']::-webkit-slider-thumb {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.metronome-number {
+  display: none;
+}
+
+.metronome-screen-progress {
+  --fmr-progress-color: #f47a24;
+  --fmr-progress-opacity: 0.3;
+  position: fixed;
+  inset: 0 0 var(--mobile-nav-height);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.metronome-screen-progress .fmr-beat-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+@media (min-width: 600px) and (max-width: 839px) and (orientation: landscape) {
+  .metronome-screen-progress {
+    inset: 0 0 0 var(--rail-width);
+  }
+}
+
+.metronome-settings .count-in-button,
+.metronome-settings-dialog .count-in-button {
+  justify-self: start;
+  align-self: end;
+  min-height: var(--fmr-touch-target, 44px);
+  flex-direction: row;
+  gap: 8px;
+  padding-inline: 12px;
+  font-size: 0.875rem;
+}
+
+.meter-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.meter-options .fmr-button {
+  min-height: var(--fmr-touch-target, 44px);
+  font-size: 1.125rem;
+}
+
+.metronome-settings .count-in-button__label,
+.metronome-settings-dialog .count-in-button__label {
+  display: inline;
+}
+
+.mobile-more__operations {
+  position: relative;
+}
+
+.mobile-more__operations .temporary-operations-trigger {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  justify-content: flex-start;
+  padding-inline: 12px;
+  border: 0;
+  border-radius: inherit;
+}
+
+.mobile-more__operations-label {
+  position: relative;
+  margin-left: 32px;
+  pointer-events: none;
+}
+
+@media (max-width: 839px) {
+  .app-shell {
+    --topbar-height: 0px;
+  }
+
+  .app-shell:has(.metronome-page--screen-progress) {
+    isolation: isolate;
+  }
+
+  .metronome-page.metronome-page--screen-progress {
+    background: none;
+  }
+
+  .topbar {
+    display: none;
+  }
+
+  .app-content {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-stage,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(56px, 1fr) auto auto;
+    align-content: stretch;
+    align-self: stretch;
+    row-gap: 8px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-heading__context {
+    display: none;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-heading {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .metronome-heading__short-settings {
+    min-width: var(--fmr-touch-target, 44px);
+    min-height: var(--fmr-touch-target, 44px);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .metronome-heading__settings-label {
+    display: none;
+  }
+
+  .metronome-heading .performance-context {
+    min-width: 0;
+    margin: 0;
+    justify-items: start;
+    line-height: 1.3;
+  }
+
+  .metronome-heading .performance-context strong {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .metronome-heading .performance-context span {
+    font-size: 0.75rem;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-number {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: clamp(128px, 38dvh, 480px);
+    min-height: 56px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .metronome-number .fmr-beat-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .bpm-display--mobile {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: baseline;
+    column-gap: 12px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .bpm-display--mobile > .bpm-display__value {
+    grid-column: 2;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen)
+    .bpm-display--mobile
+    > .bpm-display__value
+    > span {
+    font-size: clamp(2.5rem, 12vw, 4rem);
+    line-height: 1;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .bpm-display--mobile > .bpm-display__meter {
+    grid-column: 3;
+    justify-self: start;
+    min-width: var(--fmr-touch-target, 44px);
+    min-height: var(--fmr-touch-target, 44px);
+    padding: 0;
+    text-align: left;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen)
+    .bpm-display--mobile
+    > .bpm-display__meter
+    > span {
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-visualizer,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer {
+    height: clamp(64px, 10dvh, 92px);
+    min-height: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-visualizer .fmr-beat-canvas,
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-visualizer
+    .fmr-beat-canvas {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-controls {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'mobile'
+      'quick';
+    gap: 12px 8px;
+    padding: 4px 0;
+  }
+
+  .metronome-mobile-controls {
+    grid-area: mobile;
+    justify-self: stretch;
+    display: grid;
+    grid-template-columns: minmax(48px, 1fr) 48px minmax(48px, 64px) 48px minmax(48px, 1fr);
+    align-items: center;
+    column-gap: clamp(0px, calc((100% - 256px) / 4), 8px);
+  }
+
+  .metronome-mobile-controls > .fmr-button {
+    min-width: 48px;
+    min-height: 48px;
+    padding-inline: 4px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .metronome-mobile-controls > :first-child {
+    grid-column: 2;
+  }
+
+  .metronome-mobile-controls > :nth-child(3) {
+    grid-column: 4;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-mobile-controls .play-button {
+    grid-area: auto;
+    grid-column: 3;
+    justify-self: center;
+    width: 100%;
+    max-width: 64px;
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .metronome-mobile-controls > .tap-button {
+    grid-column: 5;
+    justify-self: end;
+    width: 48px;
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    font-weight: 400;
+  }
+
+  .tap-tempo-panel {
+    grid-area: mobile;
+    position: relative;
+    min-width: 0;
+  }
+
+  .tap-tempo-pad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 128px;
+    padding: 48px 12px 24px;
+    border: 1px solid var(--control-border);
+    border-radius: 16px;
+    color: var(--text);
+    background: var(--surface);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .tap-tempo-pad > span {
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .tap-tempo-pad > small {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+  }
+
+  .tap-tempo-pad:active {
+    border-color: var(--accent);
+    background: var(--surface-raised);
+  }
+
+  .tap-tempo-panel__close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 0 16px 0 16px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .quick-settings[hidden] {
+    display: none;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .quick-settings {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 900px),
+  (min-width: 600px) and (max-width: 839px) and (max-height: 820px) {
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-controls {
+    grid-template-areas: 'mobile';
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .quick-settings {
+    display: none;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 839px) and (max-height: 700px) {
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-number {
+    height: clamp(80px, calc(100dvh - 200px), 240px);
+  }
+}
+
+@media (max-width: 599px) {
+  .metronome-page:not(.metronome-page--fullscreen) {
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(min-content, 1fr) auto auto;
+    align-content: stretch;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) {
+    grid-template-rows: auto auto minmax(min-content, 1fr) auto auto;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-number {
+    height: 100%;
+  }
+}
+
+@media (max-width: 599px) and (max-height: 420px) {
+  .app-content {
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen) .metronome-controls {
+    gap: 4px;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status) .metronome-stage {
+    row-gap: 0;
+  }
+
+  .metronome-page:not(.metronome-page--fullscreen):has(> .metronome-map-status)
+    .metronome-controls {
+    padding: 0;
+  }
+}
+
+@media (max-width: 279px) {
+  .metronome-mobile-controls {
+    margin-inline: -4px;
+  }
+}
+
+@media (max-width: 839px) {
+  .app-shell:has(.metronome-page--focused) > .bottom-nav,
+  .app-shell:has(.metronome-page--focused) > .sidebar {
+    display: none;
+  }
+
+  .metronome-page.metronome-page--focused {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    height: 100dvh;
+    min-height: 0;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+      max(24px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 12px;
+    border-radius: 0;
+    overflow: auto;
+    background: var(--bg);
+  }
+
+  .metronome-page--focused .metronome-screen-progress {
+    inset: 0;
+  }
+
+  .metronome-page--focused .metronome-heading,
+  .metronome-page--focused .metronome-map-status,
+  .metronome-page--focused .metronome-settings {
+    display: none;
+  }
+
+  .metronome-page.metronome-page--focused .metronome-stage {
+    grid-area: auto;
+    grid-template-rows: minmax(56px, 1fr) auto auto;
+    min-height: min-content;
+  }
+
+  .metronome-page.metronome-page--focused .metronome-number {
+    height: 100%;
+  }
+
+  .metronome-page.metronome-page--focused .metronome-controls {
+    grid-area: auto;
+    grid-template-areas: none;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .metronome-page.metronome-page--focused .play-button {
+    grid-area: auto;
+    width: 64px;
+    height: 64px;
+    margin: 0;
   }
 }
 

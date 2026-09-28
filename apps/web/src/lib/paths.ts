@@ -8,6 +8,13 @@ const serverOrigin = IS_MOBILE_BUILD ? __FMR_MOBILE_SERVER_ORIGIN__ : '';
 export const API_BASE = `${serverOrigin}${APP_BASE}/api`;
 const WS_PATH = `${APP_BASE}/ws`;
 
+export function sessionInviteUrl(roomId: string): string {
+  return new URL(
+    `${APP_BASE}/session/${encodeURIComponent(roomId)}`,
+    serverOrigin || window.location.origin,
+  ).toString();
+}
+
 export function websocketUrl(path: string): string {
   const origin = serverOrigin || window.location.origin;
   const url = new URL(`${WS_PATH}${path.startsWith('/') ? path : `/${path}`}`, origin);

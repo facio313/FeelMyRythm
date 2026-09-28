@@ -18,6 +18,8 @@ pnpm sync
 - Account deletion proof: `https://bonifacio.work/feelmyrythm/settings#accountDeleteToken=<token>`
 - Custom deletion proof: `feelmyrythm://settings#accountDeleteToken=<token>`
 
+세션 화면에서 복사하는 링크는 WebView의 로컬 origin 대신 `__FMR_MOBILE_SERVER_ORIGIN__`과 공개 `/feelmyrythm/session/` 경로로 만든다. 브라우저에서는 현재 origin을 보존한다. 클립보드를 사용할 수 없으면 선택 가능한 공개 URL을 표시한다.
+
 iOS Universal Links가 검증되려면 `https://bonifacio.work/.well-known/apple-app-site-association`에 실제 Apple Team ID와 bundle ID `work.bonifacio.feelmyrythm`을 사용한 연결 정보가 있어야 한다. 경로 범위는 `/feelmyrythm/session/*`, 정확한 `/feelmyrythm/login`, 정확한 `/feelmyrythm/settings`로 제한한다. `/settings/*` 같은 확장 범위는 허용하지 않는다.
 
 Android App Links가 검증되려면 `https://bonifacio.work/.well-known/assetlinks.json`에 package name `work.bonifacio.feelmyrythm`과 실제 release signing certificate SHA-256 fingerprint를 게시해야 한다. `assetlinks.json`은 그 앱 identity만 위임하고, manifest는 방 초대와 정확한 `/feelmyrythm/login`·`/feelmyrythm/settings`만 허용한다. 로컬 keystore와 인증서 fingerprint는 저장소에 커밋하지 않는다.
@@ -32,7 +34,8 @@ adb shell am start -W -a android.intent.action.VIEW -d 'https://bonifacio.work/f
 
 ## Audio and wake behavior
 
-- iOS `NativeAudioEngine`은 사용자 재생 제스처에서만 `AVAudioSession.Category.playback`과 `AVAudioEngine`을 활성화해 무음 스위치와 독립적으로 재생하고, `UIBackgroundModes/audio`에서 native queue를 계속 소비한다.
+- iOS `NativeAudioEngine`은 사용자의 재생·세션 준비·합류 제스처에서 `AVAudioSession.Category.playback`과 `AVAudioEngine`을 활성화해 무음 스위치와 독립적으로 재생하고, `UIBackgroundModes/audio`에서 native queue를 계속 소비한다.
+- 세션의 `prepareAudio()`는 엔진만 준비하고 클릭 예약·시각화·Keep Awake는 시작하지 않는다. 준비 완료 뒤 READY/START를 보내며 진행 중인 방의 미준비 사용자는 `소리 켜고 합류`를 눌러 다음 마디 경계에 합류한다.
 - iOS와 Android 모두 튜너용 마이크 권한을 선언한다. 권한은 WebView가 실제로 마이크를 요청할 때 사용자에게 표시된다.
 - Android `NativeAudioEngine`은 Gradle Prefab이 CMake에 제공하는 Oboe 1.10.0 low-latency float stream으로 전체 타임라인을 재생한다. `mediaPlayback` foreground service는 audio focus, MediaStyle 정지 action, 자연 종료를 관리하며 하드웨어 볼륨 키는 music stream을 제어한다.
 - `@capacitor-community/keep-awake`는 재생 중 화면 꺼짐을 막고 정지 시 다시 허용한다. Android 구현은 `FLAG_KEEP_SCREEN_ON`을 사용하므로 별도 `WAKE_LOCK` 권한이 필요하지 않다.

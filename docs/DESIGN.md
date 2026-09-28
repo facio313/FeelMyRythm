@@ -135,9 +135,10 @@ graph TB
 1. 리더가 곡을 선택하고 연습 세션(방)을 연다. 멤버들이 방에 입장.
 2. 모든 클라이언트가 WS로 시계 동기(§6.2)를 수행해 서버 시계와의 오프셋을 추정.
 3. 모든 클라이언트가 같은 revision의 템포맵을 내려받아 **동일한 PerformanceTimeline을 로컬에서 전개**.
-4. 리더가 "26마디부터 시작" 누름 → 서버가 `START{measure:26, serverStartTime: now+3s}` 브로드캐스트.
-5. 각 클라이언트는 serverStartTime을 자기 오디오 클럭 시각으로 변환하고, 예비박부터 정확히 스케줄.
-6. 이후 네트워크가 끊겨도 재생은 로컬에서 결정론적으로 지속된다.
+4. 각 참가자는 `준비` 클릭의 사용자 제스처에서 오디오 엔진을 준비하고 READY를 보낸다. 이 단계는 클릭 예약·시각화·Keep Awake를 시작하지 않는다.
+5. 리더가 "26마디부터 시작" 누름 → 리더의 오디오 준비를 기다린 뒤 CMD_START를 보내고 서버가 `TRANSPORT{measure:26, serverStartTime: now+3s}` 브로드캐스트.
+6. 준비된 클라이언트는 serverStartTime을 자기 오디오 클럭 시각으로 변환하고 예비박부터 스케줄한다. 진행 중인 방에 오디오 준비 없이 들어온 사용자는 `소리 켜고 합류` 클릭 뒤 다음 마디 경계에 합류한다.
+7. 이후 네트워크가 끊겨도 재생은 로컬에서 결정론적으로 지속된다.
 
 ### 3.4 인증·계정 보안 흐름
 
@@ -154,6 +155,8 @@ graph TB
 - 웹 bootstrap은 React App을 import·mount하기 전 Cache Storage의 구형 `fmr-api`를 fail-closed로 purge한다. 그런 다음 `sw.js?fmr-safety=v1`을 `updateViaCache: none`으로 등록해 제어권 이관과 구형 same-scope worker의 `redundant`를 확인하고, 전환 중 마지막 legacy fetch가 캐시를 다시 만든 경우까지 마지막 purge로 제거한다. 캐시 상태·삭제·제어권을 증명하지 못하면 보안 시작 화면에 머물고 재시도만 허용한다.
 - Workbox는 `/feelmyrythm/api/*`를 navigation fallback과 runtime cache에서 제외하고, nginx API proxy는 `Cache-Control: no-store`를 항상 부여한다. 오프라인 데이터는 Service Worker 응답 캐시가 아니라 계정별 IndexedDB snapshot만 사용한다.
 - AppShell은 단일 본문 scroller의 좌표를 history entry key별로 보존해 POP에서만 복원하고 새 탐색은 맨 위에서 시작한다. 탐색 후 새 `h1`에 focus하며 browser POP은 모바일 더보기 overlay를 닫는다.
+- 폭 839px 이하 AppShell은 topbar를 제거하고 Bonifacio 복귀·테마·설정·계정/로그인·managed SSO 운영 안내를 하단 `더보기`에 모은다. 840px 이상은 topbar를 유지한다. 모바일 본문은 상단 safe area를 보존하며 하단 내비게이션은 별도 grid row를 사용한다. Bonifacio 복귀 링크는 Capacitor에서는 숨긴다.
+- 세션의 `악보 보기`는 route를 바꾸지 않고 같은 재생 controller 아래 악보를 표시한다. 악보는 방에 고정된 TempoMap과 position·frame source를 받아 현재 마디를 추적하며 별도 오디오 엔진을 만들지 않는다. 파트 전환과 악보 탐색은 세션 transport를 변경하지 않는다.
 - workspace의 `/groups`는 전체 shape을 결정하는 권위 root 요청이다. 그 후 members·projects·repertoire leaf는 최대 6개만 동시 실행하고 `allSettled`로 건강한 그룹·곡을 유지하며, 실패한 영역은 위치와 재시도를 별도로 노출한다.
 - PWA manifest는 `/feelmyrythm/` `id`·scope·start URL, `ko-KR`·category·standalone metadata, 별도의 `any`/`maskable` PNG와 180px Apple touch icon을 제공한다. theme 변경은 페이지 `data-theme`과 `theme-color`, Capacitor SystemBars를 함께 갱신하며 storage·native 실패는 웹 UI를 중단하지 않는다.
 
@@ -208,6 +211,8 @@ interface CountInPolicy {
 }
 ```
 
+메트로놈의 박자표 설정을 바꿀 때는 새 박수에 맞는 `accentPattern`을 함께 반영한다. 기존 강세는 앞 박부터 보존하고, 초과한 박은 제거하며 새로 늘어난 박은 보통 강세(`1`)로 채운다.
+
 ### 4.3 PerformanceTimeline: 전개(컴파일) 결과
 
 반복 구조가 있는 템포맵은 그대로 재생할 수 없으므로, **연주 순서대로 펼친 선형 타임라인**으로 컴파일한다. 이것이 재생·동기화·악보 하이라이트의 단일 기준이다.
@@ -242,10 +247,12 @@ buildCountIn(map: TempoMap, from: seekPoint): Beat[]                            
 
 ### 4.4 편집기 UX 요건 (요약)
 
+- 템포맵의 값이 없는 optional 필드는 canonical JSON에서 생략한다. 서버는 입력의 생략/`null`을 받아도 저장 응답·최신본·revision 목록·특정 revision·MusicXML 초안에 `null`을 되살리지 않으며, 유효한 `false`·`0`·빈 문자열은 보존한다.
 - 구간 리스트 편집(표 형태) + 마디 눈금 타임라인 뷰(구간을 색 블록으로 시각화) 병행.
 - 표 모드는 스크린 리더에 행·열 관계를 유지하는 native `table`, column header, row header를 사용한다.
 - 탭 템포(화면 두드려 BPM 측정), 구간 분할("이 마디에서 나누기"), 검증(구간 빈틈/겹침, 반복 무한루프 검출은 `expandTimeline`이 담당).
-- 악보가 연결된 경우(§7) 마디 클릭 → 해당 마디에서 구간 나누기.
+- 원격 Editor는 access role을 먼저 확인하고 member의 기존 맵은 읽기 전용으로 연다. 최신 맵 404와 빈 revision 목록이 함께 확인된 새 곡에서만 owner/leader에게 첫 revision 0 초안을 제공한다.
+- 로컬 편집은 `/editor/:mapId?source=local`로 원격 repertoire와 구분한다. 로그인 중에도 같은 IndexedDB 맵을 유지하고 JSON 가져오기는 현재 맵의 식별자·revision을 보존한다. 저장 후 `메트로놈에서 열기`는 정확한 로컬 map ID 또는 원격 repertoire를 전달하며, 악보의 `score` 문맥은 돌아가기 경로로 보존한다.
 - 로그인한 사용자의 원격 템포맵은 network failure에서만 현재 `userId`의 schema v3 snapshot으로 연다. 이때 Editor 전체를 읽기 전용으로 잠궈 편집·가져오기·저장을 막고, 연결 재확인과 JSON 내보내기만 제공한다.
 
 ---
@@ -277,12 +284,15 @@ JS 타이머(`setTimeout`)는 수십 ms 지터가 있으므로 소리 발생 자
 [Web Worker 타이머, 25ms 주기]
   └─ tick(): 지금부터 120ms 안에 도래할 박을 타임라인에서 찾아
              audioCtx 절대시각으로 AudioBufferSourceNode.start(t) 예약
-             → 예약된 박을 beatQueue에 push (시각화용)
+             → 예약된 박을 beatQueue에 push (예약된 박 metadata 추적)
 
 [메인 스레드 rAF 루프]
-  └─ audioTime = engine.now() 를 읽어 locate() → 현재 박 위치 렌더
+  └─ audioTime = engine.now() 를 읽어 transport anchor 기준 타임라인 시각 계산
+     → locate()와 결정론적 박 경계로 현재 위치·progress 렌더
+     → 예비박의 progress는 재생 전에 만든 예비박 계획의 경계로 계산
 ```
 
+- 표시 progress는 120ms 선예약 큐에 다음 박이 들어오는 시점에 의존하지 않는다. 오디오 클럭과 전개된 타임라인 또는 예비박 계획으로 박 구간 전체의 진행률을 계산하며 오디오 예약 시각과 WS 동기화 계약은 유지한다.
 - 타이머를 **Web Worker**에서 돌리는 이유: 백그라운드 탭에서 메인 스레드 타이머가 1s+로 스로틀되는 것을 회피.
 - 클릭음은 실시간 합성(oscillator) 대신 **미리 디코드한 짧은 샘플 버퍼** 사용 (다운비트/일반박/분할박/예비박 4종, 음높이·음색 구분).
 - 템포·구간 변경이 재생 중 일어나면: 다음 마디 경계에서 새 타임라인으로 전환 (경계 정렬 재계산).
@@ -290,7 +300,8 @@ JS 타이머(`setTimeout`)는 수십 ms 지터가 있으므로 소리 발생 자
 ### 5.3 예비박 (Count-in)
 
 - `seekPoint` 시각 앞에 시작 구간의 박자·템포로 1–2마디의 예비박을 삽입.
-- 소리: 본 박과 구별되는 음색(높은 우드블록 등). 시각: 카운트다운 숫자(§9).
+- 소리: 본 박과 구별되는 음색(높은 우드블록 등). 시각: 일반 박 원을 생략한 단독 카운트다운 숫자, 기본 bar 사용처의 진행 track(§9). 기존 beats variant의 숫자는 canvas 높이에 맞춰 24–160px로 제한하고 reduced motion에서도 고정 track은 유지한다. 모바일의 큰 박 숫자는 실제 glyph로 계산한 fit 글자 크기의 80%를 쓰며 panel 크기·배치를 유지하고 모바일 일반 화면의 진행은 메뉴를 제외한 앱 영역의 가장 낮은 배경 레이어에서 좌→우 채움으로 표시한다.
+- 예약 대기와 예비박의 화면 문맥은 최종 anchor의 마디·pass·구간·박 수를 유지한다. optional `isWaiting`은 첫 오디오 전의 대기를 나타내며 이때 박 강조·접근성 announcement·반응 배경을 억제한다. 표시 상태는 오디오 예약 시각에 영향을 주지 않는다.
 - 동기 세션에서는 `serverStartTime`이 **예비박의 첫 박** 시각이 되도록 정의한다 (전원 같은 예비박을 들음).
 
 ---
@@ -362,6 +373,9 @@ sequenceDiagram
         M->>S: PING×10 → offset 추정
         L->>S: PING×10 → offset 추정
     end
+    Note over L,M: 사용자 준비 클릭 → prepareAudio, 아직 재생하지 않음
+    M->>S: READY
+    Note over L: 시작 클릭 → prepareAudio 완료
     L->>S: CMD_START {measure: 26}
     S->>L: TRANSPORT {serverStartTime = now+3s, anchor 26}
     S->>M: TRANSPORT {동일}
@@ -413,13 +427,14 @@ interface MeasureMap {
 ### 7.2 마디 기반 내비게이션
 
 - 곡(RepertoireItem)에 속한 모든 악보(총보·파트보들)는 **마디 번호라는 공통 좌표계**를 공유한다.
-- 악보에서 마디 탭 → 메트로놈 seek / "여기부터 시작" 동기 명령.
+- 독립 악보 화면은 선택 마디에서 시작하는 자체 재생을 제공하고, 재생 카드에 현재 마디·BPM·박자·박을 표시한다. 로컬 PDF·이미지에는 저장된 템포맵을 연결하거나 `구간 편집`에서 첫 맵을 만들어 연결할 수 있다.
+- 세션 안의 악보는 방의 고정 revision과 외부 transport만 사용한다. 마디 탭은 악보 탐색만 바꾸고 시작·정지는 세션 리더 조작으로 수행한다. 템포맵을 편집한 뒤 변경본으로 합주하려면 새 방을 만든다.
 - 재생 중: 현재 `TimelineMeasure.measureNumber` 에 해당하는 region 하이라이트 + 자동 페이지 넘김.
 - 총보↔파트보 전환: 현재 마디 번호 유지한 채 다른 Score의 같은 마디로 점프 (`measureNumberOffset` 적용).
 - 총보·파트보 선택기는 `tablist`/`tab`/`tabpanel`로 연결하고 선택 tab만 tab stop으로 두며, 화살표와 Home/End로 파트를 순환한다.
 - 마디 region과 page anchor의 `x/y/w/h`는 viewport나 카드가 아니라 실제 score page surface를 기준으로 0–1 정규화한다. zoom은 표시 크기만 바꾸며 저장 좌표를 바꾸지 않는다.
 - 재생 중 사용자가 이전/다음 페이지를 직접 선택하면 auto-follow를 일시 중지한다. 현재 재생 마디로 이동하며 다시 추적하는 명시적 resume CTA를 계속 제공한다.
-- compact viewport의 필기·매핑 도구는 safe area를 고려한 fixed bottom overlay로 띄워 score surface를 reflow하지 않는다.
+- 독립 악보의 재생 바는 재생 중이며 보기 모드일 때만 본문 상단 sticky를 적용하고 정지·매핑·필기 중에는 일반 흐름에 둔다. 폭 600px 이상은 2열로 압축하고 재생 중 템포맵 연결 상세는 숨긴다. 세션 악보의 박·재생 조작은 상단 sticky를 유지하며 520px 이상 무대는 2열로 배치한다. 독립 악보 화면의 compact 필기·매핑 도구는 `top: auto`로 상단 위치를 해제한 safe-area 하단 overlay로 띄운다. 세션에 포함된 악보 도구는 일반 문서 흐름에 두어 세션 조작·하단 내비게이션과 겹치지 않게 한다.
 
 ### 7.3 필기·주석 레이어
 
@@ -472,14 +487,23 @@ erDiagram
 | 설계 결정 | 근거 |
 |---|---|
 | 연속 진자(펜듈럼) 대신 **이산 플래시 + 채움(fill) 예측 큐** | 움직이는 진자의 위상 판독은 시각 추적 부하가 큼. 반면 "다음 박까지 차오르는" 채움 애니메이션은 지휘자의 예비 동작처럼 **박 도래 시점을 예측**하게 해줌 (앙상블 진입에 필수) |
-| 다운비트는 **색 + 크기 + 위치** 삼중 부호화 | 전주의적(preattentive) 속성 중복 부호화. 색맹 사용자를 위해 색 단독 의존 금지 |
-| 마디 내 박 위치를 고정 슬롯(4/4면 4칸)으로 표시 | 공간적 위치는 순간 판독이 가장 빠른 채널. "지금 몇 박인지"를 세지 않고 봄 |
-| 전체 화면 플래시 모드 (보면대 거치용) | 주변시(peripheral vision)는 형태 인식은 약하지만 **깜빡임·움직임에 민감** → 악보를 보면서도 곁눈으로 박 인지 가능 |
-| 예비박은 큰 숫자 카운트다운(4·3·2·1) + 구별되는 색 | 시작 시점의 불확실성 제거, 인지 부하 최소화 |
-| 고대비·대형 요소, 원거리 가독 기준 | 합주실에서 수 m 거리 시인성 |
+| 다운비트와 현재 박은 **색 + 크기 + 윤곽 + 위치**로 중복 부호화 | 전주의적(preattentive) 속성을 겹쳐 원거리와 색각 차이에서도 색 하나에 의존하지 않음 |
+| 강세는 `무음·보통·강박`, 예비박은 압축 화면에서도 `예비 켬·끔`을 색과 함께 명시 | 내부 enum이나 색 의미를 기억하게 하지 않고 현재 상태·다음 행동의 mental model을 UI 안에서 완성 |
+| 일시적 탭 템포 feedback은 시각 라벨과 polite status에 동시에 제공 | 안정적인 버튼 이름을 유지하면서 첫 입력 인식과 누적 횟수를 화면 읽기 도구에도 전달 |
+| dialog trigger가 반응형 전환으로 사라지면 새로 보이는 동등 조작으로 focus 복구 | viewport 변경 중 모달을 닫아도 focus가 `body`로 유실되는 mode/context 오류를 방지 |
+| 일반 박자에서는 마디 내 박 위치를 번호가 있는 고정 슬롯(4/4면 4칸), 고박자에서는 현재 박을 포함한 번호 window와 생략 표시로 표현 | 공간적 위치와 숫자 라벨은 순간 판독이 빠른 채널. "지금 몇 박인지"를 세거나 색을 추론하지 않고 보되, 좁은 폭에서 원을 판독 불가능하게 축소하거나 잘리는 문제를 피함 |
+| 일반 모바일은 기존 박 원 위에 넓은 숫자 panel 추가, 조작은 한 줄 중앙 −5·재생/정지·+5와 오른쪽 작은 탭 | 큰 박 숫자 영역은 테두리·둥근 모서리와 박자표 없이 번호만 중앙에 표시한다. 실제 glyph로 계산한 기존 fit 글자 크기의 80%를 적용하며 panel 크기와 배치는 유지한다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 본박 숫자는 `1..beatCount`의 최대 실측 폭을 기준으로 글꼴 크기를 고정하고 x 중심을 유지해 박마다 크기·위치가 흔들리지 않게 한다. 모바일 BPM 직접 입력은 원형 박 아래 속도 숫자를 눌러 연다. 599px 이하 page는 본문 가용 높이에서 header·원형 박·속도·박자표·조작·상태를 제외한 남는 높이를 숫자 panel에 쓰며 짧은 화면·200% 확대는 최소 높이와 스크롤로 조작을 보존한다. 예비박은 countdown, 예약 대기는 `—`이며 같은 오디오 frame rAF로 본박/예비박에만 테마 text 단색의 opacity 0.6–1 pulse를 준다. subdivision마다 반복하지 않고 정지·reduced motion에서는 pulse를 끈다. 모바일 시각·키보드 DOM 순서는 −5 → 재생/정지 → +5 → 탭으로 일치시키며 예비박은 세부 설정 dialog/인라인 panel에서 저장한다. Medium의 2열 틀과 세로 여유가 있는 화면의 빠른 시작 마디는 유지한다. 모바일 일반 메트로놈의 진행 배경은 오디오 `frame.progress`에 따라 하단 메뉴 위까지의 앱 영역을 가장 낮은 배경 레이어에서 진한 주황 `#f47a24`, opacity 0.3으로 왼쪽에서 오른쪽으로 채운다. 600–839px 가로 화면에서는 왼쪽 rail을 제외하며 메뉴는 원래 표면을 유지한다. 큰 숫자 영역에는 별도 배경 채움을 두지 않고 숫자의 pulse·fit 계산을 유지한다. 정지·예약 대기·reduced motion에서는 채움을 비우며 route 이탈·desktop·fullscreen 전환 때 장식 레이어를 제거한다. 모바일의 기존 radial 배경 반응은 끄고 원형 canvas에도 bar를 중복하지 않는다. 기본 bar·desktop/fullscreen·다른 BeatVisualizer 사용처는 기존 bar와 reduced-motion 고정 track을 유지한다. |
+| 모바일 큰 박 번호로 집중 화면 전환 | 모바일 상단의 보면대 버튼은 제거하고 큰 박 번호를 누르면 인앱 집중 화면을 토글한다. 집중 화면에는 큰 번호·원형 박·속도/박자표·재생/정지만 남기고 상단·하단 메뉴, ±5·탭·설정을 숨긴다. 다시 큰 번호를 누르거나 입력 dialog가 닫힌 상태에서 Escape로 복귀하며 오디오 재생은 유지한다. 데스크톱의 기존 fullscreen 동작은 유지한다. 모바일 일반 화면의 세부 설정은 테두리 없는 아이콘만 표시하며 44px, coarse pointer에서는 48px의 터치 영역과 `세부 설정` 접근성 이름을 유지한다. |
+| 모바일 탭은 조작 영역을 큰 입력판으로 전환 | 작은 진입 버튼은 BPM을 직접 바꾸지 않고 큰 입력판의 실제 탭 간격만 측정한다. 첫 탭은 기준 시각이며 열기/닫기는 미집계, 매 진입 새 측정을 사용한다. 전체 화면 modal 없이 48px target의 우상단 ×·Escape로 복귀하고 탭 버튼 focus를 복원한다. 데스크톱 직접 탭과 fullscreen 조작은 유지한다. |
+| 모바일 메뉴 위 배경의 진행 채움과 기존 보면대 배경 신호 | 주변시의 움직임 인지를 보조 신호로 사용한다. 모바일 일반 화면은 메뉴를 제외한 가장 낮은 배경 레이어의 `#f47a24`·opacity 0.3 좌→우 진행 채움, desktop/fullscreen은 기존 다운비트·예비박 배경 반응을 유지하며 화면 전체를 번쩍이는 신호로 바꾸지 않는다. |
+| 예비박은 일반 박 원 없이 큰 숫자 카운트다운(4·3·2·1) + 진행 track + 구별되는 색 | 숫자와 박 원의 겹침을 없애고 시작 시점을 명확히 표시 |
+| BPM 단계는 20/400으로 clamp하고 끝 방향을 잠금 | 범위 근처에서 버튼이 무반응인 것처럼 보이는 gulf of execution을 없애고 조작 결과를 예측 가능하게 함 |
+| 폭·높이별로 숨긴 `시작 마디`는 설정 sheet에 동일하게 제공 | 공간 절약이 과업 기능 손실로 이어지지 않게 하고 잘못된 마디에서 연주를 시작하는 slip을 예방 |
+| fullscreen은 화면 뒤 AppShell chrome까지 focus에서 격리 | 보이지 않는 내비게이션으로 Tab focus가 이동하는 mode error를 막고 나가기·재생이라는 안전 조작만 남김 |
+| 고대비·대형 요소, 원거리 가독 기준 | 합주실에서 수 m 거리 시인성. 일반 4/4 박 원은 micro·짧은 landscape에서도 약 40px급, Wide에서는 128px 이상 지름을 목표로 한다. 기본 반지름은 최대 72px이고 현재 다운비트는 최대 82px까지 커지며, 고박자는 현재 박이 든 번호 window로 전환한다. 진행막대가 없는 원형 박 묶음은 canvas의 가로·세로 중앙에 정렬한다. |
 | 렌더링은 오디오 클럭 기준 rAF | 시각-청각 어긋남(>20ms)은 즉시 위화감 유발. §5.2 |
 | 모바일: 햅틱 채널 추가 (Capacitor Haptics) | 다중 감각 중복 부호화, 소음 환경 대응 |
-| 현재 마디 번호·구간 라벨·다음 템포 변화 예고("3마디 뒤 ♩=130") 상시 표시 | 상황 인식(situation awareness) 지원 |
+| 모바일 현재 마디·대기·예비박 문맥은 header 왼쪽, desktop/fullscreen은 기존 stage에 표시 | 모바일 개인 연습/Section 문맥을 숨겨 현재 재생 위치를 먼저 읽게 하되 접근 가능한 화면 제목은 유지한다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 큰 박 번호 영역에는 박자표를 함께 그리지 않는다. BPM 직접 입력은 원형 박 아래 속도 숫자에서 기존 20–400 dialog·입력 오류·해당 숫자로의 focus 복원을 유지한다. 모바일에서는 속도 숫자를 눌러 기존 20–400 입력 dialog를 열고, 박자표를 눌러 2/4·3/4·4/4·5/4·6/8·9/8·12/8의 같은 7개 선택지를 가진 dialog를 연다. 박자표 변경 시 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 설정에는 중복 템포 버튼을 두지 않는다. desktop/fullscreen은 기존 표시를 유지한다. |
 
 ---
 

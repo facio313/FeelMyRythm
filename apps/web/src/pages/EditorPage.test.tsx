@@ -60,13 +60,13 @@ function EditorRoute() {
   );
 }
 
-function renderEditor() {
+function renderEditor(path = '/editor/map-1') {
   const router = createMemoryRouter(
     [
       { path: '/editor/:tempoMapId', element: <EditorRoute /> },
       { path: '/destination', element: <h1>이동 완료</h1> },
     ],
-    { initialEntries: ['/editor/map-1'] },
+    { initialEntries: [path] },
   );
   return { router, ...render(<RouterProvider router={router} />) };
 }
@@ -93,6 +93,16 @@ function serverResponse(map: TempoMap) {
     data: map,
   };
 }
+
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('EditorPage unsaved navigation', () => {
   beforeEach(() => {
@@ -202,7 +212,9 @@ describe('EditorPage remote cache boundary', () => {
     database.getTempoMapForRepertoire.mockRejectedValue(new Error('IndexedDB unavailable'));
     database.getTempoMap.mockRejectedValue(new Error('IndexedDB unavailable'));
     database.putTempoMap.mockRejectedValue(new Error('IndexedDB unavailable'));
-    authState.client.get.mockResolvedValue(serverResponse(server));
+    authState.client.get.mockImplementation((path: string) =>
+      Promise.resolve(path.endsWith('/access') ? { role: 'leader' } : serverResponse(server)),
+    );
 
     renderEditor();
 
@@ -248,9 +260,12 @@ describe('EditorPage remote cache boundary', () => {
 
   it('clears the offline read-only state after route navigation succeeds online', async () => {
     database.getTempoMapForRepertoire.mockResolvedValue(remoteMap('map-1', 132));
-    authState.client.get
-      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(serverResponse(remoteMap('map-2', 156)));
+    authState.client.get.mockImplementation((path: string) => {
+      if (path.includes('/map-1/')) return Promise.reject(new TypeError('Failed to fetch'));
+      return Promise.resolve(
+        path.endsWith('/access') ? { role: 'leader' } : serverResponse(remoteMap('map-2', 156)),
+      );
+    });
 
     renderEditor();
     await screen.findByText('오프라인 읽기 전용으로 열었습니다.');
@@ -261,5 +276,110 @@ describe('EditorPage remote cache boundary', () => {
     for (const button of screen.getAllByRole('button', { name: '저장' })) {
       expect(button).toBeEnabled();
     }
+  });
+
+  it.each(['owner', 'leader'])(
+    'allows a %s to create the first map only after confirming an empty revision history',
+    async (role) => {
+      authState.client.get.mockImplementation((path: string) => {
+        if (path.endsWith('/access')) return Promise.resolve({ role });
+        if (path.endsWith('/revisions')) return Promise.resolve([]);
+        return Promise.reject(new ApiError(404, { detail: 'tempo map not found' }));
+      });
+      authState.client.put.mockImplementation((_path: string, body: { data: TempoMap }) =>
+        Promise.resolve(serverResponse({ ...body.data, revision: 1 })),
+      );
+
+      renderEditor();
+      const bpm = await screen.findByLabelText('BPM');
+      expect(bpm).toBeEnabled();
+      expect(database.putTempoMap).not.toHaveBeenCalled();
+      fireEvent.change(bpm, { target: { value: '150' } });
+      fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+
+      await waitFor(() =>
+        expect(authState.client.put).toHaveBeenCalledWith(
+          '/repertoire/map-1/tempomap',
+          expect.objectContaining({
+            expectedRevision: 0,
+            data: expect.objectContaining({ repertoireItemId: 'map-1', revision: 0 }),
+          }),
+        ),
+      );
+      expect(await screen.findByText('저장됨', { exact: true })).toBeVisible();
+    },
+  );
+
+  it.each([403, 404])('does not create a map when repertoire access returns %s', async (status) => {
+    authState.client.get.mockRejectedValue(
+      new ApiError(status, { detail: 'repertoire unavailable' }),
+    );
+    renderEditor();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('repertoire unavailable');
+    expect(screen.queryByLabelText('BPM')).not.toBeInTheDocument();
+    expect(authState.client.get).toHaveBeenCalledExactlyOnceWith('/repertoire/map-1/access');
+    expect(authState.client.put).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an existing history with a new map after an inconsistent latest-map 404', async () => {
+    authState.client.get.mockImplementation((path: string) => {
+      if (path.endsWith('/access')) return Promise.resolve({ role: 'leader' });
+      if (path.endsWith('/revisions')) return Promise.resolve([serverResponse(remoteMap('map-1'))]);
+      return Promise.reject(new ApiError(404, { detail: 'tempo map not found' }));
+    });
+    renderEditor();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('tempo map not found');
+    expect(screen.queryByLabelText('BPM')).not.toBeInTheDocument();
+    expect(database.putTempoMap).not.toHaveBeenCalled();
+  });
+
+  it('does not hide a latest-map 404 with cached data when checking the empty history fails', async () => {
+    database.getTempoMapForRepertoire.mockResolvedValue(remoteMap('map-1', 132));
+    authState.client.get.mockImplementation((path: string) => {
+      if (path.endsWith('/access')) return Promise.resolve({ role: 'leader' });
+      if (path.endsWith('/revisions')) return Promise.reject(new TypeError('Failed to fetch'));
+      return Promise.reject(new ApiError(404, { detail: 'tempo map not found' }));
+    });
+    renderEditor();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '첫 템포맵을 만들 수 있는지 확인하지 못했습니다',
+    );
+    expect(screen.queryByText('오프라인 읽기 전용으로 열었습니다.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('BPM')).not.toBeInTheDocument();
+  });
+
+  it('keeps a member read-only and exposes playback and score navigation', async () => {
+    authState.client.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith('/access') ? { role: 'member' } : serverResponse(remoteMap('map-1')),
+      ),
+    );
+    renderEditor('/editor/map-1?score=score-1');
+
+    expect(await screen.findByLabelText('BPM')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '가져오기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '메트로놈에서 열기' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '악보로 돌아가기' })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('BPM'), { target: { value: '180' } });
+    expect(screen.getByLabelText('BPM')).toHaveValue(100);
+    expect(authState.client.put).not.toHaveBeenCalled();
+  });
+
+  it('does not open an unsaved first-map draft for a member', async () => {
+    authState.client.get.mockImplementation((path: string) => {
+      if (path.endsWith('/access')) return Promise.resolve({ role: 'member' });
+      if (path.endsWith('/revisions')) return Promise.resolve([]);
+      return Promise.reject(new ApiError(404, { detail: 'tempo map not found' }));
+    });
+    renderEditor();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '프로젝트 리더에게 첫 템포맵 작성을 요청',
+    );
+    expect(screen.queryByLabelText('BPM')).not.toBeInTheDocument();
+    expect(database.putTempoMap).not.toHaveBeenCalled();
   });
 });
