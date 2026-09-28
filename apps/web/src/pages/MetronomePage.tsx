@@ -7,12 +7,12 @@ import {
   Expand,
   Gauge,
   Music2,
-  Pencil,
   Settings2,
   Shrink,
   SlidersHorizontal,
   Square,
   Volume2,
+  X,
 } from 'lucide-react';
 import {
   useCallback,
@@ -26,6 +26,8 @@ import { useAuth } from '../lib/auth';
 import { localDb } from '../lib/localDb';
 import { useMetronome } from '../lib/useMetronome';
 import { createDefaultTempoMap } from '../lib/defaultTempoMap';
+
+const METER_OPTIONS = ['2/4', '3/4', '4/4', '5/4', '6/8', '9/8', '12/8'];
 
 function meterBeatCount(section: TempoSection): number {
   return section.beatUnit === 'dottedQuarter'
@@ -64,6 +66,7 @@ export function MetronomePage() {
   const [searchParams] = useSearchParams();
   const requestedMeasure = Number(searchParams.get('measure'));
   const repertoireItemId = searchParams.get('repertoire');
+  const requestedLocalMapId = searchParams.get('tempoMap');
   const [map, setMap] = useState<TempoMap>(() => createDefaultTempoMap());
   const [startMeasure, setStartMeasure] = useState(() =>
     Number.isInteger(requestedMeasure) && requestedMeasure > 0 ? requestedMeasure : 1,
@@ -73,10 +76,16 @@ export function MetronomePage() {
   );
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('fmr.volume') ?? 0.75));
   const [fullscreen, setFullscreen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(() => window.innerWidth <= 839);
+  const mobileStage = mobileViewport && !fullscreen;
+  const [focused, setFocused] = useState(false);
+  const mobileFocus = mobileStage && focused;
   const [bpmDialogOpen, setBpmDialogOpen] = useState(false);
+  const [meterDialogOpen, setMeterDialogOpen] = useState(false);
   const [bpmDraft, setBpmDraft] = useState('');
   const [bpmError, setBpmError] = useState<string>();
   const [tapFeedback, setTapFeedback] = useState('');
+  const [tapPadOpen, setTapPadOpen] = useState(false);
   const [shortSettingsOpen, setShortSettingsOpen] = useState(false);
   const [tempoMapLoadAttempt, setTempoMapLoadAttempt] = useState(0);
   const [tempoMapLoadState, setTempoMapLoadState] = useState<TempoMapLoadState>({
@@ -88,7 +97,11 @@ export function MetronomePage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const bpmTriggerRef = useRef<HTMLButtonElement>(null);
   const bpmInputRef = useRef<HTMLInputElement>(null);
+  const meterTriggerRef = useRef<HTMLButtonElement>(null);
+  const numberTriggerRef = useRef<HTMLButtonElement>(null);
   const shortSettingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const tapTriggerRef = useRef<HTMLButtonElement>(null);
+  const tapPadRef = useRef<HTMLButtonElement>(null);
   const tapFeedbackFrameRef = useRef<number | undefined>(undefined);
   const tapFeedbackExpiresAtRef = useRef(0);
   const persistenceTimerRef = useRef<number | undefined>(undefined);
@@ -100,8 +113,10 @@ export function MetronomePage() {
     ? (tempoMapLoadState.status === 'remote-ready' ||
         tempoMapLoadState.status === 'remote-cached') &&
       map.repertoireItemId === repertoireItemId
-    : (tempoMapLoadState.status === 'local-ready' || tempoMapLoadState.status === 'local-error') &&
-      map.repertoireItemId === 'local';
+    : (tempoMapLoadState.status === 'local-ready' ||
+        (tempoMapLoadState.status === 'local-error' && !requestedLocalMapId)) &&
+      map.repertoireItemId === 'local' &&
+      (!requestedLocalMapId || map.id === requestedLocalMapId);
   const remoteMapLoading =
     usesRemoteMap &&
     tempoMapLoadState.status !== 'remote-ready' &&
@@ -111,6 +126,39 @@ export function MetronomePage() {
     !usesRemoteMap &&
     tempoMapLoadState.status !== 'local-ready' &&
     tempoMapLoadState.status !== 'local-error';
+
+  const resetTapMeasurement = useCallback(() => {
+    tapsRef.current.length = 0;
+    setTapFeedback('');
+    if (tapFeedbackFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(tapFeedbackFrameRef.current);
+      tapFeedbackFrameRef.current = undefined;
+    }
+  }, []);
+
+  const handleTapPadOpenChange = useCallback(
+    (open: boolean) => {
+      resetTapMeasurement();
+      setTapPadOpen(open);
+      if (!open) queueMicrotask(() => tapTriggerRef.current?.focus());
+    },
+    [resetTapMeasurement],
+  );
+
+  useEffect(() => {
+    if (tapPadOpen && mobileStage) tapPadRef.current?.focus();
+  }, [tapPadOpen, mobileStage]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const mobile = window.innerWidth <= 839;
+      setMobileViewport(mobile);
+      if (!mobile) setFocused(false);
+      if (!mobile && tapPadOpen) handleTapPadOpenChange(false);
+    };
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, [handleTapPadOpenChange, tapPadOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,9 +246,18 @@ export function MetronomePage() {
       .then((maps) => {
         if (cancelled) return;
         const localMaps = maps.filter((candidate) => candidate.repertoireItemId === 'local');
-        const activeId = localStorage.getItem('fmr.activeTempoMap');
-        const active = localMaps.find((candidate) => candidate.id === activeId) ?? localMaps[0];
-        if (active) setMap(active);
+        const activeId = requestedLocalMapId ?? localStorage.getItem('fmr.activeTempoMap');
+        const active =
+          localMaps.find((candidate) => candidate.id === activeId) ??
+          (requestedLocalMapId ? undefined : localMaps[0]);
+        if (requestedLocalMapId && !active) {
+          throw new Error('선택한 템포맵을 이 기기에서 찾지 못했습니다. 편집기에서 저장해 주세요.');
+        }
+        if (active) {
+          assertValidTempoMap(active);
+          setMap(active);
+          if (requestedLocalMapId) localStorage.setItem('fmr.activeTempoMap', active.id);
+        }
         setTempoMapLoadState({ status: 'local-ready' });
       })
       .catch((error: unknown) => {
@@ -216,7 +273,15 @@ export function MetronomePage() {
     return () => {
       cancelled = true;
     };
-  }, [client, notify, repertoireItemId, stopMetronome, tempoMapLoadAttempt, user]);
+  }, [
+    client,
+    notify,
+    repertoireItemId,
+    requestedLocalMapId,
+    stopMetronome,
+    tempoMapLoadAttempt,
+    user,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,13 +296,20 @@ export function MetronomePage() {
   }, [requestedMeasure]);
 
   useEffect(() => {
-    const onFullscreen = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    const onFullscreen = () => {
+      const active = document.fullscreenElement === containerRef.current;
+      setFullscreen(active);
+      if (active && tapPadOpen) {
+        resetTapMeasurement();
+        setTapPadOpen(false);
+      }
+    };
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => document.removeEventListener('fullscreenchange', onFullscreen);
-  }, []);
+  }, [resetTapMeasurement, tapPadOpen]);
 
   useEffect(() => {
-    if (!fullscreen) return undefined;
+    if (!fullscreen && !mobileFocus) return undefined;
 
     const shellChrome = [
       ...document.querySelectorAll<HTMLElement>(
@@ -261,7 +333,28 @@ export function MetronomePage() {
         else state.element.setAttribute('aria-hidden', state.ariaHidden);
       }
     };
-  }, [fullscreen]);
+  }, [fullscreen, mobileFocus]);
+
+  useEffect(() => {
+    if (!mobileFocus || bpmDialogOpen || meterDialogOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event
+          .composedPath()
+          .some(
+            (element) => element instanceof Element && element.getAttribute('role') === 'dialog',
+          )
+      )
+        return;
+      event.preventDefault();
+      setFocused(false);
+      numberTriggerRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [bpmDialogOpen, meterDialogOpen, mobileFocus]);
 
   useEffect(() => {
     document.title = '메트로놈 · FeelMyRythm';
@@ -321,6 +414,29 @@ export function MetronomePage() {
     [currentSection.id, map, notify],
   );
 
+  const openEditor = async () => {
+    if (!mapReadyForPlayback) return;
+    if (usesRemoteMap) {
+      void navigate(`/editor/${encodeURIComponent(map.repertoireItemId)}`);
+      return;
+    }
+    if (persistenceTimerRef.current !== undefined) {
+      window.clearTimeout(persistenceTimerRef.current);
+      persistenceTimerRef.current = undefined;
+    }
+    try {
+      await localDb.putTempoMap(map);
+      localStorage.setItem('fmr.activeTempoMap', map.id);
+      void navigate(`/editor/${encodeURIComponent(map.id)}?source=local`);
+    } catch (error) {
+      notify({
+        title: '편집할 템포맵을 저장하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    }
+  };
+
   const setBpm = useCallback(
     (next: number) => {
       const normalized = normalizeBpm(next);
@@ -335,6 +451,36 @@ export function MetronomePage() {
     (amount: number) => setBpm(Math.min(400, Math.max(20, currentSection.bpm + amount))),
     [currentSection.bpm, setBpm],
   );
+
+  const setMeter = (meter: string) => {
+    const [num, denom] = meter.split('/').map(Number);
+    const nextSection: TempoSection = {
+      ...currentSection,
+      timeSignature: { num: num ?? 4, denom: denom ?? 4 },
+      beatUnit: denom === 8 && (num ?? 0) % 3 === 0 ? 'dottedQuarter' : 'quarter',
+    };
+    updateSection({
+      timeSignature: nextSection.timeSignature,
+      beatUnit: nextSection.beatUnit,
+      accentPattern: Array.from(
+        { length: meterBeatCount(nextSection) },
+        (_, beat) => currentSection.accentPattern?.[beat] ?? (beat === 0 ? 2 : 1),
+      ),
+    });
+  };
+
+  const handleMeterDialogOpenChange = useCallback((open: boolean) => {
+    setMeterDialogOpen(open);
+    if (!open) {
+      queueMicrotask(() => (meterTriggerRef.current ?? headingRef.current)?.focus());
+    }
+  }, []);
+
+  const toggleMobileFocus = () => {
+    resetTapMeasurement();
+    setTapPadOpen(false);
+    setFocused((current) => !current);
+  };
 
   const handleBpmDialogOpenChange = useCallback((open: boolean) => {
     setBpmDialogOpen(open);
@@ -499,6 +645,39 @@ export function MetronomePage() {
     }
   };
 
+  const playControl = (
+    <button
+      type="button"
+      className={metronome.playing ? 'play-button play-button--playing' : 'play-button'}
+      aria-label={metronome.playing ? '메트로놈 정지' : '메트로놈 재생'}
+      aria-describedby={!mapReadyForPlayback ? 'metronome-map-status' : undefined}
+      disabled={!mapReadyForPlayback}
+      onClick={() => (metronome.playing ? metronome.stop() : void play())}
+    >
+      {metronome.playing ? (
+        <Square size={26} fill="currentColor" />
+      ) : (
+        <span className="play-triangle" aria-hidden />
+      )}
+    </button>
+  );
+
+  const bpmStep = (amount: number) => (
+    <Button
+      size="icon"
+      aria-label={`BPM ${Math.abs(amount)} ${amount < 0 ? '낮추기' : '높이기'}`}
+      disabled={
+        !mapReadyForPlayback || (amount < 0 ? currentSection.bpm <= 20 : currentSection.bpm >= 400)
+      }
+      onClick={() => stepBpm(amount)}
+    >
+      <span className="bpm-stepper__amount" aria-hidden>
+        {amount < 0 ? '−' : '+'}
+        {Math.abs(amount)}
+      </span>
+    </Button>
+  );
+
   const sectionBeatCount = meterBeatCount(currentSection);
   const accentPattern = Array.from(
     { length: sectionBeatCount },
@@ -507,6 +686,18 @@ export function MetronomePage() {
   const contextLine = nextSection
     ? `${nextSection.startMeasure - metronome.position.measureNumber}마디 뒤 ♩=${nextSection.bpm}`
     : '마지막 구간';
+  const performanceContext = (
+    <div className="performance-context">
+      <strong className="fmr-tabular">
+        {metronome.position.isWaiting
+          ? `마디 ${metronome.position.measureNumber} · 시작 대기`
+          : metronome.position.isCountIn
+            ? `마디 ${metronome.position.measureNumber} · 예비박 ${metronome.position.countdown ?? ''}`
+            : `마디 ${metronome.position.measureNumber}`}
+      </strong>
+      {!mobileStage || nextSection ? <span>다음: {contextLine}</span> : null}
+    </div>
+  );
   const settingsControls = (
     <>
       <div className="accent-editor">
@@ -549,6 +740,24 @@ export function MetronomePage() {
         />
         <output>{Math.round(volume * 100)}%</output>
       </label>
+      <Button
+        className="count-in-button"
+        variant={withCountIn ? 'primary' : 'secondary'}
+        disabled={!mapReadyForPlayback}
+        onClick={() =>
+          setWithCountIn((current) => {
+            const next = !current;
+            localStorage.setItem('fmr.countInEnabled', String(next));
+            return next;
+          })
+        }
+        aria-pressed={withCountIn}
+        aria-label="예비박"
+      >
+        {withCountIn ? <Check size={17} aria-hidden /> : <Settings2 size={17} aria-hidden />}
+        <span className="count-in-button__label">예비박</span>
+        <span className="count-in-button__state">{withCountIn ? '켬' : '끔'}</span>
+      </Button>
       <label className="meter-select">
         <span className="fmr-field__label">박자</span>
         <span className="meter-select__control">
@@ -556,15 +765,9 @@ export function MetronomePage() {
             className="fmr-input"
             disabled={!mapReadyForPlayback}
             value={`${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`}
-            onChange={(event) => {
-              const [num, denom] = event.target.value.split('/').map(Number);
-              updateSection({
-                timeSignature: { num: num ?? 4, denom: denom ?? 4 },
-                beatUnit: denom === 8 && (num ?? 0) % 3 === 0 ? 'dottedQuarter' : 'quarter',
-              });
-            }}
+            onChange={(event) => setMeter(event.target.value)}
           >
-            {['2/4', '3/4', '4/4', '5/4', '6/8', '9/8', '12/8'].map((meter) => (
+            {METER_OPTIONS.map((meter) => (
               <option key={meter}>{meter}</option>
             ))}
           </select>
@@ -577,7 +780,14 @@ export function MetronomePage() {
   return (
     <div
       ref={containerRef}
-      className={fullscreen ? 'metronome-page metronome-page--fullscreen' : 'metronome-page'}
+      className={[
+        'metronome-page',
+        fullscreen && 'metronome-page--fullscreen',
+        mobileStage && 'metronome-page--screen-progress',
+        mobileFocus && 'metronome-page--focused',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       data-count-in={metronome.position.isCountIn || undefined}
       data-beat-tone={
         metronome.position.isCountIn
@@ -586,14 +796,27 @@ export function MetronomePage() {
             ? 'downbeat'
             : 'beat'
       }
-      data-playing={metronome.playing || undefined}
+      data-playing={(metronome.playing && !metronome.position.isWaiting) || undefined}
       onPointerUp={handleFullscreenTap}
     >
-      <header className="metronome-heading">
+      {mobileStage ? (
+        <BeatVisualizer
+          className="metronome-screen-progress"
+          variant="progress"
+          showProgress
+          running={metronome.playing}
+          frameSource={metronome.frameSource}
+        />
+      ) : null}
+      <header
+        className="metronome-heading"
+        inert={mobileFocus || undefined}
+        aria-hidden={mobileFocus || undefined}
+      >
+        <h1 ref={headingRef} className="sr-only" tabIndex={-1}>
+          메트로놈
+        </h1>
         <div className="metronome-heading__context" aria-hidden={fullscreen || undefined}>
-          <h1 ref={headingRef} className="sr-only" tabIndex={-1}>
-            메트로놈
-          </h1>
           <span className="eyebrow">Local performance</span>
           <div className="cluster">
             <Music2 size={18} aria-hidden />
@@ -601,23 +824,25 @@ export function MetronomePage() {
             <StatusBadge>{currentSection.label ?? 'Section'}</StatusBadge>
           </div>
         </div>
+        {mobileStage ? performanceContext : null}
         <div className="cluster metronome-heading__actions">
-          <Button
-            className="metronome-heading__fullscreen"
-            variant="ghost"
-            onClick={() => void toggleFullscreen()}
-          >
-            {fullscreen ? <Shrink size={18} /> : <Expand size={18} />}
-            {fullscreen ? '나가기' : '보면대 모드'}
-          </Button>
+          {!mobileStage ? (
+            <Button
+              className="metronome-heading__fullscreen"
+              variant="ghost"
+              onClick={() => void toggleFullscreen()}
+            >
+              {fullscreen ? <Shrink size={18} /> : <Expand size={18} />}
+              {fullscreen ? '나가기' : '보면대 모드'}
+            </Button>
+          ) : null}
           <Button
             className="metronome-heading__editor"
             variant="ghost"
             inert={fullscreen ? true : undefined}
             aria-hidden={fullscreen || undefined}
-            onClick={() => {
-              void navigate(`/editor/${map.id}`);
-            }}
+            disabled={!mapReadyForPlayback}
+            onClick={() => void openEditor()}
           >
             <SlidersHorizontal size={18} /> 템포맵
           </Button>
@@ -626,11 +851,13 @@ export function MetronomePage() {
             className="metronome-heading__short-settings"
             variant="secondary"
             aria-haspopup="dialog"
+            aria-label="세부 설정"
             inert={fullscreen ? true : undefined}
             aria-hidden={fullscreen || undefined}
             onClick={() => handleShortSettingsOpenChange(true)}
           >
-            <Settings2 size={18} /> 세부 설정
+            <Settings2 size={18} aria-hidden />
+            <span className="metronome-heading__settings-label">세부 설정</span>
           </Button>
         </div>
       </header>
@@ -665,7 +892,10 @@ export function MetronomePage() {
       ) : !usesRemoteMap && tempoMapLoadState.status === 'local-error' ? (
         <div id="metronome-map-status" className="metronome-map-status" role="alert">
           <span>
-            이 기기의 템포맵을 불러오지 못해 기본 템포맵을 사용합니다: {tempoMapLoadState.message}
+            {requestedLocalMapId
+              ? '선택한 템포맵을 불러오지 못했습니다'
+              : '이 기기의 템포맵을 불러오지 못해 기본 템포맵을 사용합니다'}
+            : {tempoMapLoadState.message}
           </span>
           <Button
             size="compact"
@@ -693,16 +923,40 @@ export function MetronomePage() {
       ) : null}
 
       <section className="metronome-stage" aria-label="메트로놈 상태">
+        {mobileStage ? (
+          <button
+            ref={numberTriggerRef}
+            type="button"
+            className="metronome-number"
+            aria-label={mobileFocus ? '집중 화면 나가기' : '집중 화면'}
+            aria-pressed={mobileFocus}
+            disabled={!mapReadyForPlayback}
+            onClick={toggleMobileFocus}
+          >
+            <BeatVisualizer
+              className="metronome-number__visualizer"
+              variant="number"
+              numberScale={0.8}
+              showProgress={false}
+              progressStyle="background"
+              running={metronome.playing}
+              frameSource={metronome.frameSource}
+              label="현재 박 숫자"
+            />
+          </button>
+        ) : null}
         <BeatVisualizer
           className="metronome-visualizer"
+          showProgress={!mobileStage}
           running={metronome.playing}
           frameSource={metronome.frameSource}
           label="오디오 시계 기준 메트로놈 박"
         />
-        <div className="bpm-display">
+        <div className={mobileStage ? 'bpm-display bpm-display--mobile' : 'bpm-display'}>
           <button
             ref={bpmTriggerRef}
             type="button"
+            className="bpm-display__value"
             aria-label={`현재 BPM ${currentSection.bpm}, 눌러서 직접 입력`}
             inert={fullscreen ? true : undefined}
             aria-hidden={fullscreen || undefined}
@@ -714,9 +968,6 @@ export function MetronomePage() {
             }}
           >
             <span className="fmr-tabular">{currentSection.bpm}</span>
-            <small>
-              <Pencil aria-hidden size={13} /> 눌러 입력
-            </small>
           </button>
           {fullscreen ? (
             <span className="sr-only" role="status">
@@ -724,113 +975,133 @@ export function MetronomePage() {
               {currentSection.timeSignature.denom}박자
             </span>
           ) : null}
-          <div>
-            <span>{currentSection.beatUnit === 'dottedQuarter' ? '♩.' : '♩'} = BPM</span>
-            <strong>
-              {currentSection.timeSignature.num}/{currentSection.timeSignature.denom}
-            </strong>
-          </div>
+          {mobileStage ? (
+            <button
+              ref={meterTriggerRef}
+              type="button"
+              className="bpm-display__meter"
+              aria-label={`현재 ${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}박자, 눌러서 선택`}
+              aria-haspopup="dialog"
+              disabled={!mapReadyForPlayback}
+              onClick={() => handleMeterDialogOpenChange(true)}
+            >
+              <span>
+                {currentSection.timeSignature.num}/{currentSection.timeSignature.denom}
+              </span>
+            </button>
+          ) : (
+            <div>
+              <span>{currentSection.beatUnit === 'dottedQuarter' ? 'BPM (♩.)' : 'BPM'}</span>
+              <span aria-hidden>·</span>
+              <strong>
+                {currentSection.timeSignature.num}/{currentSection.timeSignature.denom}
+              </strong>
+            </div>
+          )}
         </div>
-        <div className="performance-context">
-          <strong className="fmr-tabular">
-            {metronome.position.isCountIn
-              ? `예비박 ${metronome.position.countdown ?? ''}`
-              : `마디 ${metronome.position.measureNumber}`}
-          </strong>
-          <span>다음: {contextLine}</span>
-        </div>
+        {!mobileStage ? performanceContext : null}
       </section>
 
       <section className="metronome-controls" aria-label="메트로놈 조작">
-        <button
-          type="button"
-          className={metronome.playing ? 'play-button play-button--playing' : 'play-button'}
-          aria-label={metronome.playing ? '메트로놈 정지' : '메트로놈 재생'}
-          aria-describedby={!mapReadyForPlayback ? 'metronome-map-status' : undefined}
-          disabled={!mapReadyForPlayback}
-          onClick={() => (metronome.playing ? metronome.stop() : void play())}
-        >
-          {metronome.playing ? (
-            <Square size={26} fill="currentColor" />
+        {mobileFocus ? (
+          playControl
+        ) : mobileStage ? (
+          tapPadOpen ? (
+            <div
+              className="tap-tempo-panel"
+              role="group"
+              aria-label="탭 템포 입력"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  handleTapPadOpenChange(false);
+                }
+              }}
+            >
+              <button
+                ref={tapPadRef}
+                type="button"
+                className="tap-tempo-pad"
+                aria-label="박자에 맞춰 탭"
+                data-feedback={tapFeedback || undefined}
+                onClick={tapTempo}
+                disabled={!mapReadyForPlayback}
+              >
+                <span aria-hidden>{tapFeedback || '박자에 맞춰 탭'}</span>
+                <small aria-hidden>두 번 이상 두드리세요</small>
+              </button>
+              <Button
+                className="tap-tempo-panel__close"
+                size="icon"
+                variant="ghost"
+                aria-label="탭 템포 닫기"
+                onClick={() => handleTapPadOpenChange(false)}
+              >
+                <X size={16} aria-hidden />
+              </Button>
+            </div>
           ) : (
-            <span className="play-triangle" aria-hidden />
-          )}
-        </button>
+            <div className="metronome-mobile-controls">
+              {bpmStep(-5)}
+              {playControl}
+              {bpmStep(5)}
+              <Button
+                ref={tapTriggerRef}
+                className="tap-button"
+                aria-label="탭 템포"
+                onClick={() => handleTapPadOpenChange(true)}
+                disabled={!mapReadyForPlayback}
+              >
+                탭
+              </Button>
+            </div>
+          )
+        ) : (
+          <>
+            {playControl}
+            <div
+              className="bpm-steppers"
+              inert={fullscreen ? true : undefined}
+              aria-hidden={fullscreen || undefined}
+            >
+              {bpmStep(-5)}
+              {bpmStep(-1)}
+              <Button
+                ref={tapTriggerRef}
+                className="tap-button"
+                aria-label="탭 템포"
+                data-feedback={tapFeedback || undefined}
+                onClick={tapTempo}
+                disabled={!mapReadyForPlayback}
+              >
+                <Gauge size={18} aria-hidden />
+                <span className="tap-button__visible-label" aria-hidden>
+                  {tapFeedback || (
+                    <>
+                      탭<span className="tap-button__optional-label"> 템포</span>
+                    </>
+                  )}
+                </span>
+              </Button>
+              {bpmStep(1)}
+              {bpmStep(5)}
+            </div>
+          </>
+        )}
 
-        <div
-          className="bpm-steppers"
-          inert={fullscreen ? true : undefined}
-          aria-hidden={fullscreen || undefined}
-        >
-          <Button
-            size="icon"
-            aria-label="BPM 5 낮추기"
-            disabled={!mapReadyForPlayback || currentSection.bpm <= 20}
-            onClick={() => stepBpm(-5)}
-          >
-            <span className="bpm-stepper__amount" aria-hidden>
-              −5
-            </span>
-          </Button>
-          <Button
-            size="icon"
-            aria-label="BPM 1 낮추기"
-            disabled={!mapReadyForPlayback || currentSection.bpm <= 20}
-            onClick={() => stepBpm(-1)}
-          >
-            <span className="bpm-stepper__amount" aria-hidden>
-              −1
-            </span>
-          </Button>
-          <Button
-            className="tap-button"
-            aria-label="탭 템포"
-            data-feedback={tapFeedback || undefined}
-            onClick={tapTempo}
-            disabled={!mapReadyForPlayback}
-          >
-            <Gauge size={18} aria-hidden />
-            <span className="tap-button__visible-label" aria-hidden>
-              {tapFeedback || (
-                <>
-                  탭<span className="tap-button__optional-label"> 템포</span>
-                </>
-              )}
-            </span>
-          </Button>
-          {tapFeedback ? (
-            <span className="sr-only tap-tempo-feedback" role="status" aria-live="polite">
-              {tapFeedback === '다시 탭'
-                ? '첫 탭을 인식했습니다. 다시 탭하세요.'
-                : `탭 템포 ${tapFeedback} 입력했습니다.`}
-            </span>
-          ) : null}
-          <Button
-            size="icon"
-            aria-label="BPM 1 높이기"
-            disabled={!mapReadyForPlayback || currentSection.bpm >= 400}
-            onClick={() => stepBpm(1)}
-          >
-            <span className="bpm-stepper__amount" aria-hidden>
-              +1
-            </span>
-          </Button>
-          <Button
-            size="icon"
-            aria-label="BPM 5 높이기"
-            disabled={!mapReadyForPlayback || currentSection.bpm >= 400}
-            onClick={() => stepBpm(5)}
-          >
-            <span className="bpm-stepper__amount" aria-hidden>
-              +5
-            </span>
-          </Button>
-        </div>
+        {tapFeedback ? (
+          <span className="sr-only tap-tempo-feedback" role="status" aria-live="polite">
+            {tapFeedback === '다시 탭'
+              ? '첫 탭을 인식했습니다. 다시 탭하세요.'
+              : `탭 템포 ${tapFeedback} 입력했습니다.`}
+          </span>
+        ) : null}
 
         <div
           className="quick-settings"
-          inert={fullscreen ? true : undefined}
-          aria-hidden={fullscreen || undefined}
+          inert={fullscreen || mobileFocus || undefined}
+          aria-hidden={fullscreen || mobileFocus || undefined}
+          hidden={mobileFocus || (mobileStage && tapPadOpen)}
         >
           <label>
             <span>시작 마디</span>
@@ -843,34 +1114,13 @@ export function MetronomePage() {
               disabled={metronome.playing || !mapReadyForPlayback}
             />
           </label>
-          <Button
-            className="count-in-button"
-            variant={withCountIn ? 'primary' : 'secondary'}
-            disabled={!mapReadyForPlayback}
-            onClick={() =>
-              setWithCountIn((current) => {
-                const next = !current;
-                localStorage.setItem('fmr.countInEnabled', String(next));
-                return next;
-              })
-            }
-            aria-pressed={withCountIn}
-            aria-label="예비박"
-          >
-            {withCountIn ? <Check size={17} aria-hidden /> : <Settings2 size={17} aria-hidden />}
-            <span className="count-in-button__label">예비박</span>
-            <span className="count-in-button__compact-label" aria-hidden>
-              예비
-            </span>
-            <span className="count-in-button__state">{withCountIn ? '켬' : '끔'}</span>
-          </Button>
         </div>
       </section>
 
       <Card
         className="metronome-settings"
-        inert={fullscreen ? true : undefined}
-        aria-hidden={fullscreen || undefined}
+        inert={fullscreen || mobileFocus || undefined}
+        aria-hidden={fullscreen || mobileFocus || undefined}
       >
         {settingsControls}
       </Card>
@@ -920,11 +1170,39 @@ export function MetronomePage() {
         </form>
       </Modal>
 
+      <Modal open={meterDialogOpen} onOpenChange={handleMeterDialogOpenChange} title="박자 선택">
+        <div className="meter-options">
+          {METER_OPTIONS.map((meter) => (
+            <Button
+              key={meter}
+              aria-label={`${meter}박자`}
+              aria-pressed={
+                meter ===
+                `${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`
+              }
+              variant={
+                meter ===
+                `${currentSection.timeSignature.num}/${currentSection.timeSignature.denom}`
+                  ? 'primary'
+                  : 'secondary'
+              }
+              disabled={!mapReadyForPlayback}
+              onClick={() => {
+                setMeter(meter);
+                handleMeterDialogOpenChange(false);
+              }}
+            >
+              {meter}
+            </Button>
+          ))}
+        </div>
+      </Modal>
+
       <Modal
         open={shortSettingsOpen}
         onOpenChange={handleShortSettingsOpenChange}
         title="메트로놈 세부 설정"
-        description="짧은 화면에서도 시작 마디, 강세 패턴, 볼륨, 박자를 조절할 수 있습니다."
+        description="시작 마디, 예비박, 강세 패턴, 볼륨과 박자를 조절할 수 있습니다."
       >
         <div className="metronome-settings-dialog">
           <label className="start-measure-field">

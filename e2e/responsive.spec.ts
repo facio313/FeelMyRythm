@@ -435,6 +435,7 @@ test('idle metronome geometry follows width and height changes before playback',
   const verticalRhythm = await page.evaluate(() => {
     const stage = document.querySelector('.metronome-stage')?.getBoundingClientRect();
     const visualizer = document.querySelector('.metronome-visualizer')?.getBoundingClientRect();
+    const number = document.querySelector('.metronome-number')?.getBoundingClientRect();
     const context = document.querySelector('.performance-context')?.getBoundingClientRect();
     const controls = document.querySelector('.metronome-controls')?.getBoundingClientRect();
     return stage && visualizer && context && controls
@@ -442,7 +443,7 @@ test('idle metronome geometry follows width and height changes before playback',
           gap: controls.top - stage.bottom,
           contentGap: controls.top - context.bottom,
           stageBottomPadding: stage.bottom - context.bottom,
-          stageTopPadding: visualizer.top - stage.top,
+          stageTopPadding: (number && number.height > 0 ? number.top : visualizer.top) - stage.top,
           stageBottom: stage.bottom,
           controlsTop: controls.top,
         }
@@ -503,11 +504,387 @@ test('short-screen metronome settings stay aligned in a centered dialog', async 
   });
   expect(alignment.horizontalDelta).toBeLessThanOrEqual(1);
   expect(alignment.verticalDelta).toBeLessThanOrEqual(1);
+
+  await expect(page.locator('.metronome-controls .count-in-button')).toHaveCount(0);
+  const countIn = dialog.getByRole('button', { name: '예비박', exact: true });
+  await expect(countIn).toHaveAttribute('aria-pressed', 'true');
+  await countIn.click();
+  await expect(countIn).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('fmr.countInEnabled'))).toBe('false');
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeFocused();
+
+  await page.reload();
+  await settings.click();
+  await expect(countIn).toHaveAttribute('aria-pressed', 'false');
+  await countIn.focus();
+  await page.keyboard.press('Space');
+  await expect(countIn).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('fmr.countInEnabled'))).toBe('true');
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeFocused();
+
+  const metronome = page.locator('.metronome-page');
+  await page.getByRole('button', { name: '메트로놈 재생', exact: true }).click();
+  await expect(metronome).toHaveAttribute('data-count-in', 'true');
+  await expect(page.locator('.metronome-heading .performance-context strong')).toHaveText(
+    /예비박 \d+/,
+  );
+  await expect(metronome).not.toHaveAttribute('data-count-in', 'true');
+  await expect(page.locator('.metronome-heading .performance-context strong')).toHaveText(
+    /마디 \d+/,
+  );
+  await page.getByRole('button', { name: '메트로놈 정지', exact: true }).click();
 });
 
-test('start measure stays available in compact and tall-medium layouts', async ({ page }) => {
+test('start measure stays available in compact and tall-medium layouts', async ({
+  page,
+}, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/feelmyrythm/');
+  await expect(page.locator('.topbar')).toBeHidden();
+  await expect(page.getByRole('button', { name: '보면대 모드', exact: true })).toHaveCount(0);
+  const focusButton = page.getByRole('button', { name: '집중 화면', exact: true });
+  await expect(focusButton).toBeVisible();
+  await expect(
+    page.locator('.metronome-number').getByRole('img', { name: '현재 박 숫자' }),
+  ).toBeVisible();
+  await expect(page.locator('.metronome-number')).toHaveCSS('border-radius', '0px');
+  await expect(page.locator('.metronome-number')).toHaveCSS('border-top-width', '0px');
+  await expect(page.locator('.metronome-heading .performance-context strong')).toHaveText('마디 1');
+  await expect(page.locator('.metronome-heading__context')).toBeHidden();
+  await expect(page.locator('.metronome-stage .performance-context')).toHaveCount(0);
+  await expect(page.locator('.metronome-controls .count-in-button')).toHaveCount(0);
+  const mobileTempo = page.locator('.metronome-stage .bpm-display--mobile');
+  await expect(
+    mobileTempo.getByRole('button', { name: '현재 BPM 100, 눌러서 직접 입력' }),
+  ).toHaveText('100');
+  await expect(mobileTempo.getByText('4/4', { exact: true })).toBeVisible();
+  await expect(mobileTempo).not.toContainText('BPM');
+  await expect(page.locator('.metronome-tempo-setting')).toHaveCount(0);
+  const bpmTrigger = mobileTempo.getByRole('button', { name: /^현재 BPM / });
+  await bpmTrigger.click();
+  const bpmDialog = page.getByRole('dialog', { name: 'BPM 직접 입력' });
+  const bpmInput = bpmDialog.getByRole('spinbutton', { name: 'BPM', exact: true });
+  await expect(bpmInput).toBeFocused();
+  await bpmInput.fill('103');
+  await bpmDialog.getByRole('button', { name: '적용', exact: true }).click();
+  await expect(bpmTrigger).toHaveText('103');
+  await expect(bpmTrigger).toBeFocused();
+  const meterTrigger = mobileTempo.locator('.bpm-display__meter');
+  await expect(meterTrigger).toHaveAccessibleName('현재 4/4박자, 눌러서 선택');
+  await meterTrigger.click();
+  const meterDialog = page.getByRole('dialog', { name: '박자 선택', exact: true });
+  await expect(meterDialog).toBeVisible();
+  expect(
+    await meterDialog
+      .getByRole('button', { name: /^\d+\/\d+박자$/ })
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
+  ).toEqual(['2/4박자', '3/4박자', '4/4박자', '5/4박자', '6/8박자', '9/8박자', '12/8박자']);
+  await expect(meterDialog.getByRole('button', { name: '4/4박자', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await meterDialog.getByRole('button', { name: '12/8박자', exact: true }).click();
+  await expect(meterDialog).toBeHidden();
+  await expect(meterTrigger).toHaveAccessibleName('현재 12/8박자, 눌러서 선택');
+  await expect(meterTrigger).toBeFocused();
+  const mobileControls = page.locator('.metronome-mobile-controls');
+  await expect(mobileControls).toBeVisible();
+  expect(
+    await mobileControls
+      .locator('button')
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
+  ).toEqual(['BPM 5 낮추기', '메트로놈 재생', 'BPM 5 높이기', '탭 템포']);
+  const mobileGeometry = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>('.metronome-heading');
+    const measure = heading?.querySelector<HTMLElement>('.performance-context');
+    const headingActions = heading?.querySelector<HTMLElement>('.metronome-heading__actions');
+    const number = document.querySelector<HTMLCanvasElement>('.metronome-number canvas');
+    const beats = document.querySelector<HTMLElement>('.metronome-visualizer');
+    const tempo = document.querySelector<HTMLElement>('.bpm-display--mobile');
+    const tempoNumber = tempo?.querySelector<HTMLElement>('button[aria-label^="현재 BPM"] > span');
+    const meter = tempo?.querySelector<HTMLElement>('.bpm-display__meter');
+    const meterNumber = meter?.querySelector<HTMLElement>('span');
+    const controls = document.querySelector<HTMLElement>('.metronome-mobile-controls');
+    const rowButtons = [...(controls?.querySelectorAll<HTMLElement>('button') ?? [])];
+    const main = document.querySelector<HTMLElement>('#main-content');
+    if (
+      !heading ||
+      !measure ||
+      !headingActions ||
+      !number ||
+      !beats ||
+      !tempo ||
+      !tempoNumber ||
+      !meter ||
+      !meterNumber ||
+      !controls ||
+      rowButtons.length !== 4 ||
+      !main
+    ) {
+      throw new Error('Mobile metronome number and control row are missing');
+    }
+    const headingRect = heading.getBoundingClientRect();
+    const measureRect = measure.getBoundingClientRect();
+    const headingActionsRect = headingActions.getBoundingClientRect();
+    const numberRect = number.getBoundingClientRect();
+    const beatsRect = beats.getBoundingClientRect();
+    const tempoRect = tempo.getBoundingClientRect();
+    const tempoNumberRect = tempoNumber.getBoundingClientRect();
+    const meterRect = meter.getBoundingClientRect();
+    const mainRect = main.getBoundingClientRect();
+    const controlsRect = controls.getBoundingClientRect();
+    const controlsStyle = getComputedStyle(controls);
+    const rowRects = rowButtons.map((control) => control.getBoundingClientRect());
+    const ratio = window.devicePixelRatio || 1;
+    const baseline = (element: HTMLElement) => {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+      element.append(probe);
+      const y = probe.getBoundingClientRect().top;
+      probe.remove();
+      return y;
+    };
+    return {
+      measureTop: measureRect.top,
+      measureBottom: measureRect.bottom,
+      measureLeft: measureRect.left,
+      measureRight: measureRect.right,
+      headingLeft: headingRect.left,
+      headingActionsLeft: headingActionsRect.left,
+      numberTop: numberRect.top,
+      numberBottom: numberRect.bottom,
+      numberHeight: numberRect.height,
+      beatsTop: beatsRect.top,
+      beatsBottom: beatsRect.bottom,
+      tempoTop: tempoRect.top,
+      tempoBottom: tempoRect.bottom,
+      tempoNumberCenterDelta: Math.abs(
+        tempoNumberRect.left + tempoNumberRect.width / 2 - (tempoRect.left + tempoRect.width / 2),
+      ),
+      meterClearsNumber:
+        meterRect.left >= tempoNumberRect.right && meterRect.right <= tempoRect.right,
+      tempoMeterBaselineDelta: Math.abs(baseline(tempoNumber) - baseline(meterNumber)),
+      controlsTop: Math.min(...rowRects.map((rect) => rect.top)),
+      controlsBottom: Math.max(...rowRects.map((rect) => rect.bottom)),
+      controlRowCenterSpread:
+        Math.max(...rowRects.map((rect) => rect.top + rect.height / 2)) -
+        Math.min(...rowRects.map((rect) => rect.top + rect.height / 2)),
+      controlsInOrder: rowRects
+        .slice(1)
+        .every((rect, index) => rect.left >= rowRects[index]!.right),
+      transportCenter: (rowRects[0]!.left + rowRects[2]!.right) / 2,
+      controlsCenter: controlsRect.left + controlsRect.width / 2,
+      secondaryButtonsAreUnboxed: rowButtons
+        .filter((button) => !button.classList.contains('play-button'))
+        .every((button) => {
+          const style = getComputedStyle(button);
+          return style.borderWidth === '0px' && style.backgroundColor === 'rgba(0, 0, 0, 0)';
+        }),
+      tapFontSize: parseFloat(getComputedStyle(rowButtons[3]!).fontSize),
+      tapRight: rowRects[3]!.right,
+      controlsContentRight: controlsRect.right - parseFloat(controlsStyle.paddingRight),
+      mainTop: mainRect.top,
+      mainBottom: mainRect.bottom,
+      widthError: Math.abs(number.width - Math.round(numberRect.width * ratio)),
+      heightError: Math.abs(number.height - Math.round(numberRect.height * ratio)),
+    };
+  });
+  expect(mobileGeometry.measureTop).toBeGreaterThanOrEqual(mobileGeometry.mainTop);
+  expect(mobileGeometry.measureBottom).toBeLessThanOrEqual(mobileGeometry.numberTop + 1);
+  expect(Math.abs(mobileGeometry.measureLeft - mobileGeometry.headingLeft)).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.measureRight).toBeLessThanOrEqual(mobileGeometry.headingActionsLeft + 1);
+  expect(mobileGeometry.numberHeight).toBeGreaterThanOrEqual(360);
+  expect(mobileGeometry.numberTop).toBeGreaterThanOrEqual(mobileGeometry.mainTop);
+  expect(mobileGeometry.numberBottom).toBeLessThanOrEqual(mobileGeometry.beatsTop + 1);
+  expect(mobileGeometry.beatsBottom).toBeLessThanOrEqual(mobileGeometry.tempoTop + 1);
+  expect(mobileGeometry.tempoBottom).toBeLessThanOrEqual(mobileGeometry.controlsTop + 1);
+  expect(mobileGeometry.tempoNumberCenterDelta).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.meterClearsNumber).toBe(true);
+  expect(mobileGeometry.tempoMeterBaselineDelta).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.controlsTop).toBeGreaterThanOrEqual(mobileGeometry.numberBottom);
+  expect(mobileGeometry.controlsInOrder).toBe(true);
+  expect(mobileGeometry.controlRowCenterSpread).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(mobileGeometry.transportCenter - mobileGeometry.controlsCenter),
+  ).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.secondaryButtonsAreUnboxed).toBe(true);
+  expect(mobileGeometry.tapFontSize).toBeLessThanOrEqual(12);
+  expect(
+    Math.abs(mobileGeometry.tapRight - mobileGeometry.controlsContentRight),
+  ).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.controlsBottom).toBeLessThanOrEqual(mobileGeometry.mainBottom + 1);
+  expect(mobileGeometry.widthError).toBeLessThanOrEqual(1);
+  expect(mobileGeometry.heightError).toBeLessThanOrEqual(1);
+  const beatCenterDelta = await page
+    .locator('.metronome-visualizer canvas')
+    .evaluate((canvas: HTMLCanvasElement) => {
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Beat canvas context is missing');
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let top = canvas.height;
+      let bottom = -1;
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+          if (pixels[(y * canvas.width + x) * 4 + 3]! < 128) continue;
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+      if (bottom < top) throw new Error('Beat canvas has no visible circles');
+      return Math.abs((top + bottom + 1) / 2 - canvas.height / 2) / window.devicePixelRatio;
+    });
+  expect(beatCenterDelta).toBeLessThanOrEqual(1);
+  const screenProgress = page.locator('.metronome-screen-progress');
+  const screenCanvas = screenProgress.locator('canvas');
+  await expect(screenProgress).toHaveCount(1);
+  await expect(screenProgress).toHaveCSS('position', 'fixed');
+  await expect(screenProgress).toHaveCSS('z-index', '-1');
+  await expect(screenProgress).toHaveCSS('pointer-events', 'none');
+  await expect(page.locator('.app-shell')).toHaveCSS('isolation', 'isolate');
+  const navigationBackground = await page
+    .locator('.bottom-nav')
+    .evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(navigationBackground).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(page.locator('.bottom-nav')).toHaveCSS('background-image', 'none');
+  const assertContentProgressBounds = async () => {
+    const geometry = await screenCanvas.evaluate(async (canvas: HTMLCanvasElement) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const bounds = canvas.getBoundingClientRect();
+      const navigation = document.querySelector<HTMLElement>('.bottom-nav');
+      if (!navigation) throw new Error('Mobile navigation is missing');
+      const navigationBounds = navigation.getBoundingClientRect();
+      const rail = navigationBounds.width < window.innerWidth / 2;
+      const ratio = window.devicePixelRatio || 1;
+      return {
+        insideAppShell: canvas.closest('.app-shell') !== null,
+        insideMetronome: canvas.closest('.metronome-page') !== null,
+        left: bounds.left,
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        expectedLeft: rail ? navigationBounds.right : 0,
+        expectedBottom: rail ? window.innerHeight : navigationBounds.top,
+        viewportWidth: window.innerWidth,
+        overlapsNavigation:
+          bounds.left < navigationBounds.right &&
+          bounds.right > navigationBounds.left &&
+          bounds.top < navigationBounds.bottom &&
+          bounds.bottom > navigationBounds.top,
+        widthError: Math.abs(canvas.width - Math.round(bounds.width * ratio)),
+        heightError: Math.abs(canvas.height - Math.round(bounds.height * ratio)),
+      };
+    });
+    expect(geometry.insideAppShell).toBe(true);
+    expect(geometry.insideMetronome).toBe(true);
+    expect(geometry.left).toBe(geometry.expectedLeft);
+    expect(geometry.top).toBe(0);
+    expect(geometry.right).toBe(geometry.viewportWidth);
+    expect(geometry.bottom).toBe(geometry.expectedBottom);
+    expect(geometry.overlapsNavigation).toBe(false);
+    expect(geometry.widthError).toBeLessThanOrEqual(1);
+    expect(geometry.heightError).toBeLessThanOrEqual(1);
+  };
+  await assertContentProgressBounds();
+  const controlsReceivePointer = await page.evaluate(() =>
+    ['.metronome-mobile-controls .play-button', '.bottom-nav button'].every((selector) => {
+      const button = document.querySelector<HTMLElement>(selector);
+      if (!button) return false;
+      const bounds = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        bounds.left + bounds.width / 2,
+        bounds.top + bounds.height / 2,
+      );
+      return hit !== null && button.contains(hit);
+    }),
+  );
+  expect(controlsReceivePointer).toBe(true);
+  await page.getByRole('button', { name: '메트로놈 재생', exact: true }).click();
+  const metronome = page.locator('.metronome-page');
+  await expect(metronome).toHaveClass(/metronome-page--screen-progress/);
+  await expect(metronome).toHaveAttribute('data-count-in', 'true');
+  await expect(metronome).not.toHaveAttribute('data-count-in', 'true');
+  await expect
+    .poll(() =>
+      screenCanvas.evaluate((canvas: HTMLCanvasElement) => {
+        const context = canvas.getContext('2d');
+        const number = document.querySelector<HTMLCanvasElement>('.metronome-number canvas');
+        const numberContext = number?.getContext('2d');
+        if (!context || !number || !numberContext) {
+          throw new Error('Screen progress or number canvas context is missing');
+        }
+        const rows = [2, Math.floor(canvas.height / 2), canvas.height - 2].map((y) => ({
+          filled: [...context.getImageData(Math.floor(canvas.width * 0.25), y, 1, 1).data],
+          clear: context.getImageData(Math.floor(canvas.width * 0.55), y, 1, 1).data[3],
+        }));
+        const numberBottom = numberContext.getImageData(0, number.height - 2, number.width, 1).data;
+        return {
+          fullHeightProgress: rows.every(
+            (row) =>
+              row.filled.every(
+                (channel, index) => Math.abs(channel - [244, 122, 36, 77][index]!) <= 2,
+              ) &&
+              row.clear === 0 &&
+              row.filled.every((channel, index) => channel === rows[0]!.filled[index]),
+          ),
+          numberHasNoBackground: numberBottom.every(
+            (channel, index) => index % 4 !== 3 || channel === 0,
+          ),
+        };
+      }),
+    )
+    .toEqual({ fullHeightProgress: true, numberHasNoBackground: true });
+  await page.screenshot({ path: testInfo.outputPath('mobile-390-focus-normal.png') });
+  await focusButton.click();
+  await expect(metronome).toHaveClass(/metronome-page--focused/);
+  await expect(metronome).not.toHaveClass(/metronome-page--fullscreen/);
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  const exitFocus = page.getByRole('button', { name: '집중 화면 나가기', exact: true });
+  await expect(exitFocus).toHaveAttribute('aria-pressed', 'true');
+  await expect(metronome).toHaveAttribute('data-playing', 'true');
+  await expect(metronome).not.toHaveAttribute('data-count-in', 'true');
+  await expect(page.locator('.metronome-heading')).toBeHidden();
+  await expect(page.locator('.bottom-nav')).toBeHidden();
+  await expect(page.getByRole('button', { name: '세부 설정', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'BPM 5 낮추기', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '탭 템포', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'BPM 5 높이기', exact: true })).toHaveCount(0);
+  await expect(metronome.getByRole('button')).toHaveCount(4);
+  await expect(bpmTrigger).toBeVisible();
+  await expect(meterTrigger).toBeVisible();
+  await expect(page.getByRole('button', { name: '메트로놈 정지', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('mobile-390-focus-active.png') });
+  await bpmTrigger.click();
+  await expect(bpmInput).toHaveValue('103');
+  await bpmInput.fill('104');
+  await page.keyboard.press('Escape');
+  await expect(bpmDialog).toBeHidden();
+  await expect(bpmTrigger).toHaveText('103');
+  await expect(bpmTrigger).toBeFocused();
+  await expect(metronome).toHaveClass(/metronome-page--focused/);
+  await meterTrigger.click();
+  await expect(meterDialog.getByRole('button', { name: '12/8박자', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  await expect(meterDialog).toBeHidden();
+  await expect(meterTrigger).toBeFocused();
+  await expect(metronome).toHaveClass(/metronome-page--focused/);
+  await exitFocus.click();
+  await expect(metronome).not.toHaveClass(/metronome-page--focused/);
+  await expect(focusButton).toBeFocused();
+  await expect(metronome).toHaveAttribute('data-playing', 'true');
+  await expect(metronome).not.toHaveAttribute('data-count-in', 'true');
+  await page.keyboard.press('Space');
+  await expect(metronome).toHaveClass(/metronome-page--focused/);
+  await page.keyboard.press('Escape');
+  await expect(metronome).not.toHaveClass(/metronome-page--focused/);
+  await expect(focusButton).toBeFocused();
+  await expect(metronome).toHaveAttribute('data-playing', 'true');
+  await expect(metronome).not.toHaveAttribute('data-count-in', 'true');
+  await page.getByRole('button', { name: '메트로놈 정지', exact: true }).click();
   const compactSettings = page.getByRole('button', { name: '세부 설정' });
   await expect(compactSettings).toBeVisible();
   await compactSettings.click();
@@ -516,16 +893,74 @@ test('start measure stays available in compact and tall-medium layouts', async (
   await expect(dialogStartMeasure).toBeVisible();
   await dialogStartMeasure.fill('4');
   await expect(dialogStartMeasure).toHaveValue('4');
+  await expect(dialog.getByRole('button', { name: /^현재 BPM / })).toHaveCount(0);
+  await dialog.getByRole('combobox', { name: '박자', exact: true }).selectOption('3/4');
   await dialog.getByRole('button', { name: '닫기' }).click();
+  await expect(mobileTempo.getByText('3/4', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 768, height: 1_024 });
   await expect(page.locator('.metronome-settings')).toBeVisible();
+  await expect(mobileTempo).toBeVisible();
+  await expect(
+    page.locator('.metronome-settings').getByRole('combobox', { name: '박자', exact: true }),
+  ).toHaveValue('3/4');
   await expect(page.getByRole('button', { name: '세부 설정' })).toBeHidden();
+  await expect(
+    page.locator('.metronome-settings').getByRole('button', { name: '예비박', exact: true }),
+  ).toBeVisible();
   const inlineStartMeasure = page.locator('.quick-settings').getByRole('spinbutton', {
     name: '시작 마디',
   });
   await expect(inlineStartMeasure).toBeVisible();
   await expect(inlineStartMeasure).toHaveValue('4');
+  await expect(screenCanvas).toBeVisible();
+  await assertContentProgressBounds();
+
+  await page.setViewportSize({ width: 768, height: 600 });
+  await assertContentProgressBounds();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '32px';
+  });
+  await assertContentProgressBounds();
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty('font-size');
+  });
+
+  await page.setViewportSize({ width: 840, height: 900 });
+  await expect(screenProgress).toHaveCount(0);
+  await expect(metronome).not.toHaveClass(/metronome-page--screen-progress/);
+  await page.getByRole('button', { name: '보면대 모드' }).click();
+  await expect(metronome).toHaveClass(/metronome-page--fullscreen/);
+  await expect(screenProgress).toHaveCount(0);
+  await expect(metronome).not.toHaveClass(/metronome-page--screen-progress/);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: '나가기', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(screenCanvas).toBeVisible();
+  await page.getByRole('button', { name: '메트로놈 재생', exact: true }).click();
+  await expect(metronome).toHaveAttribute('data-playing', 'true');
+  const reducedMotionHasFill = await screenCanvas.evaluate(async (canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Screen progress canvas context is missing');
+    for (let frame = 0; frame < 24; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const rows = [2, Math.floor(canvas.height / 2), canvas.height - 2];
+      if (rows.some((y) => context.getImageData(1, y, 1, 1).data[3]! > 0)) return true;
+    }
+    return false;
+  });
+  expect(reducedMotionHasFill).toBe(false);
+  const mobileMenu = page.getByRole('navigation', { name: '모바일 주요 메뉴' });
+  await mobileMenu.getByRole('button', { name: '더보기', exact: true }).click();
+  const more = page.getByRole('dialog', { name: '더보기', exact: true });
+  await expect(more).toBeVisible();
+  await more.getByRole('button', { name: '닫기', exact: true }).click();
+  await mobileMenu.getByRole('link', { name: '악보', exact: true }).click();
+  await expect(page).toHaveURL(/\/scores$/);
+  await expect(page.getByRole('heading', { name: '악보', exact: true })).toBeVisible();
+  await expect(screenProgress).toHaveCount(0);
+  await expect(page.locator('.bottom-nav')).toHaveCSS('background-color', navigationBackground);
 });
 
 test('settings dialog restores focus when its compact trigger disappears', async ({ page }) => {
@@ -551,6 +986,119 @@ test('settings dialog restores focus when its compact trigger disappears', async
     await expect(inlineStartMeasure).toBeVisible();
     await expect(inlineStartMeasure).toBeFocused();
   }
+});
+
+test('mobile tap pad separates entry from measured taps and restores focus', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install({ time: new Date('2026-09-29T00:00:00Z') });
+  await page.goto('/feelmyrythm/');
+  const launcher = page.getByRole('button', { name: '탭 템포', exact: true });
+  const bpm = page.locator('.bpm-display > button[aria-label^="현재 BPM"] > span');
+  await expect(bpm).toHaveText('100');
+  await page.clock.pauseAt(new Date('2026-09-29T00:01:00Z'));
+  await launcher.click();
+  await page.clock.runFor(32);
+
+  const panel = page.locator('.tap-tempo-panel');
+  const pad = panel.getByRole('button', { name: '박자에 맞춰 탭', exact: true });
+  const close = panel.getByRole('button', { name: '탭 템포 닫기', exact: true });
+  await expect(panel).toBeVisible();
+  await expect(pad).toBeFocused();
+  await expect(pad).toHaveJSProperty('tagName', 'BUTTON');
+  await expect(pad).not.toHaveAttribute('data-feedback');
+  await expect(bpm).toHaveText('100');
+  await expect(page.locator('.metronome-mobile-controls')).toBeHidden();
+  await expect(page.getByRole('button', { name: '메트로놈 재생', exact: true })).toHaveCount(0);
+  const panelGeometry = await panel.evaluate((element) => {
+    const pad = element.querySelector<HTMLElement>('.tap-tempo-pad');
+    const close = element.querySelector<HTMLElement>('[aria-label="탭 템포 닫기"]');
+    const controls = element.closest<HTMLElement>('.metronome-controls');
+    const main = element.closest<HTMLElement>('#main-content');
+    if (!pad || !close || !controls || !main) throw new Error('Tap pad regions are missing');
+    const panel = element.getBoundingClientRect();
+    const padRect = pad.getBoundingClientRect();
+    const closeRect = close.getBoundingClientRect();
+    const controlsRect = controls.getBoundingClientRect();
+    const controlsStyle = getComputedStyle(controls);
+    return {
+      siblings: pad.parentElement === close.parentElement,
+      panelWidth: panel.width,
+      controlsContentWidth:
+        controlsRect.width -
+        parseFloat(controlsStyle.paddingLeft) -
+        parseFloat(controlsStyle.paddingRight),
+      padWidth: padRect.width,
+      padHeight: padRect.height,
+      closeWidth: closeRect.width,
+      closeHeight: closeRect.height,
+      closeInUpperRight:
+        closeRect.left >= panel.left + panel.width / 2 &&
+        closeRect.right <= panel.right &&
+        closeRect.top >= panel.top &&
+        closeRect.top + closeRect.height / 2 <= panel.top + panel.height / 2,
+      panelBottom: panel.bottom,
+      mainBottom: main.getBoundingClientRect().bottom,
+    };
+  });
+  expect(panelGeometry.siblings).toBe(true);
+  expect(
+    Math.abs(panelGeometry.panelWidth - panelGeometry.controlsContentWidth),
+  ).toBeLessThanOrEqual(1);
+  expect(panelGeometry.padWidth).toBeGreaterThanOrEqual(240);
+  expect(panelGeometry.padHeight).toBeGreaterThanOrEqual(100);
+  expect(panelGeometry.closeWidth).toBeGreaterThanOrEqual(48);
+  expect(panelGeometry.closeHeight).toBeGreaterThanOrEqual(48);
+  expect(panelGeometry.closeInUpperRight).toBe(true);
+  expect(panelGeometry.panelBottom).toBeLessThanOrEqual(panelGeometry.mainBottom + 1);
+  await page.screenshot({ path: testInfo.outputPath('mobile-390-tempo-background-tap-pad.png') });
+
+  await pad.click();
+  await expect(pad).toHaveAttribute('data-feedback', '다시 탭');
+  await expect(bpm).toHaveText('100');
+  await page.clock.runFor(500);
+  await pad.click();
+  await expect(pad).toHaveAttribute('data-feedback', '2회');
+  await expect(bpm).toHaveText('120');
+  await page.clock.runFor(800);
+  await pad.click();
+  await page.clock.runFor(400);
+  await pad.click();
+  await expect(pad).toHaveAttribute('data-feedback', '4회');
+  // The existing tap algorithm uses the median of recent intervals: 500, 800, 400 ms.
+  await expect(bpm).toHaveText('120');
+
+  await close.click();
+  await page.clock.runFor(32);
+  await expect(panel).toBeHidden();
+  await expect(launcher).toBeFocused();
+  await expect(bpm).toHaveText('120');
+  await launcher.press('Enter');
+  await page.clock.runFor(32);
+  await expect(pad).toBeFocused();
+  await expect(pad).not.toHaveAttribute('data-feedback');
+  await pad.press('Space');
+  await expect(pad).toHaveAttribute('data-feedback', '다시 탭');
+  await expect(bpm).toHaveText('120');
+  await page.keyboard.press('Escape');
+  await page.clock.runFor(32);
+  await expect(panel).toBeHidden();
+  await expect(launcher).toBeFocused();
+  await expect(bpm).toHaveText('120');
+
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.clock.runFor(32);
+  await expect(
+    page.locator('.metronome-stage .bpm-display > button[aria-label^="현재 BPM"] > span'),
+  ).toHaveText('120');
+  const desktopTap = page
+    .locator('.bpm-steppers')
+    .getByRole('button', { name: '탭 템포', exact: true });
+  await expect(desktopTap).toBeVisible();
+  await desktopTap.click();
+  await expect(desktopTap).toHaveAttribute('data-feedback', /다시 탭|\d+회/);
+  await expect(panel).toBeHidden();
 });
 
 test('medium-height layout restores inline settings without a large boundary jump', async ({
@@ -627,7 +1175,7 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
     await expect(page.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled();
     expect(await page.evaluate(() => matchMedia('(any-pointer: coarse)').matches)).toBe(true);
 
-    for (const name of ['메트로놈 재생', 'BPM 5 낮추기', '탭 템포', 'BPM 5 높이기', '예비박']) {
+    for (const name of ['메트로놈 재생', 'BPM 5 낮추기', '탭 템포', 'BPM 5 높이기']) {
       const target = page.getByRole('button', { name, exact: true });
       await expect(target).toBeVisible();
       const bounds = await target.boundingBox();
@@ -637,11 +1185,59 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
         48,
       );
     }
-    const visibleCountInText = await page
-      .locator('.count-in-button')
-      .evaluate((element) => (element as HTMLElement).innerText);
+    const controlRow = await page.locator('.metronome-mobile-controls').evaluate((element) => {
+      const buttons = [...element.querySelectorAll('button')];
+      const rects = buttons.map((button) => button.getBoundingClientRect());
+      const row = element.getBoundingClientRect();
+      return {
+        names: buttons.map((button) => button.getAttribute('aria-label')),
+        centerSpread:
+          Math.max(...rects.map((rect) => rect.top + rect.height / 2)) -
+          Math.min(...rects.map((rect) => rect.top + rect.height / 2)),
+        leftToRight: rects.slice(1).every((rect, index) => rect.left >= rects[index]!.right),
+        transportCenterError: Math.abs(
+          (rects[0]!.left + rects[2]!.right) / 2 - (row.left + row.width / 2),
+        ),
+      };
+    });
+    expect(controlRow.names).toEqual(['BPM 5 낮추기', '메트로놈 재생', 'BPM 5 높이기', '탭 템포']);
+    expect(controlRow.centerSpread, `${viewport.width}px one-row controls`).toBeLessThanOrEqual(1);
+    expect(controlRow.leftToRight, `${viewport.width}px control order`).toBe(true);
+    expect(
+      controlRow.transportCenterError,
+      `${viewport.width}px centered transport`,
+    ).toBeLessThanOrEqual(1);
+    await expect(page.locator('.metronome-controls .count-in-button')).toHaveCount(0);
+    const settings = page.getByRole('button', { name: '세부 설정' });
+    const usesSettingsDialog = await settings.isVisible();
+    if (usesSettingsDialog) await settings.click();
+    const settingsRegion = usesSettingsDialog
+      ? page.getByRole('dialog', { name: '메트로놈 세부 설정' })
+      : page.locator('.metronome-settings');
+    const countIn = settingsRegion.getByRole('button', { name: '예비박', exact: true });
+    await expect(countIn).toBeVisible();
+    const countInBounds = await countIn.boundingBox();
+    expect(countInBounds, `${viewport.width}px settings count-in target`).not.toBeNull();
+    expect(countInBounds!.width).toBeGreaterThanOrEqual(48);
+    expect(countInBounds!.height).toBeGreaterThanOrEqual(48);
+    const visibleCountInText = await countIn.evaluate(
+      (element) => (element as HTMLElement).innerText,
+    );
     expect(visibleCountInText).toContain('예비');
     expect(visibleCountInText).toMatch(/켬|끔/);
+    await expect(settingsRegion.getByRole('button', { name: /^현재 BPM / })).toHaveCount(0);
+    if (usesSettingsDialog) {
+      await page.keyboard.press('Escape');
+      await expect(settings).toBeFocused();
+    }
+    const tempo = page
+      .locator('.bpm-display--mobile')
+      .getByRole('button', { name: '현재 BPM 100, 눌러서 직접 입력' });
+    await expect(tempo).toBeVisible();
+    const tempoBounds = await tempo.boundingBox();
+    expect(tempoBounds, `${viewport.width}px main BPM target`).not.toBeNull();
+    expect(tempoBounds!.width).toBeGreaterThanOrEqual(48);
+    expect(tempoBounds!.height).toBeGreaterThanOrEqual(48);
 
     await page.locator('.metronome-page').evaluate((container) => {
       const stage = container.querySelector('.metronome-stage');
@@ -661,11 +1257,9 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
 
     const retry = page.getByRole('button', { name: '다시 시도', exact: true });
     const retryBounds = await retry.boundingBox();
-    const bpmBounds = await page.locator('.bpm-display > button').boundingBox();
     expect(retryBounds).not.toBeNull();
     expect(retryBounds!.height).toBeGreaterThanOrEqual(48);
-    expect(bpmBounds).not.toBeNull();
-    expect(bpmBounds!.height).toBeGreaterThanOrEqual(48);
+    await expect(page.locator('.metronome-stage .bpm-display--mobile')).toBeVisible();
     const audit = await auditLayout(page);
     expect(audit.documentOverflow).toBeLessThanOrEqual(1);
     expect(audit.navOverlaps).toEqual([]);
@@ -795,28 +1389,60 @@ test('200% text keeps the primary metronome path clear of the mobile navigation'
     );
     const main = page.locator('#main-content');
     const nav = page.locator('.bottom-nav');
-    const bpm = page.locator('.bpm-display > button');
+    const number = page.locator('.metronome-number');
     await expect(main).toBeVisible();
     await expect(nav).toBeVisible();
-    await expect(bpm).toBeVisible();
+    await expect(number).toBeVisible();
+    const tempo = page.locator('.metronome-stage .bpm-display--mobile');
+    await expect(tempo).toBeVisible();
     const mainRect = await main.boundingBox();
     const navRect = await nav.boundingBox();
-    const bpmRect = await bpm.boundingBox();
+    const numberRect = await number.boundingBox();
+    const beatsRect = await page.locator('.metronome-visualizer').boundingBox();
+    const tempoRect = await tempo.boundingBox();
+    const controlsRect = await page.locator('.metronome-mobile-controls').boundingBox();
     expect(mainRect, `${viewport.width}x${viewport.height} main`).not.toBeNull();
     expect(navRect, `${viewport.width}x${viewport.height} nav`).not.toBeNull();
-    expect(bpmRect, `${viewport.width}x${viewport.height} BPM`).not.toBeNull();
+    expect(numberRect, `${viewport.width}x${viewport.height} number`).not.toBeNull();
+    expect(beatsRect, `${viewport.width}x${viewport.height} beats`).not.toBeNull();
+    expect(tempoRect, `${viewport.width}x${viewport.height} tempo`).not.toBeNull();
+    expect(controlsRect, `${viewport.width}x${viewport.height} controls`).not.toBeNull();
     const initialGeometry = {
-      bpmFullyVisible:
-        bpmRect!.y >= mainRect!.y - 1 &&
-        bpmRect!.y + bpmRect!.height <= mainRect!.y + mainRect!.height + 1,
+      numberStartsVisible:
+        numberRect!.y >= mainRect!.y - 1 && numberRect!.y < mainRect!.y + mainRect!.height,
+      numberClearsBeats: numberRect!.y + numberRect!.height <= beatsRect!.y + 1,
+      beatsClearTempo: beatsRect!.y + beatsRect!.height <= tempoRect!.y + 1,
+      tempoClearsControls: tempoRect!.y + tempoRect!.height <= controlsRect!.y + 1,
       navHeight: navRect!.height,
       navStartsAtMainEnd: Math.abs(navRect!.y - (mainRect!.y + mainRect!.height)),
     };
-    expect(initialGeometry.bpmFullyVisible, `${viewport.width}x${viewport.height} BPM`).toBe(true);
+    expect(initialGeometry.numberStartsVisible, `${viewport.width}x${viewport.height} number`).toBe(
+      true,
+    );
+    expect(
+      initialGeometry.numberClearsBeats,
+      `${viewport.width}x${viewport.height} beat separation`,
+    ).toBe(true);
+    expect(
+      initialGeometry.beatsClearTempo,
+      `${viewport.width}x${viewport.height} tempo separation`,
+    ).toBe(true);
+    expect(
+      initialGeometry.tempoClearsControls,
+      `${viewport.width}x${viewport.height} control separation`,
+    ).toBe(true);
     expect(initialGeometry.navHeight).toBeLessThanOrEqual(viewport.width <= 359 ? 88 : 96);
     expect(initialGeometry.navStartsAtMainEnd).toBeLessThanOrEqual(1);
 
-    for (const selector of ['.play-button', '.tap-button', '.count-in-button']) {
+    for (const selector of [
+      '.bpm-display--mobile > button[aria-label^="현재 BPM"]',
+      '.bpm-display__meter',
+      '.metronome-mobile-controls [aria-label="BPM 5 낮추기"]',
+      '.play-button',
+      '.metronome-mobile-controls [aria-label="BPM 5 높이기"]',
+      '.tap-button',
+      '.metronome-heading__short-settings',
+    ]) {
       const control = page.locator(selector);
       await control.focus();
       await expect(control).toBeFocused();
@@ -839,6 +1465,64 @@ test('200% text keeps the primary metronome path clear of the mobile navigation'
         .toBe(true);
     }
 
+    const tapLauncher = page.getByRole('button', { name: '탭 템포', exact: true });
+    await tapLauncher.click();
+    for (const name of ['박자에 맞춰 탭', '탭 템포 닫기']) {
+      const control = page.getByRole('button', { name, exact: true });
+      await control.focus();
+      await expect(control).toBeFocused();
+      await expect
+        .poll(() =>
+          control.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const main = document.querySelector('#main-content')?.getBoundingClientRect();
+            const nav = document.querySelector('.bottom-nav')?.getBoundingClientRect();
+            return Boolean(
+              main &&
+              nav &&
+              rect.width >= 48 &&
+              rect.height >= 48 &&
+              rect.left >= main.left &&
+              rect.right <= main.right &&
+              rect.top >= main.top &&
+              rect.bottom <= Math.min(main.bottom, nav.top) + 1,
+            );
+          }),
+        )
+        .toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.tap-tempo-panel')).toBeHidden();
+    await expect(tapLauncher).toBeFocused();
+
+    const settings = page.getByRole('button', { name: '세부 설정' });
+    await settings.click();
+    const dialog = page.getByRole('dialog', { name: '메트로놈 세부 설정' });
+    const countIn = dialog.getByRole('button', { name: '예비박', exact: true });
+    await countIn.focus();
+    await expect(countIn).toBeFocused();
+    await expect
+      .poll(() =>
+        countIn.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const dialog = element.closest('[role="dialog"]')?.getBoundingClientRect();
+          return Boolean(
+            dialog &&
+            rect.width >= 48 &&
+            rect.height >= 48 &&
+            rect.left >= dialog.left &&
+            rect.right <= dialog.right &&
+            rect.top >= dialog.top &&
+            rect.bottom <= Math.min(dialog.bottom, window.innerHeight),
+          );
+        }),
+      )
+      .toBe(true);
+    await page.keyboard.press('Space');
+    await expect(countIn).toHaveAttribute('aria-pressed', 'false');
+    await page.keyboard.press('Escape');
+    await expect(settings).toBeFocused();
+
     await context.close();
   }
 });
@@ -858,7 +1542,12 @@ test('BPM dialog keeps its initial focus visible at effective 256px and 200% tex
     document.documentElement.style.fontSize = '32px';
   });
 
-  await page.locator('.bpm-display > button').click();
+  const tempo = page.locator('.bpm-display--mobile').getByRole('button', {
+    name: /^현재 BPM \d+, 눌러서 직접 입력$/,
+  });
+  await expect(tempo).toHaveText('100');
+  await expect(page.locator('.metronome-tempo-setting')).toHaveCount(0);
+  await tempo.click();
   const dialog = page.getByRole('dialog', { name: 'BPM 직접 입력' });
   const input = dialog.getByRole('spinbutton', { name: 'BPM' });
   await expect(input).toBeFocused();
@@ -876,6 +1565,19 @@ test('BPM dialog keeps its initial focus visible at effective 256px and 200% tex
       }),
     )
     .toBe(true);
+
+  await input.fill('128');
+  await dialog.getByRole('button', { name: '적용', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(tempo).toHaveText('128');
+  await expect(tempo).toBeFocused();
+  await tempo.click();
+  await expect(input).toHaveValue('128');
+  await input.fill('132');
+  await dialog.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(tempo).toHaveText('128');
+  await expect(tempo).toBeFocused();
 
   await context.close();
 });

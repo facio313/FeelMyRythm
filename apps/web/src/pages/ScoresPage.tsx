@@ -1,6 +1,14 @@
-import { assertValidTempoMap, type TempoMap } from '@feelmyrythm/core';
+import { assertValidTempoMap, beatsPerMeasure, type TempoMap } from '@feelmyrythm/core';
 import type { components } from '@feelmyrythm/protocol';
-import { Button, Card, EmptyState, Field, StatusBadge, useToast } from '@feelmyrythm/ui';
+import {
+  BeatVisualizer,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  StatusBadge,
+  useToast,
+} from '@feelmyrythm/ui';
 import {
   BookOpen,
   ChevronDown,
@@ -76,7 +84,11 @@ import {
 } from '../lib/scoreApi';
 import { useAsync } from '../lib/useAsync';
 import { createDefaultTempoMap } from '../lib/defaultTempoMap';
-import { useMetronome } from '../lib/useMetronome';
+import {
+  useMetronome,
+  type MetronomeController,
+  type MetronomePosition,
+} from '../lib/useMetronome';
 
 interface NormalizedRect {
   x: number;
@@ -403,11 +415,66 @@ function ScoreSurface({
   return <div className="unsupported-score">이 악보 형식은 미리보기를 지원하지 않습니다.</div>;
 }
 
-export function ScoresPage() {
-  const { scoreId, repertoireItemId: routeRepertoireId } = useParams<{
+export interface SynchronizedScorePlayback {
+  tempoMap: TempoMap;
+  playing: boolean;
+  position: MetronomePosition;
+  frameSource: MetronomeController['frameSource'];
+}
+
+export interface ScoresPageProps {
+  repertoireItemId?: string;
+  synchronizedPlayback?: SynchronizedScorePlayback;
+}
+
+export function ScoresPage({ synchronizedPlayback, ...props }: ScoresPageProps = {}) {
+  if (synchronizedPlayback) {
+    return (
+      <ScoresPageContent
+        key={props.repertoireItemId}
+        {...props}
+        playbackMap={synchronizedPlayback.tempoMap}
+        metronome={synchronizedPlayback}
+      />
+    );
+  }
+  return <StandaloneScoresPage {...props} />;
+}
+
+function StandaloneScoresPage(props: Omit<ScoresPageProps, 'synchronizedPlayback'>) {
+  const [playbackMap, setPlaybackMap] = useState<TempoMap>(() => createDefaultTempoMap());
+  const metronome = useMetronome(playbackMap);
+  return (
+    <ScoresPageContent
+      {...props}
+      playbackMap={playbackMap}
+      setPlaybackMap={setPlaybackMap}
+      metronome={metronome}
+      localController={metronome}
+    />
+  );
+}
+
+function ScoresPageContent({
+  repertoireItemId: explicitRepertoireId,
+  playbackMap,
+  setPlaybackMap,
+  metronome,
+  localController,
+}: {
+  repertoireItemId?: string;
+  playbackMap: TempoMap;
+  setPlaybackMap?: (map: TempoMap) => void;
+  metronome: Pick<MetronomeController, 'playing' | 'position' | 'frameSource'>;
+  localController?: MetronomeController;
+}) {
+  const embedded = !localController;
+  const [embeddedScoreId, setEmbeddedScoreId] = useState<string>();
+  const { scoreId: routeScoreId, repertoireItemId: routeRepertoireId } = useParams<{
     scoreId?: string;
     repertoireItemId?: string;
   }>();
+  const scoreId = embedded ? embeddedScoreId : routeScoreId;
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { notify } = useToast();
@@ -417,7 +484,7 @@ export function ScoresPage() {
   const requestedMeasure = Number(searchParams.get('measure'));
   const initialMeasure =
     Number.isInteger(requestedMeasure) && requestedMeasure > 0 ? requestedMeasure : 1;
-  const repertoireItemId = routeRepertoireId ?? queryRepertoireId;
+  const repertoireItemId = explicitRepertoireId ?? routeRepertoireId ?? queryRepertoireId;
   const activeRepertoireIdRef = useRef(repertoireItemId);
   const remoteMode = Boolean(user && repertoireItemId);
   const omrDraftCreationEnabled = omrDraftCreationAvailableInCurrentBuild();
@@ -460,8 +527,9 @@ export function ScoresPage() {
   const [savingMetadata, setSavingMetadata] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [usingOfflineCache, setUsingOfflineCache] = useState(false);
-  const [playbackMap, setPlaybackMap] = useState<TempoMap>(() => createDefaultTempoMap());
-  const [playbackReady, setPlaybackReady] = useState(false);
+  const [localPlaybackReady, setPlaybackReady] = useState(false);
+  const playbackReady = embedded || localPlaybackReady;
+  const [linkingTempoMap, setLinkingTempoMap] = useState(false);
   const [playbackNotice, setPlaybackNotice] = useState<{
     message: string;
     tone: 'warning' | 'danger';
@@ -472,7 +540,6 @@ export function ScoresPage() {
   const [scoreReloadToken, setScoreReloadToken] = useState(0);
   const [autoPageFollowing, setAutoPageFollowing] = useState(true);
   const [scoreZoom, setScoreZoom] = useState(1);
-  const metronome = useMetronome(playbackMap);
 
   useLayoutEffect(() => {
     activeScoreIdRef.current = scoreId;
@@ -507,6 +574,17 @@ export function ScoresPage() {
       return `${root}?${params.toString()}`;
     },
     [queryRepertoireId, queryString, routeRepertoireId],
+  );
+
+  const openScore = useCallback(
+    (nextScoreId: string, replace = false) => {
+      if (embedded) {
+        setEmbeddedScoreId(nextScoreId);
+      } else {
+        void navigate(scorePath(nextScoreId), { replace });
+      }
+    },
+    [embedded, navigate, scorePath],
   );
 
   const scores = useAsync<ScoreListItem[]>(async () => {
@@ -551,7 +629,13 @@ export function ScoresPage() {
     repertoireAccess.data?.role === 'owner' ||
     repertoireAccess.data?.role === 'leader';
 
+  const localTempoMaps = useAsync<TempoMap[]>(
+    async () => (remoteMode || embedded ? [] : localDb.listTempoMaps()),
+    [embedded, remoteMode, selected?.tempoMapId],
+  );
+
   useEffect(() => {
+    if (!setPlaybackMap) return;
     let active = true;
     void (async () => {
       await Promise.resolve();
@@ -625,10 +709,19 @@ export function ScoresPage() {
     return () => {
       active = false;
     };
-  }, [client, notify, remoteCacheScope, remoteMode, repertoireItemId, scoreReloadToken, selected]);
+  }, [
+    client,
+    notify,
+    remoteCacheScope,
+    remoteMode,
+    repertoireItemId,
+    scoreReloadToken,
+    selected,
+    setPlaybackMap,
+  ]);
 
   useEffect(() => {
-    if (!Number.isInteger(requestedMeasure) || requestedMeasure < 1) return;
+    if (embedded || !Number.isInteger(requestedMeasure) || requestedMeasure < 1) return;
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -644,10 +737,10 @@ export function ScoresPage() {
     return () => {
       active = false;
     };
-  }, [measureMap, requestedMeasure]);
+  }, [embedded, measureMap, requestedMeasure]);
 
   useEffect(() => {
-    if (!metronome.playing) return;
+    if (!metronome.playing && !embedded) return;
     const next = metronome.position.measureNumber;
     if (next === currentMeasureRef.current) return;
     let active = true;
@@ -662,7 +755,13 @@ export function ScoresPage() {
     return () => {
       active = false;
     };
-  }, [autoPageFollowing, measureMap, metronome.playing, metronome.position.measureNumber]);
+  }, [
+    autoPageFollowing,
+    embedded,
+    measureMap,
+    metronome.playing,
+    metronome.position.measureNumber,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -1086,8 +1185,14 @@ export function ScoresPage() {
     const first = scores.data?.[0];
     if (scoreId || scores.loading || !first) return;
     if (repertoireItemId && first.repertoireItemId !== repertoireItemId) return;
-    void navigate(scorePath(first.id), { replace: true });
-  }, [navigate, repertoireItemId, scoreId, scorePath, scores.data, scores.loading]);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) openScore(first.id, true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [openScore, repertoireItemId, scoreId, scores.data, scores.loading]);
 
   useEffect(() => {
     if (!scores.error) return;
@@ -1126,14 +1231,16 @@ export function ScoresPage() {
       }
       if (isMusicXmlName(file.name)) {
         if (remoteMode && repertoireItemId) {
-          const targetRepertoireId = repertoireItemId;
-          const draft = await createMusicXmlDraft(client, targetRepertoireId, file);
-          if (activeRepertoireIdRef.current !== targetRepertoireId) return;
-          remoteTempoDraft = {
-            draft,
-            filename: file.name,
-            repertoireItemId: targetRepertoireId,
-          };
+          if (!embedded) {
+            const targetRepertoireId = repertoireItemId;
+            const draft = await createMusicXmlDraft(client, targetRepertoireId, file);
+            if (activeRepertoireIdRef.current !== targetRepertoireId) return;
+            remoteTempoDraft = {
+              draft,
+              filename: file.name,
+              repertoireItemId: targetRepertoireId,
+            };
+          }
         } else {
           const xml = await readMusicXml(file);
           const draft = musicXmlToTempoMap(xml, file.name.replace(/\.[^.]+$/, ''));
@@ -1167,7 +1274,7 @@ export function ScoresPage() {
           });
         }
         scores.reload();
-        void navigate(scorePath(score.id));
+        openScore(score.id);
         notify({ title: '악보를 서버에 저장했습니다.', tone: 'success' });
         return;
       }
@@ -1183,7 +1290,7 @@ export function ScoresPage() {
       };
       await localDb.putScore(score);
       scores.reload();
-      void navigate(scorePath(score.id));
+      openScore(score.id);
     } catch (error) {
       notify({
         title: '악보를 가져오지 못했습니다.',
@@ -1928,7 +2035,12 @@ export function ScoresPage() {
   };
 
   const savePendingTempoDraft = async () => {
-    if (!pendingTempoDraft || pendingTempoDraft.repertoireItemId !== repertoireItemId) return;
+    if (
+      !setPlaybackMap ||
+      !pendingTempoDraft ||
+      pendingTempoDraft.repertoireItemId !== repertoireItemId
+    )
+      return;
     const targetDraft = pendingTempoDraft;
     const targetRepertoireId = targetDraft.repertoireItemId;
     setSavingDraft(true);
@@ -1976,13 +2088,78 @@ export function ScoresPage() {
     }
   };
 
+  const linkLocalTempoMap = async (mapId: string) => {
+    if (!selected || remoteMode || embedded || !mapId) return;
+    const targetScore = selected;
+    setLinkingTempoMap(true);
+    try {
+      const map = await localDb.getTempoMap(mapId);
+      if (!map) throw new Error('연결할 템포맵을 찾지 못했습니다.');
+      assertValidTempoMap(map);
+      const linked = { ...targetScore, tempoMapId: map.id, updatedAt: new Date().toISOString() };
+      await localDb.putScore(linked);
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      localController?.stop();
+      setSelected(linked);
+      notify({ title: '악보에 템포맵을 연결했습니다.', tone: 'success' });
+    } catch (error) {
+      notify({
+        title: '템포맵을 연결하지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    } finally {
+      setLinkingTempoMap(false);
+    }
+  };
+
+  const openTempoEditor = async () => {
+    if (!selected || embedded || !canManageScores || usingOfflineCache) return;
+    const targetScore = selected;
+    if (remoteMode && repertoireItemId) {
+      void navigate(
+        `/editor/${encodeURIComponent(repertoireItemId)}?score=${encodeURIComponent(targetScore.id)}`,
+      );
+      return;
+    }
+    setLinkingTempoMap(true);
+    try {
+      let map: TempoMap | undefined;
+      if (targetScore.tempoMapId) {
+        map = await localDb.getTempoMap(targetScore.tempoMapId);
+        if (!map) throw new Error('연결된 템포맵을 찾지 못했습니다. 다른 템포맵을 연결해 주세요.');
+      } else {
+        map = createDefaultTempoMap(targetScore.repertoireItemId);
+        await localDb.putTempoMap(map);
+        await localDb.putScore({
+          ...targetScore,
+          tempoMapId: map.id,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      if (activeScoreIdRef.current !== targetScore.id) return;
+      void navigate(
+        `/editor/${encodeURIComponent(map.id)}?source=local&score=${encodeURIComponent(targetScore.id)}`,
+      );
+    } catch (error) {
+      notify({
+        title: '템포맵 편집기를 열지 못했습니다.',
+        description: error instanceof Error ? error.message : String(error),
+        tone: 'danger',
+      });
+    } finally {
+      setLinkingTempoMap(false);
+    }
+  };
+
   const togglePlayback = async () => {
+    if (!localController) return;
     if (metronome.playing) {
-      metronome.stop();
+      localController.stop();
       return;
     }
     try {
-      await metronome.start(currentMeasure, 1, true);
+      await localController.start(currentMeasure, 1, true);
     } catch (error) {
       notify({
         title: '악보 재생을 시작하지 못했습니다.',
@@ -1993,12 +2170,17 @@ export function ScoresPage() {
   };
 
   async function selectCanonicalMeasure(canonical: number, targetPage?: number): Promise<void> {
+    if (embedded) {
+      setAutoPageFollowing(false);
+      if (targetPage !== undefined) setPage(targetPage);
+      return;
+    }
     currentMeasureRef.current = canonical;
     setCurrentMeasure(canonical);
     if (targetPage !== undefined) setPage(targetPage);
-    if (!metronome.playing) return;
+    if (!metronome.playing || !localController) return;
     try {
-      await metronome.start(canonical, 1, false);
+      await localController.start(canonical, 1, false);
     } catch (error) {
       notify({
         title: '선택한 마디로 이동하지 못했습니다.',
@@ -2080,6 +2262,25 @@ export function ScoresPage() {
       : [];
   });
   const parts = scores.data ?? [];
+  const playbackMeasure =
+    metronome.playing || embedded ? metronome.position.measureNumber : currentMeasure;
+  const playbackSection = playbackMap.sections.find(
+    (section) => section.startMeasure <= playbackMeasure && section.endMeasure >= playbackMeasure,
+  );
+  const playbackBeatCount = playbackSection ? beatsPerMeasure(playbackSection) : 4;
+  const scoreFrameSource = useCallback(
+    () =>
+      metronome.playing || embedded
+        ? metronome.frameSource()
+        : {
+            beatIndex: 0,
+            beatCount: playbackBeatCount,
+            progress: 0,
+            accent: 2 as const,
+            measureNumber: currentMeasure,
+          },
+    [currentMeasure, embedded, metronome, playbackBeatCount],
+  );
   const selectPartFromKeyboard = (
     event: ReactKeyboardEvent<HTMLButtonElement>,
     currentIndex: number,
@@ -2104,40 +2305,55 @@ export function ScoresPage() {
       keyboardPartFocusIdRef.current = null;
       return;
     }
-    void navigate(scorePath(next.id));
+    openScore(next.id);
   };
 
   return (
-    <div className="page score-page">
-      <PageHeader
-        eyebrow="Score library"
-        title="악보"
-        description={
-          remoteMode
-            ? '레퍼토리 악보를 서버와 동기화합니다. MusicXML은 서버에서 초안을 분석합니다.'
-            : 'MusicXML은 자동 인식하고, PDF와 이미지는 로컬에서 마디를 직접 매핑합니다.'
-        }
-        actions={
-          <>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".pdf,image/*,.musicxml,.mxl,.xml"
-              hidden
-              onChange={(event) => void upload(event)}
-            />
-            <Button
-              variant="primary"
-              disabled={uploading || scores.loading || !canManageScores}
-              onClick={() => inputRef.current?.click()}
-            >
-              <Upload size={18} aria-hidden /> {uploading ? '업로드 중…' : '악보 가져오기'}
-            </Button>
-          </>
-        }
+    <div className={`page score-page${embedded ? ' score-page--embedded' : ''}`}>
+      {embedded ? (
+        <div className="score-embedded-header">
+          <h2>함께 보는 악보</h2>
+          <p className="subtle">
+            세션 r{playbackMap.revision} · {currentMeasure}마디를 따라갑니다.
+          </p>
+          <Button
+            disabled={uploading || scores.loading || !canManageScores}
+            onClick={() => inputRef.current?.click()}
+          >
+            <Upload size={18} aria-hidden /> {uploading ? '업로드 중…' : '악보 가져오기'}
+          </Button>
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow="Score library"
+          title="악보"
+          description={
+            remoteMode
+              ? '레퍼토리 악보를 서버와 동기화합니다. MusicXML은 서버에서 초안을 분석합니다.'
+              : 'MusicXML은 자동 인식하고, PDF와 이미지는 로컬에서 마디를 직접 매핑합니다.'
+          }
+          actions={
+            <>
+              <Button
+                variant="primary"
+                disabled={uploading || scores.loading || !canManageScores}
+                onClick={() => inputRef.current?.click()}
+              >
+                <Upload size={18} aria-hidden /> {uploading ? '업로드 중…' : '악보 가져오기'}
+              </Button>
+            </>
+          }
+        />
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,image/*,.musicxml,.mxl,.xml"
+        hidden
+        onChange={(event) => void upload(event)}
       />
 
-      {pendingTempoDraft && pendingTempoDraft.repertoireItemId === repertoireItemId ? (
+      {!embedded && pendingTempoDraft && pendingTempoDraft.repertoireItemId === repertoireItemId ? (
         <Card className="score-draft-review" role="status">
           <div>
             <strong>{pendingTempoDraft.filename} 템포맵 초안</strong>
@@ -2258,6 +2474,109 @@ export function ScoresPage() {
         </Card>
       ) : null}
 
+      {!embedded && selected ? (
+        <Card
+          className="score-playback"
+          aria-label="악보 재생"
+          data-playing={metronome.playing || undefined}
+          data-mode={mode}
+        >
+          <div className="score-playback__status fmr-tabular">
+            <strong>
+              {playbackMeasure} / {playbackMap.totalMeasures}마디
+            </strong>
+            <span>
+              {playbackSection
+                ? `${playbackSection.bpm}${playbackSection.tempoChange ? ` → ${playbackSection.tempoChange.targetBpm}` : ''} BPM · ${playbackSection.timeSignature.num}/${playbackSection.timeSignature.denom}`
+                : '재생 범위 밖'}
+            </span>
+            <span>
+              {metronome.position.isWaiting && metronome.playing
+                ? '시작 대기'
+                : metronome.position.isCountIn && metronome.playing
+                  ? `예비박 ${metronome.position.countdown ?? ''}`
+                  : `${metronome.playing ? metronome.position.beatIndex + 1 : 1} / ${playbackBeatCount}박`}
+            </span>
+          </div>
+          <BeatVisualizer
+            className="score-playback__visualizer"
+            frameSource={scoreFrameSource}
+            running={metronome.playing}
+            label="악보 박자 시각화"
+          />
+          <div className="score-playback__actions">
+            <Button
+              aria-label={metronome.playing ? '악보 재생 정지' : '이 마디부터 재생'}
+              disabled={!metronome.playing && (!playbackReady || !playbackSection)}
+              variant="primary"
+              onClick={() => void togglePlayback()}
+            >
+              {metronome.playing ? (
+                <Square size={17} aria-hidden />
+              ) : (
+                <Play size={17} aria-hidden />
+              )}
+              {metronome.playing ? '정지' : '재생'}
+            </Button>
+            <Button
+              aria-label={linkingTempoMap ? '템포맵 준비 중…' : '마디 구간 편집'}
+              disabled={linkingTempoMap || usingOfflineCache || !canManageScores}
+              onClick={() => void openTempoEditor()}
+            >
+              <PenLine size={17} aria-hidden />
+              {linkingTempoMap ? '준비 중…' : '구간 편집'}
+            </Button>
+          </div>
+          {!remoteMode ? (
+            <details className="score-tempo-link">
+              <summary>저장한 템포맵 연결</summary>
+              <p className="subtle">
+                구간마다 BPM·박자표를 편집해 저장한 템포맵을 이 악보에 연결합니다.
+              </p>
+              {localTempoMaps.error ? (
+                <div role="alert">
+                  <p>저장한 템포맵 목록을 불러오지 못했습니다.</p>
+                  <Button onClick={localTempoMaps.reload}>다시 시도</Button>
+                </div>
+              ) : (
+                <label className="fmr-field">
+                  <span className="fmr-field__label">연결할 템포맵</span>
+                  <select
+                    className="fmr-input"
+                    value={selected.tempoMapId ?? ''}
+                    disabled={linkingTempoMap || localTempoMaps.loading || metronome.playing}
+                    onChange={(event) => void linkLocalTempoMap(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      템포맵을 선택하세요
+                    </option>
+                    {(localTempoMaps.data ?? []).map((map, index) => (
+                      <option key={map.id} value={map.id}>
+                        {index + 1}. {map.sections[0]?.label || '템포맵'} · {map.totalMeasures}마디
+                        · {map.sections.length}구간 ·{' '}
+                        {map.sections
+                          .map(
+                            (section) =>
+                              `${section.bpm} BPM ${section.timeSignature.num}/${section.timeSignature.denom}`,
+                          )
+                          .join(' → ')}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {!localTempoMaps.loading &&
+              !localTempoMaps.error &&
+              localTempoMaps.data?.length === 0 ? (
+                <p className="subtle">
+                  아직 저장한 템포맵이 없습니다. ‘마디 구간 편집’에서 만들 수 있습니다.
+                </p>
+              ) : null}
+            </details>
+          ) : null}
+        </Card>
+      ) : null}
+
       {!scores.loading && !scores.error && parts.length === 0 ? (
         <Card>
           <EmptyState
@@ -2288,7 +2607,7 @@ export function ScoresPage() {
                 tabIndex={selected?.id === score.id ? 0 : -1}
                 className={selected?.id === score.id ? 'score-part--active' : ''}
                 onClick={() => {
-                  void navigate(scorePath(score.id));
+                  openScore(score.id);
                 }}
                 onKeyDown={(event) => selectPartFromKeyboard(event, index)}
               >
@@ -2366,6 +2685,7 @@ export function ScoresPage() {
                   type="number"
                   min={1}
                   value={currentMeasure}
+                  readOnly={embedded}
                   onChange={(event) => {
                     const next = Math.max(1, Number(event.target.value));
                     currentMeasureRef.current = next;
@@ -2380,14 +2700,9 @@ export function ScoresPage() {
                     if (target) setPage(target.page);
                   }}
                 />
-                <Button
-                  disabled={!selected || !playbackReady}
-                  variant={metronome.playing ? 'primary' : 'secondary'}
-                  onClick={() => void togglePlayback()}
-                >
-                  {metronome.playing ? <Square size={17} /> : <Play size={17} />}
-                  {metronome.playing ? '악보 재생 정지' : '이 마디부터 재생'}
-                </Button>
+                {embedded ? (
+                  <p className="subtle">시작·정지·재생 마디 이동은 세션에서 제어합니다.</p>
+                ) : null}
                 {mode === 'pen' || mode === 'text' || mode === 'stamp' ? (
                   <div className="score-annotation-settings">
                     {mode === 'text' || mode === 'stamp' ? (
@@ -2688,7 +3003,7 @@ export function ScoresPage() {
                 >
                   <ZoomIn size={18} aria-hidden />
                 </Button>
-                {metronome.playing && !autoPageFollowing ? (
+                {(metronome.playing || embedded) && !autoPageFollowing ? (
                   <Button
                     onClick={() => {
                       setAutoPageFollowing(true);

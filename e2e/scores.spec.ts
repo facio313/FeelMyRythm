@@ -290,7 +290,7 @@ test('previews a persistent Audiveris draft and saves it with its pinned map rev
 
 test('maps a score, preserves canonical measure across parts, and persists practice-aware pen notes', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto('/feelmyrythm/scores');
   await page.locator('input[type="file"]').setInputFiles({
     name: 'violin.svg',
@@ -321,17 +321,43 @@ test('maps a score, preserves canonical measure across parts, and persists pract
 
   await page.getByRole('button', { name: '펜', exact: true }).click();
   await page.getByLabel('프로젝트 공유').check();
-  await page.mouse.move(left + 24, top + 24);
-  await page.mouse.down();
-  await page.mouse.move(left + 120, top + 60, { steps: 8 });
-  await page.mouse.up();
+  const drawPenStroke = async (verticalRatio: number) => {
+    await stage.scrollIntoViewIfNeeded();
+    const currentBox = await stage.boundingBox();
+    if (!currentBox) throw new Error('Score surface disappeared before drawing');
+    const x = currentBox.x + currentBox.width * 0.2;
+    const y = currentBox.y + currentBox.height * verticalRatio;
+    expect(
+      await stage.evaluate(
+        (surface, points) =>
+          points.every((point) => surface.contains(document.elementFromPoint(point.x, point.y))),
+        [
+          { x, y },
+          { x: x + 96, y: y + 24 },
+        ],
+      ),
+      'Both pen stroke endpoints must hit the visible score surface',
+    ).toBe(true);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 96, y + 24, { steps: 8 });
+    await page.mouse.up();
+  };
+  await drawPenStroke(0.25);
   await expect(page.locator('.annotation-pen--project')).toHaveCount(1);
 
-  await page.mouse.move(left + 40, top + 90);
-  await page.mouse.down();
-  await page.mouse.move(left + 140, top + 110, { steps: 8 });
-  await page.mouse.up();
+  await drawPenStroke(0.4);
   await expect(page.locator('.annotation-pen--project')).toHaveCount(2);
+  const penStyle = await page
+    .locator('.annotation-pen--project')
+    .first()
+    .evaluate((stroke) => {
+      const style = getComputedStyle(stroke);
+      return { width: Number.parseFloat(style.strokeWidth), vectorEffect: style.vectorEffect };
+    });
+  expect(penStyle.width).toBeGreaterThanOrEqual(2);
+  expect(penStyle.vectorEffect).toBe('non-scaling-stroke');
+  await page.screenshot({ path: testInfo.outputPath('score-editing-two-pen-strokes.png') });
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByRole('button', { name: '필기 삭제: 펜 스트로크' }).first().click();
   await expect(page.locator('.annotation-pen--project')).toHaveCount(1);

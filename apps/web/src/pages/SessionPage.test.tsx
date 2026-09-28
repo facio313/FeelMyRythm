@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type * as FeelMyRythmUi from '@feelmyrythm/ui';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import type { TempoMap } from '@feelmyrythm/core';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RoomSnapshot } from '../lib/roomClient';
+import type { ScoresPageProps } from './ScoresPage';
 
 const authState = vi.hoisted(() => ({
   user: {
@@ -15,7 +18,7 @@ const authState = vi.hoisted(() => ({
     tokenType: 'bearer',
   } as { accessToken: string; refreshToken: string; tokenType: string } | null,
   client: {
-    get: vi.fn(() => new Promise(() => undefined)),
+    get: vi.fn<(path: string) => Promise<unknown>>(() => new Promise(() => undefined)),
     post: vi.fn(),
     refreshAccessToken: vi.fn(),
   },
@@ -31,11 +34,32 @@ const metronome = vi.hoisted(() => ({
     isCountIn: false,
   },
   frameSource: vi.fn(() => ({ beatIndex: 0, beatCount: 4, progress: 0, accent: 2 })),
+  prepareAudio: vi.fn<() => Promise<void>>(),
   start: vi.fn(),
   startSynchronized: vi.fn(),
   stop: vi.fn(),
   setVolume: vi.fn(),
 }));
+const metronomeHook = vi.hoisted(() => vi.fn());
+const scoreBoundary = vi.hoisted(() => vi.fn());
+const notify = vi.hoisted(() => vi.fn());
+const roomState = vi.hoisted(() => ({
+  snapshot: undefined as RoomSnapshot | undefined,
+  listener: undefined as ((snapshot: RoomSnapshot) => void) | undefined,
+}));
+const roomClient = vi.hoisted(() => ({
+  subscribe: vi.fn(),
+  connect: vi.fn(),
+  disconnect: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+  setReady: vi.fn(),
+}));
+const createRoomClient = vi.hoisted(() =>
+  vi.fn(function () {
+    return roomClient;
+  }),
+);
 const workspaceState = vi.hoisted(() => ({
   data: { groups: [], failures: [] } as { groups: unknown[]; failures: unknown[] },
   loading: false,
@@ -47,10 +71,23 @@ vi.mock('../lib/auth', () => ({ useAuth: () => authState }));
 vi.mock('../lib/useAsync', () => ({
   useAsync: () => workspaceState,
 }));
-vi.mock('../lib/useMetronome', () => ({ useMetronome: () => metronome }));
+vi.mock('../lib/useMetronome', () => ({ useMetronome: metronomeHook }));
+vi.mock('../lib/roomClient', () => ({ RoomClient: createRoomClient }));
+vi.mock('./ScoresPage', () => ({
+  ScoresPage: (props: ScoresPageProps) => {
+    scoreBoundary(props);
+    return (
+      <div aria-label="세션 악보">고정 악보 r{props.synchronizedPlayback?.tempoMap.revision}</div>
+    );
+  },
+}));
 vi.mock('@feelmyrythm/ui', async (importOriginal) => {
   const actual = await importOriginal<typeof FeelMyRythmUi>();
-  return { ...actual, useToast: () => ({ notify: vi.fn() }) };
+  return {
+    ...actual,
+    useToast: () => ({ notify }),
+    BeatVisualizer: ({ label }: { label: string }) => <div role="img" aria-label={label} />,
+  };
 });
 
 import {
@@ -61,6 +98,95 @@ import {
   SessionPage,
   shouldStopRoomAfterLocalEnd,
 } from './SessionPage';
+
+const fixedTempoMap: TempoMap = {
+  id: 'room-map',
+  repertoireItemId: 'repertoire-1',
+  revision: 2,
+  totalMeasures: 4,
+  sections: [
+    {
+      id: 'section-1',
+      startMeasure: 1,
+      endMeasure: 4,
+      timeSignature: { num: 3, denom: 4 },
+      bpm: 150,
+      beatUnit: 'quarter',
+    },
+  ],
+  jumps: [],
+  countIn: { measures: 1, useSectionMeter: true },
+};
+
+function joinedSnapshot(role: 'leader' | 'member' = 'leader'): RoomSnapshot {
+  return {
+    transport: {
+      roomId: 'room-1',
+      repertoireId: fixedTempoMap.repertoireItemId,
+      revision: fixedTempoMap.revision,
+      status: 'stopped',
+      countIn: false,
+    },
+    roster: [
+      {
+        userId: 'user-1',
+        displayName: 'Player',
+        role,
+        ready: false,
+        calibrated: true,
+        bluetooth: false,
+      },
+      {
+        userId: 'user-2',
+        displayName: 'Partner',
+        role: 'member',
+        ready: true,
+        calibrated: true,
+        bluetooth: false,
+      },
+    ],
+    connectionState: 'joined',
+    connected: true,
+    reconnecting: false,
+    offsetMs: 12,
+    rttMs: 20,
+    error: undefined,
+  };
+}
+
+function RouteLocation() {
+  const location = useLocation();
+  return <output aria-label="현재 경로">{location.pathname}</output>;
+}
+
+async function renderJoinedSession(snapshot = joinedSnapshot()) {
+  roomState.snapshot = snapshot;
+  authState.client.get.mockImplementation(async (path) => {
+    if (path === '/rooms/room-1') {
+      return {
+        roomId: 'room-1',
+        repertoireId: fixedTempoMap.repertoireItemId,
+        tempoMapRevision: fixedTempoMap.revision,
+        leaderId: 'user-1',
+        expiresAt: '2026-09-29T00:00:00.000Z',
+      };
+    }
+    if (path === '/repertoire/repertoire-1/tempomap/revisions/2') {
+      return { revision: fixedTempoMap.revision, data: fixedTempoMap };
+    }
+    throw new Error(`Unexpected request ${path}`);
+  });
+  const view = render(
+    <MemoryRouter initialEntries={['/session/room-1']}>
+      <RouteLocation />
+      <Routes>
+        <Route path="session/:roomId" element={<SessionPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await screen.findByText('동기화됨');
+  return view;
+}
 
 describe('session device status', () => {
   beforeEach(() => {
@@ -80,8 +206,29 @@ describe('session device status', () => {
       refreshToken: 'refresh-1',
       tokenType: 'bearer',
     };
-    authState.client.get.mockClear();
-    metronome.stop.mockClear();
+    authState.client.get.mockReset().mockImplementation(() => new Promise(() => undefined));
+    metronome.playing = false;
+    metronome.prepareAudio.mockReset().mockResolvedValue(undefined);
+    metronome.startSynchronized.mockReset().mockResolvedValue(undefined);
+    metronome.stop.mockReset();
+    metronomeHook.mockReset().mockReturnValue(metronome);
+    scoreBoundary.mockReset();
+    notify.mockReset();
+    roomState.snapshot = undefined;
+    roomState.listener = undefined;
+    createRoomClient.mockClear();
+    roomClient.connect.mockReset();
+    roomClient.disconnect.mockReset();
+    roomClient.start.mockReset().mockReturnValue(true);
+    roomClient.stop.mockReset().mockReturnValue(true);
+    roomClient.setReady.mockReset().mockReturnValue(true);
+    roomClient.subscribe
+      .mockReset()
+      .mockImplementation((listener: (snapshot: RoomSnapshot) => void) => {
+        roomState.listener = listener;
+        if (roomState.snapshot) listener(roomState.snapshot);
+        return vi.fn();
+      });
     workspaceState.data = { groups: [], failures: [] };
     workspaceState.loading = false;
     workspaceState.error = undefined;
@@ -175,7 +322,9 @@ describe('session device status', () => {
 
     const fallback = await screen.findByRole('alert');
     expect(fallback).toHaveTextContent('초대 링크를 직접 복사해 주세요.');
-    expect(screen.getByLabelText('초대 링크')).toHaveValue(window.location.href);
+    expect(screen.getByRole('textbox', { name: '초대 링크' })).toHaveValue(
+      `${window.location.origin}/feelmyrythm/session/room-1`,
+    );
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledOnce();
     });
@@ -331,4 +480,133 @@ describe('session device status', () => {
     expect(workspaceState.reload).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: '세션 열기' })).toBeEnabled();
   });
+
+  it('opens and closes scores without leaving the room or replacing its fixed playback revision', async () => {
+    await renderJoinedSession();
+    expect(createRoomClient).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '악보 보기' }));
+
+    expect(screen.getByLabelText('세션 악보')).toHaveTextContent('고정 악보 r2');
+    expect(scoreBoundary).toHaveBeenLastCalledWith({
+      repertoireItemId: 'repertoire-1',
+      synchronizedPlayback: {
+        tempoMap: fixedTempoMap,
+        playing: false,
+        position: metronome.position,
+        frameSource: metronome.frameSource,
+      },
+    });
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('fmr:tempomap-updated', {
+          detail: {
+            repertoireId: 'repertoire-1',
+            revision: 3,
+            data: { ...fixedTempoMap, revision: 3 },
+          },
+        }),
+      );
+    });
+    expect(metronomeHook).toHaveBeenLastCalledWith(fixedTempoMap);
+    expect(screen.getByLabelText('세션 악보')).toHaveTextContent('고정 악보 r2');
+    expect(authState.client.get.mock.calls.map(([path]) => path)).toEqual([
+      '/rooms/room-1',
+      '/repertoire/repertoire-1/tempomap/revisions/2',
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: '박자 크게' }));
+    expect(screen.queryByLabelText('세션 악보')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/session/room-1');
+    expect(createRoomClient).toHaveBeenCalledOnce();
+    expect(roomClient.connect).toHaveBeenCalledOnce();
+    expect(roomClient.disconnect).not.toHaveBeenCalled();
+    expect(metronome.stop).not.toHaveBeenCalled();
+  });
+
+  it('shows each participant readiness and updates the total from the server roster', async () => {
+    const snapshot = joinedSnapshot();
+    await renderJoinedSession(snapshot);
+    const partnerRow = screen.getByText('Partner').closest('.participant-row');
+    const playerRow = screen.getByText('Player').closest('.participant-row');
+    expect(partnerRow).not.toBeNull();
+    expect(playerRow).not.toBeNull();
+    expect(within(partnerRow as HTMLElement).getByText('준비 완료')).toBeInTheDocument();
+    expect(within(playerRow as HTMLElement).getByText('준비 중')).toBeInTheDocument();
+    expect(screen.getByText('준비 1/2명')).toBeInTheDocument();
+
+    act(() => {
+      roomState.listener?.({
+        ...snapshot,
+        roster: snapshot.roster.map((participant) => ({ ...participant, ready: true })),
+      });
+    });
+    expect(within(playerRow as HTMLElement).getByText('준비 완료')).toBeInTheDocument();
+    expect(screen.getByText('준비 2/2명')).toBeInTheDocument();
+  });
+
+  it.each(['준비 완료', '3초 뒤 시작'])(
+    'prepares local audio before %s and blocks duplicate ready/start commands',
+    async (action) => {
+      let completePreparation: (() => void) | undefined;
+      metronome.prepareAudio.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            completePreparation = resolve;
+          }),
+      );
+      await renderJoinedSession();
+
+      fireEvent.click(screen.getByRole('button', { name: action }));
+      fireEvent.click(screen.getByRole('button', { name: '준비 완료' }));
+      fireEvent.click(screen.getByRole('button', { name: '3초 뒤 시작' }));
+      expect(metronome.prepareAudio).toHaveBeenCalledOnce();
+      expect(roomClient.setReady).not.toHaveBeenCalled();
+      expect(roomClient.start).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: '준비 완료' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '3초 뒤 시작' })).toBeDisabled();
+
+      await act(async () => {
+        completePreparation?.();
+      });
+      if (action === '준비 완료') {
+        expect(roomClient.setReady).toHaveBeenCalledExactlyOnceWith(true);
+        expect(roomClient.start).not.toHaveBeenCalled();
+      } else {
+        expect(roomClient.start).toHaveBeenCalledExactlyOnceWith({ measure: 1, pass: 1 }, true);
+        expect(roomClient.setReady).not.toHaveBeenCalled();
+      }
+      fireEvent.click(screen.getByRole('button', { name: action }));
+      expect(metronome.prepareAudio).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([0, 12])(
+    'waits for the late participant audio gesture before scheduling transport at %dms offset',
+    async (offsetMs) => {
+      const snapshot = joinedSnapshot('member');
+      snapshot.offsetMs = offsetMs;
+      snapshot.transport = {
+        ...snapshot.transport!,
+        status: 'playing',
+        anchor: { measure: 2, pass: 1 },
+        serverStartTime: 500_000,
+      };
+      await renderJoinedSession(snapshot);
+      expect(metronome.prepareAudio).not.toHaveBeenCalled();
+      expect(metronome.startSynchronized).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: '소리 켜고 합류' }));
+      await waitFor(() =>
+        expect(metronome.startSynchronized).toHaveBeenCalledExactlyOnceWith({
+          measure: 2,
+          pass: 1,
+          serverStartTimeMs: 500_000,
+          serverOffsetMs: offsetMs,
+          withCountIn: false,
+        }),
+      );
+      expect(metronome.prepareAudio).toHaveBeenCalledOnce();
+      expect(roomClient.start).not.toHaveBeenCalled();
+    },
+  );
 });

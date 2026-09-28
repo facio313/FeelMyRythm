@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   AudioLines,
   BookOpen,
   Gauge,
@@ -26,7 +27,7 @@ import {
 import { cn, Modal } from '@feelmyrythm/ui';
 import { nativeBridge } from '@feelmyrythm/mobile';
 import { useAuth } from '../lib/auth';
-import { portfolioSsoEnabled } from '../lib/runtimeMode';
+import { managedLocalSsoModeEnabled, portfolioSsoEnabled } from '../lib/runtimeMode';
 import { applyTheme, readStoredTheme, type AppTheme } from '../lib/theme';
 import { TemporaryOperationsNotice } from './TemporaryOperationsNotice';
 
@@ -96,6 +97,13 @@ export function AppShell() {
   const { pathname } = location;
   const [moreOpen, setMoreOpen] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme());
+  const themeToggleLabel = theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환';
+  const operationsNoticeEnabled = managedLocalSsoModeEnabled();
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+  };
   const visibleLegalNavigation = portfolioSsoEnabled()
     ? legalNavigation.filter(({ to }) => to !== '/delete-account')
     : legalNavigation;
@@ -198,17 +206,13 @@ export function AppShell() {
           ) : null}
         </div>
         <nav className="topbar__actions" aria-label="계정과 화면 설정">
-          <TemporaryOperationsNotice />
+          <TemporaryOperationsNotice enabled={operationsNoticeEnabled} />
           <button
             type="button"
             className="icon-link app-theme-toggle"
-            aria-label={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
-            title={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
-            onClick={() => {
-              const nextTheme = theme === 'dark' ? 'light' : 'dark';
-              setTheme(nextTheme);
-              applyTheme(nextTheme);
-            }}
+            aria-label={themeToggleLabel}
+            title={themeToggleLabel}
+            onClick={toggleTheme}
           >
             {theme === 'dark' ? <Sun size={20} aria-hidden /> : <Moon size={20} aria-hidden />}
           </button>
@@ -289,7 +293,7 @@ export function AppShell() {
         open={moreOpen}
         onOpenChange={setMoreOpen}
         title="더보기"
-        description="편집, 튜닝과 프로젝트 관리 메뉴입니다."
+        description="편집, 튜닝, 프로젝트 관리와 계정·화면 설정 메뉴입니다."
       >
         <nav className="mobile-more" aria-label="모바일 전체 메뉴">
           {mobileMore.map(({ to, label, icon: Icon }) => {
@@ -307,6 +311,15 @@ export function AppShell() {
               </Link>
             );
           })}
+          <button
+            type="button"
+            className="mobile-more__link mobile-more__theme"
+            aria-label={themeToggleLabel}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Sun size={22} aria-hidden /> : <Moon size={22} aria-hidden />}
+            <span>{themeToggleLabel}</span>
+          </button>
           <NavLink
             to={user ? '/dashboard' : '/login'}
             className="mobile-more__link"
@@ -315,6 +328,25 @@ export function AppShell() {
             <UserRound size={22} aria-hidden />
             <span>{user ? `${user.displayName} 계정` : '로그인'}</span>
           </NavLink>
+          {!nativeBridge.native ? (
+            <a
+              className="mobile-more__link mobile-more__portfolio"
+              href="https://bonifacio.work/"
+              aria-label="← Bonifacio"
+              onClick={() => setMoreOpen(false)}
+            >
+              <ArrowLeft size={22} aria-hidden />
+              <span>Bonifacio</span>
+            </a>
+          ) : null}
+          {operationsNoticeEnabled ? (
+            <div className="mobile-more__link mobile-more__operations">
+              <TemporaryOperationsNotice enabled />
+              <span className="mobile-more__operations-label" aria-hidden>
+                현재 운영 구성
+              </span>
+            </div>
+          ) : null}
           {visibleLegalNavigation.map(({ to, label }) => (
             <NavLink
               key={to}

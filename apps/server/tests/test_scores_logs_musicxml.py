@@ -706,5 +706,5 @@ def test_musicxml_parser_builds_tempo_and_repeat_draft(client: TestClient, ensem
     assert draft["totalMeasures"] == 2
     assert draft["sections"][0]["beatUnit"] == "dottedQuarter"
     assert draft["sections"][0]["bpm"] == 72
-    assert draft["anacrusis"] is None
+    assert "anacrusis" not in draft
     assert draft["jumps"] == [{"type": "repeat", "startMeasure": 1, "endMeasure": 2, "times": 2}]

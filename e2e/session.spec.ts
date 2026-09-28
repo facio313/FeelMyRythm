@@ -60,7 +60,7 @@ const tempoMap = {
       subdivision: 1,
     },
   ],
-  jumps: [],
+  jumps: [{ type: 'repeat', startMeasure: 1, endMeasure: 64, times: 2 }],
   countIn: { measures: 1, useSectionMeter: true },
 };
 
@@ -74,7 +74,7 @@ function sendServerEnvelope(
 
 test('creates a repertoire room and sends CMD_START through the mocked WebSocket', async ({
   page,
-}) => {
+}, testInfo) => {
   const clientMessages: ClientEnvelope[] = [];
   const apiRequests: ApiRequestRecord[] = [];
   const unexpectedApiRequests: string[] = [];
@@ -251,6 +251,12 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
             serverStartTimeNs: (Date.now() + 3_000) * 1_000_000,
           });
         }
+        if (message.type === 'PING') {
+          sendServerEnvelope(socket, 'PONG', {
+            t0: message.payload?.t0,
+            serverReceiveTimeNs: Date.now() * 1_000_000,
+          });
+        }
       });
     },
   );
@@ -313,6 +319,7 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
     { width: 1440, height: 900 },
   ]) {
     await page.setViewportSize(viewport);
+    await page.locator('.app-content').evaluate((content) => content.scrollTo(0, 0));
     const compact = viewport.width < 840;
     const mobileBar = page.locator('.session-mobile-bar');
     const desktopRoster = page.locator('.roster-panel--desktop');
@@ -372,11 +379,54 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
       await expect(mobileBar).toBeHidden();
       await expect(desktopRoster).toBeVisible();
     }
+
+    await test.step(`visible beat and controls at ${viewport.width}×${viewport.height}`, async () => {
+      const visibleGeometry = await page.evaluate((compactViewport) => {
+        const canvas = document.querySelector<HTMLElement>('.session-visualizer canvas');
+        const controls = document.querySelector<HTMLElement>(
+          compactViewport ? '.session-mobile-bar' : '.session-controls__desktop-transport',
+        );
+        const content = document.querySelector<HTMLElement>('.app-content');
+        if (!canvas || !controls || !content) throw new Error('Session playback view is missing');
+        const canvasRect = canvas.getBoundingClientRect();
+        const controlsRect = controls.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        return {
+          canvasTop: canvasRect.top,
+          canvasBottom: canvasRect.bottom,
+          canvasWidth: canvasRect.width,
+          canvasHeight: canvasRect.height,
+          controlsTop: controlsRect.top,
+          controlsBottom: controlsRect.bottom,
+          overlaps:
+            canvasRect.left < controlsRect.right &&
+            canvasRect.right > controlsRect.left &&
+            canvasRect.top < controlsRect.bottom &&
+            canvasRect.bottom > controlsRect.top,
+          contentTop: contentRect.top,
+          contentBottom: contentRect.bottom,
+        };
+      }, compact);
+      expect(visibleGeometry.canvasWidth).toBeGreaterThan(0);
+      expect(visibleGeometry.canvasHeight).toBeGreaterThan(0);
+      expect(visibleGeometry.canvasTop).toBeGreaterThanOrEqual(visibleGeometry.contentTop - 1);
+      expect(visibleGeometry.canvasBottom).toBeLessThanOrEqual(visibleGeometry.contentBottom + 1);
+      expect(visibleGeometry.overlaps).toBe(false);
+      expect(visibleGeometry.controlsBottom).toBeLessThanOrEqual(visibleGeometry.contentBottom + 1);
+      if ([320, 667, 768, 1440].includes(viewport.width)) {
+        await page.screenshot({
+          path: testInfo.outputPath(`session-leader-${viewport.width}x${viewport.height}.png`),
+        });
+      }
+    });
   }
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByLabel('시작 마디').fill('26');
-  await page.getByLabel('Pass').fill('2');
+  await page.getByRole('button', { name: '재생 설정' }).click();
+  const playbackSettings = page.getByRole('dialog', { name: '재생 설정' });
+  await playbackSettings.getByLabel('시작 마디').fill('26');
+  await playbackSettings.getByLabel('반복 차수').fill('2');
+  await playbackSettings.getByRole('button', { name: '설정 완료' }).click();
   await page.getByRole('button', { name: '3초 뒤 시작' }).evaluate((button) => {
     if (!(button instanceof HTMLButtonElement)) throw new Error('Start control is not a button');
     button.click();
@@ -394,9 +444,7 @@ test('creates a repertoire room and sends CMD_START through the mocked WebSocket
   expect(startMessage?.requestId).toEqual(expect.any(String));
 
   await expect(page.getByText('연주 중', { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(`26마디 · pass 2 · revision ${tempoMapRevision}`, { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('26마디 · 100 BPM · 4/4', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '정지' })).toBeVisible();
 
   acceptRoomJoin = false;

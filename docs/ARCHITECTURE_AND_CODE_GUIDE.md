@@ -106,7 +106,7 @@ apps/web/index.html
 | 1 | [`index.html`](../apps/web/index.html) | Vite HTML entry. `#root`를 만들고 `/src/main.tsx` ES module을 불러온다. React route나 상태는 여기 없다. |
 | 2 | [`main.tsx`의 `bootstrap`](../apps/web/src/main.tsx) | 저장 테마 적용 → React root 생성 → 보안 대기 화면 → 안전한 PWA 전환 확인 → `App` 동적 import 순서로 실행한다. PWA 인증 cache 안전성을 증명하지 못하면 실제 앱을 mount하지 않는다. |
 | 3 | [`App.tsx`의 `createAppRouter`](../apps/web/src/App.tsx) | `AuthProvider`, toast, native deep-link lifecycle, lazy page와 전체 route를 조립하는 composition root다. DOM mount entry는 아니다. |
-| 4 | [`AppShell.tsx`의 `AppShell`](../apps/web/src/components/AppShell.tsx) | 모든 화면에 남는 topbar, desktop sidebar, mobile bottom navigation, legal link, route별 focus·scroll 복원과 `<Outlet>`을 제공한다. |
+| 4 | [`AppShell.tsx`의 `AppShell`](../apps/web/src/components/AppShell.tsx) | 폭 840px 이상 topbar·desktop sidebar와 839px 이하의 topbar 없는 mobile bottom navigation·더보기를 제공한다. 모바일 본문 상단 safe area, legal link, route별 focus·scroll 복원과 `<Outlet>`을 유지한다. |
 | 5 | [`pages`](../apps/web/src/pages) | route 단위 UI와 화면 state를 소유한다. 인증·로컬·원격 모드 전환도 중앙 guard가 아니라 각 화면에서 처리한다. |
 
 ```mermaid
@@ -216,9 +216,9 @@ flowchart LR
 
 | 기능 | 화면·orchestration | client/core 흐름 | 서버·영속 흐름 |
 | --- | --- | --- | --- |
-| 메트로놈 | `MetronomePage`가 route의 `repertoire`·`measure`와 로컬 설정을 읽고 [`useMetronome`](../apps/web/src/lib/useMetronome.ts)에 `TempoMap`을 준다. | `validateTempoMap` → `expandTimeline` → `TimelineTransport` → `LookaheadScheduler` → `WebAudioEngine`; rAF는 예약 beat queue를 읽는다. 원격 network failure만 [`localDb`](../apps/web/src/lib/localDb.ts)의 user-scoped snapshot으로 대체한다. | 원격 map은 `GET /api/repertoire/{id}/tempomap` → [`repertoire.py`](../apps/server/app/routers/repertoire.py) → immutable `TempoMapRevision`. 서버는 beat를 보내지 않는다. |
-| 템포맵 편집 | `EditorPage`가 로컬 ID 또는 repertoire ID로 authoritative source를 고르고 dirty/blocker·충돌 modal을 소유한다. | core validation과 실제 timeline 전개가 모두 성공해야 저장한다. 원격 저장은 `{expectedRevision,data}`, 409는 [`tempoMapMerge`](../apps/web/src/lib/tempoMapMerge.ts)로 최신본/초안 rebase를 선택한다. | `PUT /api/repertoire/{id}/tempomap` → leader 권한 → current row lock → expected revision 비교 → 새 `TempoMapRevision` insert. 기존 revision은 수정하지 않는다. |
-| 앙상블 | `SessionPage`가 workspace, 방 REST, [`RoomClient`](../apps/web/src/lib/roomClient.ts), `useMetronome.startSynchronized`를 연결한다. | `JOIN_ROOM` 후 PING 표본으로 offset을 추정하고 `TRANSPORT(serverStartTimeNs, revision, anchor)`를 server→performance→audio time으로 변환한다. | `POST /api/rooms`가 revision·anchor 집합을 고정한다. [`ws.py`](../apps/server/app/ws.py)는 first-frame bearer와 membership을 검증하고 [`RoomManager`](../apps/server/app/rooms.py)가 READY/START/STOP/SEEK와 roster를 관리한다. |
+| 메트로놈 | `MetronomePage`가 route의 `repertoire`·`tempoMap`·`measure`와 로컬 설정을 읽고 [`useMetronome`](../apps/web/src/lib/useMetronome.ts)에 `TempoMap`을 준다. | `validateTempoMap` → `expandTimeline` → `TimelineTransport` → `LookaheadScheduler` → `WebAudioEngine`; rAF는 오디오 클럭 기준 frame source를 읽는다. 표시 progress는 120ms 선예약 큐의 다음 박에 의존하지 않고 전개된 결정론적 타임라인의 박 경계로 계산한다. 예비박은 재생 전에 만든 계획의 경계를 사용하며 오디오 예약 시각·WS 동기화 계약은 유지한다. 폭 839px 이하 일반 메트로놈은 `.metronome-number` 버튼 안에 같은 `BeatVisualizer`의 `variant="number"`를 기존 박 원 위에 표시하며 별도 타이머나 오디오를 만들지 않는다. 본박 번호·예비박 countdown·대기 `—`만 숫자 canvas에 표시하고 본박/예비박 progress만 pulse에 사용한다. 큰 박 숫자 영역은 테두리·둥근 모서리와 박자표 없이 번호만 중앙에 표시한다. 실제 glyph로 계산한 기존 fit 글자 크기의 80%를 적용하며 panel 크기와 배치는 유지한다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 본박 숫자는 `1..beatCount`의 최대 실측 폭을 기준으로 글꼴 크기를 고정하고 x 중심을 유지해 박마다 크기·위치가 흔들리지 않게 한다. 모바일 속도 숫자는 기존 직접 입력 button이며 20–400 dialog·오류·trigger focus 복원을 유지한다. 모바일에서는 속도 숫자를 눌러 기존 20–400 입력 dialog를 열고, 박자표를 눌러 2/4·3/4·4/4·5/4·6/8·9/8·12/8의 같은 7개 선택지를 가진 dialog를 연다. 박자표 변경 시 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 화면의 세부 설정은 테두리 없는 아이콘만 표시하며 44px, coarse pointer에서는 48px의 터치 영역과 `세부 설정` 접근성 이름을 유지한다. 설정의 중복 템포 버튼은 두지 않는다. 모바일 일반 화면은 진행 전용 `BeatVisualizer`의 `variant="progress"`를 Page 내부에 fixed로 렌더한다. 활성 `.app-shell`은 `isolation: isolate`, 진행 레이어는 `z-index: -1`로 앱 표면 바탕 위·모든 콘텐츠 아래에 둔다. 오디오 `frame.progress`를 따라 메뉴를 제외한 앱 영역을 `#f47a24`, opacity 0.3의 주황으로 좌→우 채운다. 상속된 `--mobile-nav-height`만큼 bottom을 제외하고 600–839px landscape에서는 `--rail-width`만큼 left를 제외하며 bottom은 0으로 둔다. 레이어는 `pointer-events: none`·`aria-hidden`이고 내비게이션은 기존 표면을 유지한다. 숫자 canvas는 `showProgress=false`로 채움을 제거하고 기존 `progressStyle="background"`의 fit 경로로 숫자 pulse·fit 계산을 유지하며 `numberScale={0.8}`을 적용한다. `meterLabel`은 전달하지 않으며 원형 canvas도 `showProgress=false`다. 진행막대가 없는 원형 박 묶음은 canvas의 가로·세로 중앙에 정렬한다. 정지·예약 대기·reduced motion에서는 채움을 비우고 route 이탈·desktop·fullscreen 전환 때 장식 레이어를 제거한다. 모바일의 기존 radial 배경은 끄며 기본 bar·desktop/fullscreen·다른 사용처는 유지한다. 단일 `.performance-context` DOM은 모바일에서는 header 왼쪽, desktop/fullscreen에서는 기존 stage에 두며 예비박 중에도 마디 번호를 유지한다. 예비박 토글은 모든 폭에서 dialog와 인라인 panel이 공유하는 `settingsControls`에서 기존 저장 동작을 유지한다. 박자표 설정 변경은 새 박수에 맞춘 `accentPattern`을 함께 반영해 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 조작은 `−5 → 재생/정지 → +5 → 탭` 순서다. 모바일 `탭`은 조작 영역을 입력판으로 대체하는 local UI 상태이며 매 진입 측정을 비운다. 실제 입력판 탭만 기존 BPM 계산에 사용하고 ×/Escape로 복귀해 trigger focus를 복원한다. 데스크톱 직접 탭과 fullscreen은 유지한다. 모바일 상단의 보면대 버튼은 제거하고 큰 박 번호를 누르면 인앱 집중 화면을 토글한다. 집중 화면은 메뉴를 숨기므로 진행 배경의 inset을 0으로 두되 콘텐츠 아래 레이어는 유지한다. 집중 화면에는 큰 번호·원형 박·속도/박자표·재생/정지만 남기고 상단·하단 메뉴, ±5·탭·설정을 숨긴다. 다시 큰 번호를 누르거나 입력 dialog가 닫힌 상태에서 Escape로 복귀하며 오디오 재생은 유지한다. 데스크톱의 기존 fullscreen 동작은 유지한다. 원격 network failure만 [`localDb`](../apps/web/src/lib/localDb.ts)의 user-scoped snapshot으로 대체한다. | 원격 map은 `GET /api/repertoire/{id}/tempomap` → [`repertoire.py`](../apps/server/app/routers/repertoire.py) → immutable `TempoMapRevision`. 서버는 beat를 보내지 않는다. |
+| 템포맵 편집 | `EditorPage`가 `source=local`의 map ID 또는 원격 repertoire ID로 authoritative source를 고르고 dirty/blocker·충돌 modal을 소유한다. | core validation과 실제 timeline 전개가 모두 성공해야 저장한다. 원격 저장은 `{expectedRevision,data}`, 409는 [`tempoMapMerge`](../apps/web/src/lib/tempoMapMerge.ts)로 최신본/초안 rebase를 선택한다. | `PUT /api/repertoire/{id}/tempomap` → leader 권한 → current row lock → expected revision 비교 → 새 `TempoMapRevision` insert. 기존 revision은 수정하지 않는다. |
+| 앙상블 | `SessionPage`가 workspace, 방 REST, [`RoomClient`](../apps/web/src/lib/roomClient.ts), `useMetronome.prepareAudio/startSynchronized`와 세션 내 `ScoresPage`를 연결한다. | `JOIN_ROOM` 후 PING 표본으로 offset을 추정하고 `TRANSPORT(serverStartTimeNs, revision, anchor)`를 server→performance→audio time으로 변환한다. | `POST /api/rooms`가 revision·anchor 집합을 고정한다. [`ws.py`](../apps/server/app/ws.py)는 first-frame bearer와 membership을 검증하고 [`RoomManager`](../apps/server/app/rooms.py)가 READY/START/STOP/SEEK와 roster를 관리한다. |
 | 악보 목록·업로드 | `ScoresPage` → [`scoreApi`](../apps/web/src/lib/scoreApi.ts). PDF.js, image element, OSMD renderer를 형식별로 lazy 사용한다. | presign → 인증 header 없는 staging upload → complete 순서다. 목록·본문·MeasureMap·annotation snapshot은 user ID로 분리한다. | [`scores.py`](../apps/server/app/routers/scores.py)가 pending `Score`를 만들고 complete에서 staging을 final key로 promote한 뒤 ready와 staging deletion outbox를 commit한다. |
 | 마디 매핑·필기 | `ScoresPage`의 pointer/keyboard mapping과 annotation 도구가 정규화 page 좌표·canonical measure를 만든다. | `scoreApi.putMeasureMap`, create/update/delete annotation. metadata+MeasureMap은 하나의 settings 요청으로 보낸다. | `MeasureMap`·`Annotation`은 expected revision을 검사한다. repertoire 전체 annotation 조회는 마디 필기를 다른 파트 map에 재투영하는 데 쓰인다. |
 | MusicXML | 업로드 뒤 `ScoresPage`가 초안의 구간·jump·경고를 보여 주고 명시적 저장을 기다린다. | 로컬 경로는 [`musicxml.ts`](../apps/web/src/lib/musicxml.ts), 원격은 multipart draft API를 쓴다. | `POST /api/repertoire/{id}/musicxml/draft` → [`musicxml.py`](../apps/server/app/musicxml.py)의 defused parser·MXL 제한 → 저장 전 `TempoMapData` 검증. |
@@ -228,6 +228,10 @@ flowchart LR
 | 프로젝트 | `DashboardPage` → [`loadWorkspace`](../apps/web/src/lib/workspace.ts). root groups만 권위 요청이고 하위 members/projects/repertoire는 최대 6개 병렬 `allSettled`로 부분 성공을 보존한다. | `ApiClient`로 group/project/repertoire/member CRUD. 불완전한 branch의 관리 조작은 잠그고 retry한다. | [`groups.py`](../apps/server/app/routers/groups.py), `repertoire.py`와 [`access.py`](../apps/server/app/access.py)가 owner/leader/member 계층을 검사한다. |
 | 설정·계정 | `SettingsPage`가 theme, count-in, volume, visual offset, storage estimate와 삭제 modal을 소유한다. | [`theme.ts`](../apps/web/src/lib/theme.ts), `localDb.storageEstimate`, `AuthProvider.logout/deleteAccount`, memory-only deletion challenge. | `/api/users/me`, `/api/users/me/delete-challenge`, `DELETE /api/users/me` → [`auth.py`](../apps/server/app/routers/auth.py). 계정 tombstone과 storage deletion outbox를 같은 transaction에 기록한다. |
 | 로그인·가입 | `LoginPage` → [`AuthProvider`](../apps/web/src/lib/auth.tsx) → `ApiClient`. fragment credential은 layout effect에서 URL에서 즉시 제거하고 component memory에서만 사용한다. | 가입 1단계에는 password가 없고, 메일 link에서 최초 password를 정한다. login/refresh/logout session envelope는 플랫폼 저장소가 담당한다. | [`auth.py`](../apps/server/app/routers/auth.py) → [`security.py`](../apps/server/app/security.py) → `User`·`RefreshSession`; 자세한 상태 전이는 다음 장에 있다. |
+
+Editor는 원격 access role을 먼저 읽고 member의 기존 맵을 읽기 전용으로 연다. 최신 맵 404와 빈 revision 목록을 함께 확인한 경우에만 owner/leader에게 revision 0의 첫 초안을 제공한다. 로컬 편집은 로그인 중에도 같은 IndexedDB 대상에 저장하며 JSON 가져오기로 대상 ID·repertoire·revision을 바꾸지 않는다. `메트로놈에서 열기`는 원격 repertoire 또는 정확한 로컬 `tempoMap` ID를 전달한다. 명시한 로컬 맵이 없거나 유효하지 않으면 다른 맵으로 대체하지 않는다.
+
+`ScoresPage`는 독립 화면에서 자체 `useMetronome`을 사용하고, 세션 안에서는 `synchronizedPlayback`의 고정 TempoMap·playing·position·frameSource를 받는다. 이 경로는 자체 엔진을 생성하거나 최신 맵을 다시 읽지 않으며, 마디 선택은 화면 탐색만 바꾼다. 로컬 PDF·이미지는 저장된 맵을 `ScoreRecord.tempoMapId`로 연결하거나 첫 맵을 생성·연결해 편집기로 이동한다. `score` query가 저장 후 악보로 돌아갈 문맥을 유지한다.
 
 ## 6. 인증·보안·배치·설정 전반
 
@@ -391,7 +395,7 @@ flowchart LR
 ### Capacitor 경로
 
 - `vite build --mode mobile`은 상대 경로 `./`를 사용해 [`apps/mobile/web`](../apps/mobile)로 출력한다.
-- 네이티브 번들은 로컬 HTML을 열지만 REST/WS는 `https://bonifacio.work/feelmyrythm/api|ws`로 보낸다.
+- 네이티브 번들은 로컬 HTML을 열지만 REST/WS는 `https://bonifacio.work/feelmyrythm/api|ws`로 보낸다. [`paths.ts`](../apps/web/src/lib/paths.ts)의 `sessionInviteUrl`도 native에서는 `__FMR_MOBILE_SERVER_ORIGIN__`, browser에서는 현재 origin을 사용하고 공개 `APP_BASE`와 인코딩한 room ID를 결합한다.
 - [`nativeAudio.ts`](../apps/mobile/src/nativeAudio.ts)가 Web Audio와 네이티브 오디오 clock 사이의 batch scheduling 경계를 제공하고, [`nativeBridge.ts`](../apps/mobile/src/nativeBridge.ts)가 keep-awake, haptics, system bar와 딥링크를 추상화한다.
 - Keychain/Keystore는 발급된 app session의 저장 경계일 뿐 중앙 identity proof를 생성하지 않는다. `main`/`dev` mobile release에는 system-browser login, 일회용 credential exchange와 native callback bridge가 추가로 필요하다.
 - [`secureStorage.ts`](../apps/mobile/src/secureStorage.ts)는 브라우저 localStorage와 iOS Keychain/Android Keystore 경계를 분리한다.
@@ -415,6 +419,8 @@ TempoMap
     ├── D.C. / D.S.
     └── Fine / Coda 이동
 ```
+
+API 직렬화는 값이 없는 optional 필드를 `null` 대신 생략한다. [`schemas.py`](../apps/server/app/schemas.py)의 필드별 `exclude_if`가 저장 응답·최신본·revision 목록·특정 revision·MusicXML 초안에 함께 적용된다. 입력의 생략과 legacy `null`은 계속 받아들이고 유효한 `false`·`0`·빈 문자열은 보존한다.
 
 변환 흐름은 다음과 같다.
 
@@ -448,6 +454,9 @@ sequenceDiagram
   M->>S: WS JOIN_ROOM + PING
   S-->>L: PONG(serverReceiveTimeNs), roster
   S-->>M: PONG(serverReceiveTimeNs), roster
+  M->>A: 준비 클릭 → prepareAudio
+  M->>S: READY
+  L->>A: 시작 클릭 → prepareAudio
   L->>S: CMD_START(measure, pass, count-in)
   S->>S: 최신 권한·유효 anchor 검증
   S-->>L: TRANSPORT(serverStartTimeNs, pinned revision)
@@ -455,6 +464,10 @@ sequenceDiagram
   L->>A: server→performance→audio 시간 변환 후 로컬 예약
   M->>A: server→performance→audio 시간 변환 후 로컬 예약
 ```
+
+`prepareAudio(): Promise<void>`는 사용자 제스처에서 엔진 생성·시작을 공유하고 클릭 예약·rAF·Keep Awake·playing 상태를 시작하지 않는다. 중복 준비는 같은 startup을 기다리며 stop·unmount로 취소된 준비는 `AbortError`로 끝나고 새 재생 수명을 건드리지 않는다. 진행 중인 방의 미준비 참가자는 `소리 켜고 합류` 클릭 뒤 다음 마디 경계에 합류한다. `악보 보기`는 세션 route와 오디오 수명을 유지하며 방의 고정 revision을 소비하고, 편집본은 새 방에 적용한다.
+
+`MetronomePosition`과 `BeatFrame`의 optional `isWaiting`은 예약 뒤 첫 오디오 전의 표시 상태다. 최종 재생 anchor의 마디·pass·section·박 수를 예약 대기와 예비박까지 유지하며, 첫 오디오 전에는 박 강조·announcement·반응 배경을 억제한다. 표시 anchor는 기존 오디오 예약 시각을 변경하지 않는다.
 
 중요한 코드:
 

@@ -67,6 +67,10 @@
 
 ## 5. 실시간 동기화·오디오·서버 계약
 
+서버 입력 검증과 실제 응답은 별도 경계다. 템포맵의 optional 값을 생략해 저장하더라도 응답 모델이 `null`로 복원하면 TypeScript의 엄격한 validator가 읽기를 거부한다. 현재 [schema](../apps/server/app/schemas.py)는 값이 없는 optional 필드를 저장 응답·최신본·revision 목록·특정 revision과 MusicXML 초안에서 공통으로 생략하며 `false`·`0`·빈 문자열은 보존한다.
+
+동기 시작의 사용자 제스처와 서버 명령도 분리한다. [prepareAudio](../apps/web/src/lib/useMetronome.ts)는 엔진만 준비하고 클릭 예약·시각화·Keep Awake를 시작하지 않는다. [세션](../apps/web/src/pages/SessionPage.tsx)의 준비/시작 클릭은 이를 기다린 뒤 명령을 전송하고, 진행 중인 방의 미준비 사용자는 `소리 켜고 합류`로 다음 마디 경계에 들어온다. 취소된 준비의 완료가 새 재생 수명을 건드리지 않도록 stop·unmount와 소유권을 공유한다. 예약 대기와 예비박의 표시 anchor도 최종 시작 마디·pass·구간·박 수로 고정하고 optional `isWaiting`으로 첫 오디오 전의 강조·announcement·반응 배경을 억제한다. 이 표시 보정은 클릭 예약 시각을 변경하지 않으며 아래 실기기 오디오 게이트를 대신하지 않는다.
+
 | 증상 또는 문제 | 근본 원인 | 영향 | 교정 | 예방·교훈 | 현재 상태 및 근거 |
 | --- | --- | --- | --- | --- | --- |
 | `stop()`의 `AudioContext.suspend()`가 끝나기 전에 빠르게 다시 시작하면 뒤늦은 suspend가 새 재생을 멈출 수 있었다. | start와 stop을 독립 비동기 호출로 보고 lifecycle 순서를 직렬화하지 않았다. | UI는 재생 중인데 소리가 없거나 첫 박이 누락되는 race가 생길 수 있었다. | 하나의 `lifecyclePromise`에 start/stop을 순서대로 연결해 in-flight suspend 후 반드시 resume하도록 했다. | platform lifecycle API는 현재 state 확인만으로 충분하지 않다. 이전 operation의 완료 순서까지 소유해야 한다. | **해결** — [WebAudio engine](../packages/audio/src/webAudioEngine.ts), [rapid restart 테스트](../packages/audio/test/webAudioEngine.test.ts) |
@@ -77,6 +81,10 @@
 | WebSocket 인증 거부와 실제 network close를 같은 자동 재연결 대상으로 삼으면 만료 token으로 무한 재시도할 수 있었다. | close code의 의미와 auth generation별 refresh 한도를 구분하지 않았다. | 서버 부하, 배터리 소모, 잘못된 “연결 중” 상태가 지속될 수 있었다. | terminal close code를 분리하고 4401은 현재 auth generation에서 한 번만 refresh한다. 실제 network close만 backoff 재연결한다. | 재연결 정책은 transport error가 아니라 protocol semantic에 따라 결정한다. | **해결** — [room client](../apps/web/src/lib/roomClient.ts), [room client 테스트](../apps/web/src/lib/roomClient.test.ts), [WS 서버](../apps/server/app/ws.py) |
 
 ## 6. 악보·비동기 상태·객체 저장소
+
+편집기를 열 수 있다는 것만으로 구간별 연습 경로가 완성되지는 않는다. [Editor](../apps/web/src/pages/EditorPage.tsx)는 새 원격 곡의 access role과 빈 revision 이력을 확인한 뒤 owner/leader의 첫 초안을 만들고 member는 읽기 전용으로 연다. `source=local`과 명시적인 재생 map ID는 로그인 여부 때문에 로컬 대상이 원격 곡으로 해석되거나 다른 맵으로 바뀌는 것을 막는다. 저장 후 재생·악보 복귀를 제공하고 로컬 PDF·이미지도 맵 선택 또는 첫 구간 편집으로 연결한다.
+
+[ScoresPage](../apps/web/src/pages/ScoresPage.tsx)는 독립 재생과 세션의 외부 transport를 구분한다. 세션 안에서 파트보를 열 때 route를 유지하고 방의 고정 revision·position·frame source를 받으므로 악보 전환이 별도 재생 엔진이나 최신 맵 로딩을 만들지 않는다. 악보의 마디 탐색은 화면만 움직이며 세션 시작·정지는 리더 조작에 남는다.
 
 | 증상 또는 문제 | 근본 원인 | 영향 | 교정 | 예방·교훈 | 현재 상태 및 근거 |
 | --- | --- | --- | --- | --- | --- |
@@ -90,6 +98,10 @@
 | 원격 악보 cache snapshot에서 MXL을 이미 정규화한 뒤 metadata만 바뀌어도 다시 unzip하려는 경로가 있었다. | blob의 실제 normalized content와 원래 filename/content type metadata를 동일한 신호로 사용했다. | offline 복원에서 정상 MusicXML을 손상된 압축 파일처럼 처리할 수 있었다. | snapshot에 정규화된 blob 의미를 유지하고 metadata 변경만으로 재압축 해제하지 않도록 했다. | 파생 artifact에는 원본 형식과 현재 payload 형식을 별도 필드로 표현한다. | **해결** — [악보 화면 테스트](../apps/web/src/pages/ScoresPage.test.ts), [MusicXML helper](../apps/web/src/lib/musicxml.ts) |
 
 ## 7. 반응형 UX·접근성·모바일 빌드
+
+모바일 UI 계약은 폭 839px 이하에서 topbar를 제거하고 Bonifacio 복귀·테마·설정·계정/로그인·managed SSO 운영 안내를 하단 `더보기`로 모으는 것이다. 본문 상단 safe area는 보존하고 840px 이상에서는 topbar를 유지한다. 일반 모바일 메트로놈은 기존 박 원 위에 넓은 숫자 panel로 본박·예비박 countdown·예약 대기 `—`만 표시한다. 큰 박 숫자 영역은 테두리·둥근 모서리와 박자표 없이 번호만 중앙에 표시한다. 실제 glyph로 계산한 기존 fit 글자 크기의 80%를 적용하며 panel 크기와 배치는 유지한다. 200px 숫자 상한은 적용하지 않는다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 본박 숫자는 `1..beatCount`의 최대 실측 폭을 기준으로 글꼴 크기를 고정하고 x 중심을 유지해 박마다 크기·위치가 흔들리지 않게 한다. 599px 이하 page는 본문 가용 높이에서 header·원형 박·속도·박자표·조작·상태를 뺀 남는 높이를 숫자 panel에 쓰고 숫자·원형 박·속도/박자표는 세로의 일반 흐름에 둔다. 짧은 화면·200% 확대는 최소 높이와 세로 스크롤로 조작을 보존한다. 진행막대가 없는 원형 박 묶음은 가로·세로 중앙에 정렬한다. 같은 오디오 frame의 rAF로 테마 text 단색의 opacity 0.6–1을 본박/예비박에만 pulse하며 subdivision에는 반복하지 않고 정지·reduced motion에서는 pulse를 끈다. 모바일 일반 화면은 한 줄 중앙에 −5 → 재생/정지 → +5를 묶고 작고 은은한 탭 글자를 오른쪽 끝에 두며 시각·키보드 DOM 순서도 일치시킨다. 탭은 BPM을 직접 바꾸지 않고 조작 영역 전체를 큰 입력판으로 대체한다. 첫 실제 탭은 기준 시각이며 열기/닫기는 횟수에 포함하지 않고 매 진입 새 측정을 시작한다. 전체 화면 modal 없이 우상단 ×의 48px target 또는 Escape로 복귀하며 탭 버튼 focus를 복원한다. 데스크톱 직접 탭과 fullscreen 조작은 유지한다. 예비박 토글은 세부 설정 dialog/인라인 panel에서 같은 저장 동작으로 제공한다. Medium의 2열 틀과 세로 여유가 있는 화면의 빠른 시작 마디는 유지한다. 현재 마디·대기·예비박은 header 왼쪽에 모으고 개인 연습/Section 문맥은 숨기되 제목 접근성을 유지한다. 모바일 속도 숫자를 눌러 기존 20–400 dialog에서 직접 입력하며 입력 오류·속도 숫자로의 focus 복원을 유지한다. 설정에는 중복 템포 버튼을 두지 않는다. desktop/fullscreen의 기존 표시는 유지한다. 모바일 일반 메트로놈의 진행 배경은 오디오 `frame.progress`에 따라 하단 메뉴 위까지의 앱 영역을 가장 낮은 배경 레이어에서 진한 주황 `#f47a24`, opacity 0.3으로 왼쪽에서 오른쪽으로 채운다. 600–839px 가로 화면에서는 왼쪽 rail을 제외하며 메뉴는 원래 표면을 유지한다. 큰 숫자 영역에는 별도 배경 채움을 두지 않고 숫자의 pulse·fit 계산을 유지한다. 정지·예약 대기·reduced motion에서는 채움을 비우며 route 이탈·desktop·fullscreen 전환 때 장식 레이어를 제거한다. 모바일의 기존 radial 배경 반응은 끄고 원형 canvas에도 bar를 중복하지 않는다. 기본 bar·desktop/fullscreen·다른 BeatVisualizer 사용처는 기존 bar와 reduced-motion 고정 track을 유지한다. 모바일 상단의 보면대 버튼은 제거하고 큰 박 번호를 누르면 인앱 집중 화면을 토글한다. 집중 화면에는 큰 번호·원형 박·속도/박자표·재생/정지만 남기고 상단·하단 메뉴, ±5·탭·설정을 숨긴다. 다시 큰 번호를 누르거나 입력 dialog가 닫힌 상태에서 Escape로 복귀하며 오디오 재생은 유지한다. 데스크톱의 기존 fullscreen 동작은 유지한다. 모바일 일반 화면의 세부 설정은 테두리 없는 아이콘만 표시하며 44px, coarse pointer에서는 48px의 터치 영역과 `세부 설정` 접근성 이름을 유지한다. 모바일에서는 속도 숫자를 눌러 기존 20–400 입력 dialog를 열고, 박자표를 눌러 2/4·3/4·4/4·5/4·6/8·9/8·12/8의 같은 7개 선택지를 가진 dialog를 연다. 박자표 변경 시 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다.
+
+세션의 작은 화면은 박자·현재 마디와 준비·리더 시작/정지를 일반 문서 흐름 안에 먼저 두고 참가자 목록은 sheet, 시작 위치는 재생 설정, RTT·revision은 접는 정보로 분리한다. 독립 재생 바가 필기 영역을 가리지 않도록 재생 중이며 보기 모드일 때만 sticky를 적용하고 정지·매핑·필기 중에는 일반 흐름에 둔다. 폭 600px 이상은 2열로 압축하고 재생 중 템포맵 연결 상세는 숨긴다. 세션 악보의 박·재생 바는 상단 sticky와 520px 이상 2열을 유지한다. 독립 compact 도구는 `top: auto`로 상단 위치를 해제해 제목을 덮지 않는 하단 overlay로 정렬하며 세션에 포함된 악보 도구는 일반 흐름에 둔다. 참가자별 준비/대기와 준비 인원수는 글자로 확인할 수 있으며 [공용 박 시각화](../packages/ui/src/BeatVisualizer.tsx)는 예비박 동안 일반 박 원 없이 단독 숫자와 진행 track을 그린다. [초대 경로 helper](../apps/web/src/lib/paths.ts)는 native의 WebView origin 대신 공개 서버 origin과 APP_BASE를 사용하고 브라우저의 현재 origin은 보존한다.
 
 | 증상 또는 문제 | 근본 원인 | 영향 | 교정 | 예방·교훈 | 현재 상태 및 근거 |
 | --- | --- | --- | --- | --- | --- |

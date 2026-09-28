@@ -96,6 +96,9 @@ test('stand mode removes hidden controls from focus and exits on a touch double-
   await page.getByRole('button', { name: '보면대 모드' }).click();
   await expect(page.locator('.metronome-page')).toHaveClass(/metronome-page--fullscreen/);
   await expect(page.locator('.metronome-page')).toHaveCSS('border-radius', '0px');
+  await expect(page.locator('.metronome-number')).toBeHidden();
+  await expect(page.locator('.metronome-mobile-controls')).toBeHidden();
+  await expect(page.locator('.tap-tempo-panel')).toBeHidden();
   const idleBackground = await page.locator('.metronome-page').evaluate((element) => {
     const probe = document.createElement('div');
     probe.style.backgroundColor = 'var(--bg)';
@@ -129,7 +132,10 @@ test('stand mode removes hidden controls from focus and exits on a touch double-
     });
     expect(descendantAcceptedFocus, `${selector} descendants stay out of focus`).toBe(false);
   }
-  await expect(page.locator('.bpm-display > button > small')).toBeHidden();
+  await expect(page.locator('.bpm-display > button > small')).toHaveCount(0);
+  await expect(page.locator('.metronome-heading .performance-context')).toHaveCount(0);
+  await expect(page.locator('.metronome-stage .performance-context')).toBeVisible();
+  await expect(page.locator('.metronome-stage .bpm-display')).toBeVisible();
   await expect(page.locator('.metronome-settings')).toHaveCSS('display', 'none');
   await expect(page.locator('.bpm-steppers')).toHaveCSS('display', 'none');
   await expect(page.locator('.quick-settings')).toHaveCSS('display', 'none');
@@ -150,6 +156,9 @@ test('stand mode removes hidden controls from focus and exits on a touch double-
   ]) {
     for (const withStatus of [false, true]) {
       await page.setViewportSize(viewport);
+      await expect(page.locator('.metronome-number')).toBeHidden();
+      await expect(page.locator('.metronome-mobile-controls')).toBeHidden();
+      await expect(page.locator('.tap-tempo-panel')).toBeHidden();
       const geometry = await page.locator('.metronome-page').evaluate((container, addStatus) => {
         container.querySelector('#fullscreen-test-status')?.remove();
         const stage = container.querySelector<HTMLElement>('.metronome-stage');
@@ -158,7 +167,7 @@ test('stand mode removes hidden controls from focus and exits on a touch double-
         const heading = container.querySelector<HTMLElement>('.metronome-heading');
         const visualizer = container.querySelector<HTMLElement>('.metronome-visualizer');
         const bpm = container.querySelector<HTMLElement>('.bpm-display');
-        const context = container.querySelector<HTMLElement>('.performance-context');
+        const context = stage?.querySelector<HTMLElement>('.performance-context');
         if (!stage || !controls || !play || !heading || !visualizer || !bpm || !context) {
           throw new Error('Fullscreen metronome regions are missing');
         }
@@ -248,9 +257,7 @@ test('saved light theme is applied at boot and login errors stay field-linked at
   await page.goto('/feelmyrythm/');
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  expect(
-    await page.locator('.topbar').evaluate((node) => getComputedStyle(node).backgroundColor),
-  ).toBe('rgba(250, 248, 243, 0.94)');
+  await expect(page.locator('.topbar')).toBeHidden();
   expect(
     await page.locator('.bottom-nav').evaluate((node) => getComputedStyle(node).backgroundColor),
   ).toBe('rgba(250, 248, 243, 0.96)');
@@ -277,13 +284,26 @@ test('saved light theme is applied at boot and login errors stay field-linked at
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test('the persistent topbar control switches to light at micro width and survives reload', async ({
+test('mobile More keeps account and theme controls available and preserves theme across reload', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 256, height: 568 });
   await page.goto('/feelmyrythm/');
 
-  const toggle = page.getByRole('button', { name: '라이트 테마로 전환' });
+  await expect(page.locator('.topbar')).toBeHidden();
+  await page.getByRole('button', { name: '더보기', exact: true }).click();
+  const more = page.getByRole('dialog', { name: '더보기', exact: true });
+  await expect(more).toBeVisible();
+  await expect(more.getByRole('link', { name: '← Bonifacio' })).toHaveAttribute(
+    'href',
+    'https://bonifacio.work/',
+  );
+  await expect(more.getByRole('link', { name: '설정', exact: true })).toBeVisible();
+  await expect(more.getByRole('link', { name: '로그인', exact: true })).toHaveAttribute(
+    'href',
+    '/feelmyrythm/login',
+  );
+  const toggle = more.getByRole('button', { name: '라이트 테마로 전환' });
   await expect(toggle).toBeVisible();
   const toggleBounds = await toggle.boundingBox();
   expect(toggleBounds).not.toBeNull();
@@ -294,9 +314,21 @@ test('the persistent topbar control switches to light at micro width and survive
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#FAF8F3');
   expect(await page.evaluate(() => localStorage.getItem('fmr.theme'))).toBe('light');
+  await more.getByRole('link', { name: '설정', exact: true }).click();
+  await expect(page).toHaveURL(/\/feelmyrythm\/settings$/);
+  await expect(more).toBeHidden();
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await expect(page.getByRole('button', { name: '다크 테마로 전환' })).toBeVisible();
+  await page.getByRole('button', { name: '더보기', exact: true }).click();
+  await expect(more.getByRole('button', { name: '다크 테마로 전환' })).toBeVisible();
+  await more.getByRole('button', { name: '닫기', exact: true }).click();
+  await page.setViewportSize({ width: 839, height: 844 });
+  await expect(page.locator('.topbar')).toBeHidden();
+  await page.setViewportSize({ width: 840, height: 844 });
+  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(
+    page.locator('.topbar').getByRole('button', { name: '다크 테마로 전환' }),
+  ).toBeVisible();
 });
 
 test('selected semantic text and control pairs keep WCAG AA contrast in both themes', async ({

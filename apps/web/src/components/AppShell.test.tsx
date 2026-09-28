@@ -81,8 +81,15 @@ describe('AppShell', () => {
     expect(within(dialog).getByRole('link', { name: '튜너' })).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: '프로젝트' })).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: '출력 보정' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: '설정' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: '로그인' })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('link', { name: '설정' })).toHaveLength(1);
+    expect(within(dialog).getAllByRole('link', { name: '로그인' })).toHaveLength(1);
+    const portfolioExit = within(dialog).getByRole('link', { name: '← Bonifacio' });
+    expect(portfolioExit).toHaveAttribute('href', 'https://bonifacio.work/');
+    expect(portfolioExit).not.toHaveAttribute('target');
+    expect(within(dialog).getByRole('button', { name: '라이트 테마로 전환' })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: '현재 운영 구성 보기' }),
+    ).not.toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: '개인정보 처리 안내' })).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: '계정 삭제' })).toBeInTheDocument();
 
@@ -103,6 +110,12 @@ describe('AppShell', () => {
     );
 
     expect(screen.queryByRole('link', { name: '← Bonifacio' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '더보기' }));
+    expect(
+      within(screen.getByRole('dialog', { name: '더보기' })).queryByRole('link', {
+        name: '← Bonifacio',
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('exposes a persistent theme toggle that updates browser chrome and storage', () => {
@@ -126,6 +139,92 @@ describe('AppShell', () => {
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
     expect(screen.getByRole('button', { name: '다크 테마로 전환' })).toBeInTheDocument();
     themeColorMeta.remove();
+  });
+
+  it('keeps the more-menu theme action in sync with the desktop top bar', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<PageHeader title="메트로놈" description="테스트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const desktopActions = screen.getByRole('navigation', { name: '계정과 화면 설정' });
+    expect(within(desktopActions).getAllByRole('button')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '더보기' }));
+    const more = screen.getByRole('dialog', { name: '더보기' });
+    fireEvent.click(within(more).getByRole('button', { name: '라이트 테마로 전환' }));
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    expect(within(more).getAllByRole('button', { name: '다크 테마로 전환' })).toHaveLength(1);
+    fireEvent.click(within(more).getByRole('button', { name: '닫기' }));
+
+    expect(
+      within(desktopActions).getByRole('button', { name: '다크 테마로 전환' }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: '← Bonifacio' })).toHaveLength(1);
+  });
+
+  it('opens managed operations information from more and returns to the same menu', () => {
+    vi.stubEnv('VITE_FMR_MANAGED_LOCAL_SSO', 'true');
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<PageHeader title="메트로놈" description="테스트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const desktopActions = screen.getByRole('navigation', { name: '계정과 화면 설정' });
+    expect(
+      within(desktopActions).getAllByRole('button', { name: '현재 운영 구성 보기' }),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '더보기' }));
+    const more = screen.getByRole('dialog', { name: '더보기' });
+    const operations = within(more).getByRole('button', { name: '현재 운영 구성 보기' });
+    fireEvent.click(operations);
+
+    const notice = screen.getByRole('dialog', { name: '현재 운영 구성' });
+    expect(within(notice).getByText('중앙 통합 로그인 계정을 자동 연결')).toBeInTheDocument();
+    fireEvent.click(within(notice).getByRole('button', { name: '확인' }));
+    expect(screen.getByRole('dialog', { name: '더보기' })).toBeInTheDocument();
+    expect(operations).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(within(more).getByRole('button', { name: '닫기' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(
+      within(desktopActions).getAllByRole('button', { name: '현재 운영 구성 보기' }),
+    ).toHaveLength(1);
+  });
+
+  it('shows the signed-in account once in more and closes the menu when selected', async () => {
+    authState.user = { displayName: 'Player' };
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<PageHeader title="메트로놈" description="테스트" />} />
+            <Route path="dashboard" element={<PageHeader title="내 프로젝트" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '더보기' }));
+    const more = screen.getByRole('dialog', { name: '더보기' });
+    const account = within(more).getByRole('link', { name: 'Player 계정' });
+    expect(within(more).getAllByRole('link', { name: 'Player 계정' })).toHaveLength(1);
+    expect(within(more).queryByRole('link', { name: '로그인' })).not.toBeInTheDocument();
+    expect(account).toHaveAttribute('href', '/dashboard');
+    fireEvent.click(account);
+
+    expect(screen.queryByRole('dialog', { name: '더보기' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '내 프로젝트' })).toBeInTheDocument();
   });
 
   it('keeps the shell visible while a lazy route loads and focuses its heading when ready', async () => {
