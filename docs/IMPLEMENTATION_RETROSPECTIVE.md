@@ -212,3 +212,7 @@
 | 앱 셸·반응형·접근성 | [AppShell 테스트](../apps/web/src/components/AppShell.test.tsx), [반응형 E2E](../e2e/responsive.spec.ts), [접근성 E2E](../e2e/ux-accessibility.spec.ts) |
 | 모바일 경계 | [native bridge 테스트](../apps/mobile/src/nativeBridge.test.ts), [secure storage 테스트](../apps/mobile/src/secureStorage.test.ts), [deep-link 테스트](../apps/mobile/src/deepLink.test.ts), [자산 검증기](../apps/mobile/scripts/verify-web-assets.mjs) |
 | 전체 CI·배포 artifact | [Validate workflow](../.github/workflows/ci.yml), [Deploy workflow](../.github/workflows/deploy.yml), [runtime image smoke](../.github/scripts/smoke-runtime-images.sh) |
+
+## 12. 2026-09-29 릴리스 통합 검증
+
+첫 main 검증에서 서버·protocol·iOS·Android와 웹 단위·빌드는 통과했지만 브라우저 회귀 79개 중 8개가 실패했다. 편집기 3개는 원격 편집에 필요한 `/repertoire/{id}/access`의 leader 응답이 mock에 빠져 있었고, 작은 화면 5개는 새 11px `탭` 글자 대신 예전 아이콘 전용 0px 글자를 기대했다. 테스트에 실제 권한 조회 계약을 추가하고 사용자가 요청한 작은 탭 글자를 명시적으로 검증하도록 수정했다. 저장 충돌·오프라인 읽기·저장 실패 시 이동 차단과 화면 겹침 검사는 유지한다. UI나 접근 권한 동작을 테스트에 맞춰 되돌리지 않는다.

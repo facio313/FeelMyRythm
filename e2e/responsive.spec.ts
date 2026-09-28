@@ -311,7 +311,8 @@ for (const viewport of viewports) {
               await expect(page.getByRole('button', { name: 'BPM 5 낮추기' })).toBeVisible();
               await expect(tapTempo).toBeVisible();
               await expect(page.getByRole('button', { name: 'BPM 5 높이기' })).toBeVisible();
-              if (viewport.width <= 359) await expect(tapTempo).toHaveCSS('font-size', '0px');
+              await expect(tapTempo).toHaveText('탭');
+              await expect(tapTempo).toHaveCSS('font-size', '11px');
             }
 
             if (viewport.width <= 419) {
