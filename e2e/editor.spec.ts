@@ -273,6 +273,10 @@ test('keeps the server authoritative online and requires an explicit save after 
   await page.route('**/feelmyrythm/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/feelmyrythm/api', '');
+    if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/access`) {
+      await route.fulfill({ json: { role: 'leader' } });
+      return;
+    }
     if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/tempomap`) {
       const data =
         latestRevision === 5 ? tempoMap(5, 120) : tempoMap(latestRevision, 140, 'server-map');
@@ -357,6 +361,10 @@ test('ignores IndexedDB bookkeeping when equal revisions have identical contents
   await page.route('**/feelmyrythm/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/feelmyrythm/api', '');
+    if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/access`) {
+      await route.fulfill({ json: { role: 'leader' } });
+      return;
+    }
     if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/tempomap`) {
       if (!online) {
         await route.abort('failed');
@@ -448,6 +456,10 @@ test('keeps the pending route blocked when save-and-leave fails', async ({ page 
   await page.route('**/feelmyrythm/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/feelmyrythm/api', '');
+    if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/access`) {
+      await route.fulfill({ json: { role: 'leader' } });
+      return;
+    }
     if (request.method() === 'GET' && path === `/repertoire/${repertoireId}/tempomap`) {
       await route.fulfill({ json: serverTempoMap(tempoMap(5, 120)) });
       return;
