@@ -1,5 +1,19 @@
 # FeelMyRythm 아키텍처와 코드 읽기 가이드
 
+**코드를 읽는 출발점 · [DashboardPage.createGroup 따라가기](#create-group-walkthrough)**
+
+파일 이름을 먼저 외우기보다, **그룹 하나를 만드는 동작**을 따라 화면 → HTTP 요청 → 서버 → DB → 화면 순서로 읽어 보세요. 아래의 전체 구조 설명과 함께 볼 수 있도록 실제 호출 위치를 연결했습니다.
+
+| 지금 알고 싶은 것 | 바로 읽을 곳 |
+| --- | --- |
+| 어떤 파일부터 열어야 하나요? | [파일별 역할과 읽는 순서](#create-group-files) |
+| 버튼을 누르면 어떤 순서로 동작하나요? | [그룹 생성 16단계](#create-group-walkthrough) |
+| 저장했는데 화면에 안 보이거나 요청이 실패하면요? | [실패 경로와 리뷰 질문](#create-group-failures) |
+
+---
+
+> 메트로놈에서 아래의 모바일/폰 레이아웃은 폭 599px 이하 또는 600–839px·높이 599px 이하를 뜻한다. 그 밖의 패드·데스크톱은 상시 설정을 가진 작업 공간을 사용한다. AppShell의 내비게이션 기준은 별도 840px이다.
+
 > 대상: 이 저장소를 처음 열어 구조, 실행 경로, 핵심 불변 조건과 변경 지점을 빠르게 파악하려는 개발자
 
 함께 읽을 문서:
@@ -216,7 +230,7 @@ flowchart LR
 
 | 기능 | 화면·orchestration | client/core 흐름 | 서버·영속 흐름 |
 | --- | --- | --- | --- |
-| 메트로놈 | `MetronomePage`가 route의 `repertoire`·`tempoMap`·`measure`와 로컬 설정을 읽고 [`useMetronome`](../apps/web/src/lib/useMetronome.ts)에 `TempoMap`을 준다. | `validateTempoMap` → `expandTimeline` → `TimelineTransport` → `LookaheadScheduler` → `WebAudioEngine`; rAF는 오디오 클럭 기준 frame source를 읽는다. 표시 progress는 120ms 선예약 큐의 다음 박에 의존하지 않고 전개된 결정론적 타임라인의 박 경계로 계산한다. 예비박은 재생 전에 만든 계획의 경계를 사용하며 오디오 예약 시각·WS 동기화 계약은 유지한다. 폭 839px 이하 일반 메트로놈은 `.metronome-number` 버튼 안에 같은 `BeatVisualizer`의 `variant="number"`를 기존 박 원 위에 표시하며 별도 타이머나 오디오를 만들지 않는다. 본박 번호·예비박 countdown·대기 `—`만 숫자 canvas에 표시하고 본박/예비박 progress만 pulse에 사용한다. 큰 박 숫자 영역은 테두리·둥근 모서리와 박자표 없이 번호만 중앙에 표시한다. 실제 glyph로 계산한 기존 fit 글자 크기의 80%를 적용하며 panel 크기와 배치는 유지한다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 본박 숫자는 `1..beatCount`의 최대 실측 폭을 기준으로 글꼴 크기를 고정하고 x 중심을 유지해 박마다 크기·위치가 흔들리지 않게 한다. 모바일 속도 숫자는 기존 직접 입력 button이며 20–400 dialog·오류·trigger focus 복원을 유지한다. 모바일에서는 속도 숫자를 눌러 기존 20–400 입력 dialog를 열고, 박자표를 눌러 2/4·3/4·4/4·5/4·6/8·9/8·12/8의 같은 7개 선택지를 가진 dialog를 연다. 박자표 변경 시 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 화면의 세부 설정은 테두리 없는 아이콘만 표시하며 44px, coarse pointer에서는 48px의 터치 영역과 `세부 설정` 접근성 이름을 유지한다. 설정의 중복 템포 버튼은 두지 않는다. 모바일 일반 화면은 진행 전용 `BeatVisualizer`의 `variant="progress"`를 Page 내부에 fixed로 렌더한다. 활성 `.app-shell`은 `isolation: isolate`, 진행 레이어는 `z-index: -1`로 앱 표면 바탕 위·모든 콘텐츠 아래에 둔다. 오디오 `frame.progress`를 따라 메뉴를 제외한 앱 영역을 `#f47a24`, opacity 0.3의 주황으로 좌→우 채운다. 상속된 `--mobile-nav-height`만큼 bottom을 제외하고 600–839px landscape에서는 `--rail-width`만큼 left를 제외하며 bottom은 0으로 둔다. 레이어는 `pointer-events: none`·`aria-hidden`이고 내비게이션은 기존 표면을 유지한다. 숫자 canvas는 `showProgress=false`로 채움을 제거하고 기존 `progressStyle="background"`의 fit 경로로 숫자 pulse·fit 계산을 유지하며 `numberScale={0.8}`을 적용한다. `meterLabel`은 전달하지 않으며 원형 canvas도 `showProgress=false`다. 진행막대가 없는 원형 박 묶음은 canvas의 가로·세로 중앙에 정렬한다. 정지·예약 대기·reduced motion에서는 채움을 비우고 route 이탈·desktop·fullscreen 전환 때 장식 레이어를 제거한다. 모바일의 기존 radial 배경은 끄며 기본 bar·desktop/fullscreen·다른 사용처는 유지한다. 단일 `.performance-context` DOM은 모바일에서는 header 왼쪽, desktop/fullscreen에서는 기존 stage에 두며 예비박 중에도 마디 번호를 유지한다. 예비박 토글은 모든 폭에서 dialog와 인라인 panel이 공유하는 `settingsControls`에서 기존 저장 동작을 유지한다. 박자표 설정 변경은 새 박수에 맞춘 `accentPattern`을 함께 반영해 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 조작은 `−5 → 재생/정지 → +5 → 탭` 순서다. 모바일 `탭`은 조작 영역을 입력판으로 대체하는 local UI 상태이며 매 진입 측정을 비운다. 실제 입력판 탭만 기존 BPM 계산에 사용하고 ×/Escape로 복귀해 trigger focus를 복원한다. 데스크톱 직접 탭과 fullscreen은 유지한다. 모바일 상단의 보면대 버튼은 제거하고 큰 박 번호를 누르면 인앱 집중 화면을 토글한다. 집중 화면은 메뉴를 숨기므로 진행 배경의 inset을 0으로 두되 콘텐츠 아래 레이어는 유지한다. 집중 화면에는 큰 번호·원형 박·속도/박자표·재생/정지만 남기고 상단·하단 메뉴, ±5·탭·설정을 숨긴다. 다시 큰 번호를 누르거나 입력 dialog가 닫힌 상태에서 Escape로 복귀하며 오디오 재생은 유지한다. 데스크톱의 기존 fullscreen 동작은 유지한다. 원격 network failure만 [`localDb`](../apps/web/src/lib/localDb.ts)의 user-scoped snapshot으로 대체한다. | 원격 map은 `GET /api/repertoire/{id}/tempomap` → [`repertoire.py`](../apps/server/app/routers/repertoire.py) → immutable `TempoMapRevision`. 서버는 beat를 보내지 않는다. |
+| 메트로놈 | `MetronomePage`가 route의 `repertoire`·`tempoMap`·`measure`와 로컬 설정을 읽고 [`useMetronome`](../apps/web/src/lib/useMetronome.ts)에 `TempoMap`을 준다. | `validateTempoMap` → `expandTimeline` → `TimelineTransport` → `LookaheadScheduler` → `WebAudioEngine`; rAF는 오디오 클럭 기준 frame source를 읽는다. 표시 progress는 120ms 선예약 큐의 다음 박에 의존하지 않고 전개된 결정론적 타임라인의 박 경계로 계산한다. 예비박은 재생 전에 만든 계획의 경계를 사용하며 오디오 예약 시각·WS 동기화 계약은 유지한다. 폰 레이아웃의 일반 메트로놈은 `.metronome-number` 버튼 안에 같은 `BeatVisualizer`의 `variant="number"`를 기존 박 원 위에 표시하며 별도 타이머나 오디오를 만들지 않는다. 본박·페르마타의 박 번호와 숨 고르기 `쉼`을 숫자 canvas에 표시하며 대기에는 clearRect 이후 그리기를 생략해 빈 영역을 유지하고 숫자의 불투명도는 항상 1로 유지한다. 숫자 영역은 z-index 1로 진행 배경(-1)과 다른 표시 콘텐츠 위에 두고 dialog 계층은 보존한다. 예비박은 같은 영역의 비모달 팝업 카드로 구분한다. 큰 박 숫자 영역은 테두리·둥근 모서리와 박자표 없이 번호만 중앙에 표시한다. 실제 glyph로 계산한 기존 fit 글자 크기의 80%를 적용하며 panel 크기와 배치는 유지한다. 모바일 stage는 큰 박 번호 → 원형 박 → 현재 속도 숫자와 박자표 순으로 표시한다. 속도 옆 `BPM` 글자는 숨기며 박자표는 속도 숫자 옆에 둔다. 양쪽이 같은 폭인 grid로 속도 숫자의 중심을 고정하고 오른쪽 박자표와 baseline을 맞춘다. 본박 숫자는 `1..beatCount`의 최대 실측 폭을 기준으로 글꼴 크기를 고정하고 x 중심을 유지해 박마다 크기·위치가 흔들리지 않게 한다. 모바일 속도 숫자는 기존 직접 입력 button이며 20–400 dialog·오류·trigger focus 복원을 유지한다. 모바일에서는 속도 숫자를 눌러 기존 20–400 입력 dialog를 열고, 박자표를 눌러 2/4·3/4·4/4·5/4·6/8·9/8·12/8의 같은 7개 선택지를 가진 dialog를 연다. 박자표 변경 시 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 화면의 세부 설정은 테두리 없는 아이콘만 표시하며 44px, coarse pointer에서는 48px의 터치 영역과 `세부 설정` 접근성 이름을 유지한다. 설정의 중복 템포 버튼은 두지 않는다. 모바일 일반 화면은 진행 전용 `BeatVisualizer`의 `variant="progress"`를 Page 내부에 fixed로 렌더한다. 활성 `.app-shell`은 `isolation: isolate`, 진행 레이어는 `z-index: -1`로 앱 표면 바탕 위·모든 콘텐츠 아래에 둔다. 오디오 `frame.progress`를 따라 메뉴를 제외한 앱 영역을 `#f47a24`, opacity 0.3의 주황으로 좌→우 채운다. 상속된 `--mobile-nav-height`만큼 bottom을 제외하고 600–839px landscape에서는 `--rail-width`만큼 left를 제외하며 bottom은 0으로 둔다. 레이어는 `pointer-events: none`·`aria-hidden`이고 내비게이션은 기존 표면을 유지한다. 숫자 canvas는 `showProgress=false`로 채움을 제거하고 기존 `progressStyle="background"`의 fit 경로로 일정한 숫자 밝기와 fit 계산을 유지하며 `numberScale={0.8}`을 적용한다. `meterLabel`은 전달하지 않으며 원형 canvas도 `showProgress=false`다. 진행막대가 없는 원형 박 묶음은 canvas의 가로·세로 중앙에 정렬한다. 정지·예약 대기·reduced motion에서는 채움을 비우고 route 이탈·desktop·fullscreen 전환 때 장식 레이어를 제거한다. 모바일의 기존 radial 배경은 끄며 기본 bar·desktop/fullscreen·다른 사용처는 유지한다. 단일 `.performance-context` DOM은 모바일에서는 header 왼쪽, desktop/fullscreen에서는 기존 stage에 두며 예비박 중에도 마디 번호를 유지한다. 예비박 토글은 모든 폭에서 dialog와 인라인 panel이 공유하는 `settingsControls`에서 기존 저장 동작을 유지한다. 박자표 설정 변경은 새 박수에 맞춘 `accentPattern`을 함께 반영해 기존 앞 박 강세를 보존하고 초과분은 제거하며 추가 박은 보통 강세로 채운다. 모바일 일반 조작은 `−5 → 재생/정지 → +5 → 탭` 순서다. 모바일 `탭`은 기존 버튼 줄의 공간을 보존한 채 같은 크기의 입력판을 absolute로 겹치는 local UI 상태이며 매 진입 측정을 비운다. 원래 조작과 빠른 시작 마디는 visibility/inert로 공간을 보존하며 초점은 preventScroll로 이동해 위쪽 UI를 유지한다. 라벨은 입력판 전체의 중앙, ×는 오른쪽의 세로 중앙에 둔다. 실제 입력판 탭만 기존 BPM 계산에 사용하고 ×/Escape로 복귀해 trigger focus를 복원한다. 데스크톱 직접 탭과 fullscreen은 유지한다. 모바일 상단의 보면대 버튼은 제거하고 큰 박 번호를 누르면 인앱 집중 화면을 토글한다. 집중 화면은 메뉴를 숨기므로 진행 배경의 inset을 0으로 두되 콘텐츠 아래 레이어는 유지한다. 집중 화면에는 큰 번호·원형 박·속도/박자표·재생/정지만 남기고 상단·하단 메뉴, ±5·탭·설정을 숨긴다. 다시 큰 번호를 누르거나 입력 dialog가 닫힌 상태에서 Escape로 복귀하며 오디오 재생은 유지한다. 데스크톱의 기존 fullscreen 동작은 유지한다. 원격 network failure만 [`localDb`](../apps/web/src/lib/localDb.ts)의 user-scoped snapshot으로 대체한다. | 원격 map은 `GET /api/repertoire/{id}/tempomap` → [`repertoire.py`](../apps/server/app/routers/repertoire.py) → immutable `TempoMapRevision`. 서버는 beat를 보내지 않는다. 예비박 팝업과 앱의 상태 문구는 4/4 한 마디에서 `3 → 2 → 1 → 0`으로 표시하며, 마지막 `0`의 한 박이 끝나면 본박으로 들어간다. 팝업·접근성 안내는 `frame.countInValue - 1`, 페이지 상태는 `position.countdown - 1`을 표시하며 오디오 frame의 내부 값은 유지한다. |
 | 템포맵 편집 | `EditorPage`가 `source=local`의 map ID 또는 원격 repertoire ID로 authoritative source를 고르고 dirty/blocker·충돌 modal을 소유한다. | core validation과 실제 timeline 전개가 모두 성공해야 저장한다. 원격 저장은 `{expectedRevision,data}`, 409는 [`tempoMapMerge`](../apps/web/src/lib/tempoMapMerge.ts)로 최신본/초안 rebase를 선택한다. | `PUT /api/repertoire/{id}/tempomap` → leader 권한 → current row lock → expected revision 비교 → 새 `TempoMapRevision` insert. 기존 revision은 수정하지 않는다. |
 | 앙상블 | `SessionPage`가 workspace, 방 REST, [`RoomClient`](../apps/web/src/lib/roomClient.ts), `useMetronome.prepareAudio/startSynchronized`와 세션 내 `ScoresPage`를 연결한다. | `JOIN_ROOM` 후 PING 표본으로 offset을 추정하고 `TRANSPORT(serverStartTimeNs, revision, anchor)`를 server→performance→audio time으로 변환한다. | `POST /api/rooms`가 revision·anchor 집합을 고정한다. [`ws.py`](../apps/server/app/ws.py)는 first-frame bearer와 membership을 검증하고 [`RoomManager`](../apps/server/app/rooms.py)가 READY/START/STOP/SEEK와 roster를 관리한다. |
 | 악보 목록·업로드 | `ScoresPage` → [`scoreApi`](../apps/web/src/lib/scoreApi.ts). PDF.js, image element, OSMD renderer를 형식별로 lazy 사용한다. | presign → 인증 header 없는 staging upload → complete 순서다. 목록·본문·MeasureMap·annotation snapshot은 user ID로 분리한다. | [`scores.py`](../apps/server/app/routers/scores.py)가 pending `Score`를 만들고 complete에서 staging을 final key로 promote한 뒤 ready와 staging deletion outbox를 commit한다. |
@@ -232,6 +246,688 @@ flowchart LR
 Editor는 원격 access role을 먼저 읽고 member의 기존 맵을 읽기 전용으로 연다. 최신 맵 404와 빈 revision 목록을 함께 확인한 경우에만 owner/leader에게 revision 0의 첫 초안을 제공한다. 로컬 편집은 로그인 중에도 같은 IndexedDB 대상에 저장하며 JSON 가져오기로 대상 ID·repertoire·revision을 바꾸지 않는다. `메트로놈에서 열기`는 원격 repertoire 또는 정확한 로컬 `tempoMap` ID를 전달한다. 명시한 로컬 맵이 없거나 유효하지 않으면 다른 맵으로 대체하지 않는다.
 
 `ScoresPage`는 독립 화면에서 자체 `useMetronome`을 사용하고, 세션 안에서는 `synchronizedPlayback`의 고정 TempoMap·playing·position·frameSource를 받는다. 이 경로는 자체 엔진을 생성하거나 최신 맵을 다시 읽지 않으며, 마디 선택은 화면 탐색만 바꾼다. 로컬 PDF·이미지는 저장된 맵을 `ScoreRecord.tempoMapId`로 연결하거나 첫 맵을 생성·연결해 편집기로 이동한다. `score` query가 저장 후 악보로 돌아갈 문맥을 유지한다.
+
+<a id="create-group-walkthrough"></a>
+
+### 5.4 실제 코드 따라 읽기 · DashboardPage.createGroup
+
+> **이번에 따라갈 동작**
+>
+> 로그인한 사용자가 대시보드에서 **새 그룹 → 이름 입력 → 만들기**를 누른다.
+>
+> 서버는 그룹과 생성자의 `owner` 멤버십을 함께 저장한다. 프론트는 목록을 다시 조회해 새 그룹을 표시한다.
+
+이 절의 기준은 **FeelMyRythm의 Codex 작업 폴더에 있는 실제 코드**다. 예시 이름 `주말 앙상블`과 아래의 식별자·시각은 설명용이며, 실제 계정이나 DB에서 가져온 값이 아니다. 코드 블록은 해당 파일의 핵심 부분을 발췌했고, 파일 링크는 발췌가 시작되는 줄로 연결했다.
+
+**읽는 순서**
+
+| 구간 | 단계 | 이 구간에서 확인할 것 |
+| --- | --- | --- |
+| [A · 화면과 요청](#create-group-browser) | 01–04 | 입력값이 어디에 저장되고 어떤 HTTP 요청이 되는가 |
+| [B · 서버 진입과 검증](#create-group-server) | 05–08 | 어떤 함수가 요청을 받고, DB 세션·사용자·입력값을 어떻게 준비하는가 |
+| [C · DB 저장과 응답](#create-group-database) | 09–11 | 어느 테이블에 무엇을 저장하고 무엇을 응답하는가 |
+| [D · 재조회와 화면 표시](#create-group-refresh) | 12–16 | 응답 뒤 어떤 GET 요청을 보내고 화면을 다시 그리는가 |
+
+```mermaid
+sequenceDiagram
+    actor U as 사용자
+    participant P as DashboardPage
+    participant C as ApiClient
+    participant A as FastAPI
+    participant D as DB
+    U->>P: 이름 입력 후 만들기
+    P->>C: post("/groups", {name})
+    C->>A: POST /api/groups · 프록시 통과 후
+    A->>D: 현재 사용자 조회
+    Note over A,D: 입력 검증과 사용자 확인 후 생성 함수 실행
+    A->>D: groups + group_members INSERT
+    A->>D: COMMIT 후 객체 새로 읽기
+    A-->>C: 201 · GroupOut
+    C-->>P: post Promise 완료
+    P->>P: 성공 알림 · 모달 닫기 · groups.reload()
+    P->>C: loadWorkspace → GET /groups
+    C->>A: GET /api/groups
+    A->>D: 내 멤버십으로 그룹 목록 조회
+    A-->>C: 그룹 목록
+    Note over C,A: 그룹별 members·projects 조회, 프로젝트가 있으면 repertoire 조회
+    C-->>P: 화면용 그룹 목록과 조회 실패 정보
+    P-->>U: 그룹 이름 · owner · 멤버 수 표시
+```
+
+<a id="create-group-files"></a>
+
+**먼저 열어 둘 파일**
+
+아래 경로는 저장소 루트를 기준으로 한다. 이 기능은 서버의 별도 서비스나 DAO(데이터 접근 전용 계층)를 거치지 않고, **라우터가 SQLAlchemy의 DB 세션으로 직접 저장·조회**한다. SQLAlchemy는 파이썬 객체와 DB 테이블을 연결하는 ORM이다.
+
+| 순서 | 파일·폴더 | 역할 | 이번에 볼 함수·정의 |
+| --- | --- | --- | --- |
+| 1 | [apps/web/src/pages/DashboardPage.tsx](../apps/web/src/pages/DashboardPage.tsx#L38) | 화면, 입력 상태, 생성 요청, 결과 표시 | `DashboardPage`, `createGroup` |
+| 2 | [apps/web/src/lib/auth.tsx](../apps/web/src/lib/auth.tsx#L407) | 현재 사용자와 공용 API 클라이언트 제공 | `useAuth`, `new ApiClient(...)` |
+| 3 | [apps/web/src/lib/api.ts](../apps/web/src/lib/api.ts#L69) · [paths.ts](../apps/web/src/lib/paths.ts#L3) | JSON 변환, 인증 헤더, 요청 주소, 오류 처리 | `post`, `request`, `API_BASE` |
+| 4 | [apps/server/app/main.py](../apps/server/app/main.py#L146) · [routers/groups.py](../apps/server/app/routers/groups.py#L25) | API 등록과 그룹 생성·목록 조회 | `include_router`, `create_group`, `list_groups` |
+| 5 | [dependencies.py](../apps/server/app/dependencies.py#L27) · [security.py](../apps/server/app/security.py#L146) | 요청에 사용할 DB 세션과 인증된 사용자 준비 | `DbSession`, `CurrentUser`, `authenticate_access_token` |
+| 6 | [schemas.py](../apps/server/app/schemas.py#L158) · [serializers.py](../apps/server/app/serializers.py#L52) | 요청 검증과 응답 모양 정의 | `GroupCreate`, `GroupOut`, `group_out` |
+| 7 | [db.py](../apps/server/app/db.py#L14) · [models.py](../apps/server/app/models.py#L85) | DB 연결·세션과 테이블 매핑 | `Database`, `Group`, `GroupMember` |
+| 8 | [apps/web/src/lib/useAsync.ts](../apps/web/src/lib/useAsync.ts#L10) · [workspace.ts](../apps/web/src/lib/workspace.ts#L81) | 생성 후 목록 재조회와 화면용 데이터 조합 | `reload`, `loadWorkspace` |
+
+`apps/web`은 React 프론트엔드, `apps/server`는 FastAPI 백엔드다. `packages/ui`는 공용 화면 부품, `packages/protocol`은 서버 응답 등의 타입을 공유하는 곳이다. 이 흐름의 공유 그룹은 서버 DB에 저장된다. 같은 화면의 `localMaps`와 IndexedDB는 로컬 템포맵을 다루는 별도 경로다.
+
+---
+
+<a id="create-group-browser"></a>
+
+**A · 화면에서 입력값을 받아 요청을 보낸다**
+
+#### 01 · 새 그룹 모달을 열고 이름을 React 상태에 담는다
+
+**읽을 코드:** [DashboardPage.tsx · 39–45행](../apps/web/src/pages/DashboardPage.tsx#L39) · [DashboardPage.tsx · 566–577행](../apps/web/src/pages/DashboardPage.tsx#L566)
+
+```tsx
+const { user, client } = useAuth();
+const navigate = useNavigate();
+const { notify } = useToast();
+const [createOpen, setCreateOpen] = useState(false);
+const createGroupInFlight = useRef(false);
+const [creatingGroup, setCreatingGroup] = useState(false);
+const [groupName, setGroupName] = useState('');
+```
+
+로그인한 사용자의 **새 그룹** 버튼은 [278행](../apps/web/src/pages/DashboardPage.tsx#L278)에서 `setCreateOpen(true)`를 호출한다. `createOpen`은 모달의 열림 상태, `groupName`은 입력 중인 이름, `creatingGroup`은 제출 버튼의 진행 상태다.
+
+```tsx
+<form className="stack" onSubmit={(event) => void createGroup(event)}>
+  <Field
+    label="그룹 이름"
+    value={groupName}
+    onChange={(event) => setGroupName(event.target.value)}
+    autoFocus
+    required
+  />
+  <Button variant="primary" type="submit" disabled={creatingGroup}>
+    {creatingGroup ? '만드는 중…' : '만들기'}
+  </Button>
+</form>
+```
+
+입력할 때마다 `onChange`가 `groupName`을 갱신한다. 만들기 버튼은 `type="submit"`이므로 폼의 `onSubmit`을 거쳐 `createGroup(event)`가 호출된다. 이름 입력 뒤 Enter로 폼을 제출해도 같은 경로를 탄다.
+
+`Field`는 [공용 input 컴포넌트](../packages/ui/src/primitives.tsx#L53)다. `required`를 실제 HTML `input`에 넘기므로 빈 입력은 브라우저가 막는다. 공백만 있는 이름의 검증은 뒤의 서버 단계에서 다시 확인한다.
+
+#### 02 · createGroup이 기본 제출을 막고 중복 실행을 잠근다
+
+**읽을 코드:** [DashboardPage.tsx · 64–70행](../apps/web/src/pages/DashboardPage.tsx#L64)
+
+```tsx
+async function createGroup(event: FormEvent) {
+  event.preventDefault();
+  if (createGroupInFlight.current) return;
+  createGroupInFlight.current = true;
+  setCreatingGroup(true);
+  try {
+    await client.post<GroupSummary>('/groups', { name: groupName });
+```
+
+`event.preventDefault()`는 브라우저의 기본 폼 제출과 페이지 이동을 막는다. 이어서 `createGroupInFlight.current`가 이미 `true`면 즉시 종료한다.
+
+잠금은 `useRef`의 값을 즉시 바꿔 적용하고, 버튼의 **만드는 중…** 표시와 비활성화는 `setCreatingGroup(true)`로 처리한다. React가 다음 화면을 그리기 전에 제출이 다시 들어와도 ref 검사로 걸러낼 수 있다.
+
+이 잠금은 **현재 컴포넌트에서 진행 중인 제출**을 막는 장치다. 다른 탭이나 새로고침 뒤의 재요청까지 같은 생성으로 취급하는 서버의 중복 처리 방지는 아니다.
+
+#### 03 · ApiClient.post가 객체를 JSON 요청 본문으로 바꾼다
+
+**읽을 코드:** [api.ts · 176–181행](../apps/web/src/lib/api.ts#L176)
+
+```ts
+post<T>(path: string, body?: unknown): Promise<T> {
+  return this.request<T>(path, {
+    method: 'POST',
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+```
+
+`client`는 [AuthProvider가 만든 ApiClient](../apps/web/src/lib/auth.tsx#L407)를 `useAuth()`로 받은 객체다. `createGroup`은 `{ name: groupName }`만 넘기고, `post`는 HTTP 메서드를 `POST`로 설정한 뒤 `JSON.stringify`로 JSON 본문을 만든다. JSON은 객체의 값을 서버와 주고받기 위한 텍스트 형식이다.
+
+입력값이 앞뒤 공백을 포함한 `  주말 앙상블  `이라면 실제로 넘기는 JSON 모양은 다음과 같다. 프론트의 이 함수에는 `trim()`이 없다.
+
+```json
+{
+  "name": "  주말 앙상블  "
+}
+```
+
+현재 사용자 ID나 `owner` 역할은 본문에 넣지 않는다. 서버가 인증 결과로 결정한다.
+
+#### 04 · request가 인증 헤더와 주소를 붙여 fetch를 실행한다
+
+**읽을 코드:** [api.ts · 74–86행](../apps/web/src/lib/api.ts#L74) · [paths.ts · 3–8행](../apps/web/src/lib/paths.ts#L3)
+
+```ts
+const authenticated = options.authenticated ?? true;
+const tokens = this.readTokens();
+const headers = new Headers(init.headers);
+if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
+  headers.set('Content-Type', 'application/json');
+}
+headers.set('Accept', 'application/json');
+if (authenticated && tokens) headers.set('Authorization', `Bearer ${tokens.accessToken}`);
+
+const response = await fetch(`${API_BASE}${path.startsWith('/') ? path : `/${path}`}`, {
+  ...init,
+  headers,
+});
+```
+
+`request`는 JSON을 주고받는다는 헤더를 붙이고, 저장된 토큰이 있으면 `Authorization: Bearer ...`를 추가한다. 그다음 `API_BASE`와 `/groups`를 이어 붙여 네트워크 요청을 보낸다.
+
+| 확인 위치 | 이 요청의 주소 | 근거 |
+| --- | --- | --- |
+| 브라우저의 Network 탭 | `POST /feelmyrythm/api/groups` | `API_BASE = /feelmyrythm/api` |
+| 개발 프록시가 서버에 전달할 때 | `POST /api/groups` | [vite.config.ts](../apps/web/vite.config.ts#L119)가 `/feelmyrythm`을 제거 |
+| 배포 설정의 nginx가 전달할 때 | `POST /api/groups` | [nginx.conf](../nginx/nginx.conf#L27)의 API 위치와 `proxy_pass` |
+| 모바일 빌드 | 설정된 서버 origin + `/feelmyrythm/api/groups` | [paths.ts](../apps/web/src/lib/paths.ts#L7)의 `serverOrigin` |
+
+따라서 프론트 코드의 `/groups`와 백엔드 경로의 `/api/groups`는 이 요청의 서로 다른 지점이다. 위 주소는 코드와 설정의 연결을 설명한 것이며, 현재 운영 서버에서 호출해 확인한 기록은 아니다.
+
+인증 오류인 401이 오면 [88–102행](../apps/web/src/lib/api.ts#L88)에서 조건에 따라 토큰을 갱신하거나 이미 바뀐 토큰을 사용해 **한 번 재요청**한다. 모든 네트워크 오류를 무조건 반복하는 코드는 없다.
+
+---
+
+<a id="create-group-server"></a>
+
+**B · 서버가 요청을 받아 실행에 필요한 값을 준비한다**
+
+#### 05 · POST /api/groups가 create_group에 연결된다
+
+**읽을 코드:** [groups.py · 25–29행](../apps/server/app/routers/groups.py#L25) · [main.py · 146–158행](../apps/server/app/main.py#L146)
+
+```python
+router = APIRouter(prefix="/api", tags=["groups and projects"])
+
+
+@router.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(body: GroupCreate, db: DbSession, user: CurrentUser) -> GroupOut:
+```
+
+`main.py`가 `groups.router`를 FastAPI 앱에 등록한다. 라우터의 `prefix="/api"`와 함수 위의 `"/groups"`가 합쳐져 `POST /api/groups`를 받는다.
+
+함수 인자 세 개가 이 경로의 핵심이다.
+
+| 인자 | 함수에 들어오는 값 | 준비하는 코드 |
+| --- | --- | --- |
+| `body: GroupCreate` | 검증된 그룹 이름과 설명 | `schemas.py` |
+| `db: DbSession` | 이번 요청에서 사용하는 SQLAlchemy 세션 | `dependencies.py` → `db.py` |
+| `user: CurrentUser` | 인증을 통과한 사용자 객체 | `dependencies.py` → `security.py` |
+
+**06–08은 함수 본문 실행 전에 필요한 준비 과정을 읽는 순서다.** FastAPI의 의존성 처리와 본문 검증을 설명하기 위해 나눈 것이며, 아래 번호가 모든 내부 검사의 엄격한 실행 순서를 뜻하지는 않는다. 세 인자가 정상적으로 준비되어야 09의 생성 코드로 들어간다.
+
+#### 06 · 요청에 사용할 DB 세션을 연다
+
+**읽을 코드:** [dependencies.py · 27–31행](../apps/server/app/dependencies.py#L27) · [db.py · 40–45행](../apps/server/app/db.py#L40)
+
+```python
+def get_db(request: Request) -> Iterator[Session]:
+    yield from request.app.state.database.sessions()
+
+
+DbSession = Annotated[Session, Depends(get_db)]
+```
+
+`Depends(get_db)`는 “이 인자가 필요하면 `get_db`로 값을 준비해 달라”는 FastAPI의 의존성 선언이다. `get_db`는 앱에 준비된 `Database` 객체에 세션을 요청한다.
+
+```python
+def sessions(self) -> Iterator[Session]:
+    session = self.session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
+```
+
+세션은 DB 객체를 읽고 변경 사항을 모아 저장하는 작업 단위다. `yield`로 라우터와 인증 코드에 세션을 제공하고, 요청 처리가 끝나면 `finally`에서 닫는다. 이 함수가 매 요청마다 테이블을 새로 만드는 것은 아니다.
+
+연결 엔진과 세션 팩토리는 [Database.__init__](../apps/server/app/db.py#L14)에 있다. `autoflush=False`라서 조회 전 자동 반영은 꺼져 있지만, 뒤에서 호출하는 `commit()`은 대기 중인 변경을 DB에 반영하고 확정한다.
+
+#### 07 · 토큰을 확인하고 DB에서 현재 사용자를 찾는다
+
+**읽을 코드:** [dependencies.py · 41–46행](../apps/server/app/dependencies.py#L41) · [security.py · 146–156행](../apps/server/app/security.py#L146)
+
+```python
+if credentials is None or credentials.scheme.casefold() != "bearer":
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required")
+user = authenticate_access_token(db, settings, credentials.credentials)
+request_subject = trusted_sso_subject(request, settings)
+require_matching_sso_subject(user.sso_subject, request_subject)
+return user
+```
+
+Bearer 토큰이 없으면 401로 끝난다. 토큰이 있으면 `authenticate_access_token`이 서명·만료·토큰 종류 등을 확인한 뒤 사용자 행을 조회한다.
+
+```python
+def authenticate_access_token(db: Session, settings: Settings, token: str) -> User:
+    try:
+        payload = decode_token(settings, token, "access")
+    except TokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    user = db.get(User, str(payload["sub"]))
+    if user is None or not user.is_active or user.email_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="inactive or missing user")
+    if payload.get("gen") != user.auth_generation:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token generation is stale")
+    return user
+```
+
+`db.get(User, ...)`의 ID는 토큰의 `sub` 값이다. 사용자가 없거나 비활성 상태이거나 이메일 확인이 안 되어 있으면 거부한다. `auth_generation`과 토큰의 `gen`도 비교해 이전 인증 세대의 토큰을 막는다. 토큰 자체의 검증은 [decode_token](../apps/server/app/security.py#L130)에서 읽을 수 있다.
+
+통합 로그인(SSO)의 신뢰된 사용자 식별자가 전달된 경우에는 [require_matching_sso_subject](../apps/server/app/sso.py#L196)가 앱 사용자와의 일치도 검사한다. 이 과정을 통과한 `user.id`가 뒤에서 그룹 생성자의 ID가 된다.
+
+#### 08 · GroupCreate가 이름과 설명을 검증한다
+
+**읽을 코드:** [schemas.py · 158–160행](../apps/server/app/schemas.py#L158) · [schemas.py · 11–11행](../apps/server/app/schemas.py#L11)
+
+```python
+class GroupCreate(ApiModel):
+    name: NonEmpty
+    description: str = ""
+```
+
+```python
+NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+```
+
+`NonEmpty`는 문자열 앞뒤 공백을 제거하고, 제거 후에도 최소 한 글자가 남아야 한다는 조건이다. 예시의 이름은 `주말 앙상블`로 바뀐다. `description`을 보내지 않았으므로 설명은 기본값인 빈 문자열이 된다.
+
+| 입력 | 이 단계의 결과 |
+| --- | --- |
+| `{"name": "  주말 앙상블  "}` | 이름을 `주말 앙상블`로 정리, 설명은 `""` |
+| `{"name": "   "}` 또는 이름 누락 | 입력 검증 실패, 생성 함수 본문에 들어가지 않음 |
+| 이름 외에 `userId`, `role` 등 미정의 필드 전달 | [ApiModel의 extra="forbid"](../apps/server/app/schemas.py#L15)에 따라 거부 |
+
+여기서의 검증은 그룹 이름의 공백·최소 길이 등에 대한 것이다. `GroupCreate`에 최대 길이 검사는 없고, 모델의 이름 열은 `String(160)`이다. 이름 길이 제한을 리뷰할 때는 두 정의를 함께 봐야 한다.
+
+---
+
+<a id="create-group-database"></a>
+
+**C · 그룹과 소유자 멤버십을 함께 저장하고 응답한다**
+
+#### 09 · Group과 owner 멤버십 객체를 만든다
+
+**읽을 코드:** [groups.py · 30–31행](../apps/server/app/routers/groups.py#L30) · [models.py · 85–104행](../apps/server/app/models.py#L85)
+
+```python
+group = Group(name=body.name, description=body.description)
+membership = GroupMember(group=group, user_id=user.id, role="owner")
+```
+
+첫 줄은 그룹 객체를 만든다. 두 번째 줄은 인증된 사용자 `user.id`를 새 그룹의 `owner`로 연결한다. 클라이언트가 역할을 정하는 대신 서버 코드가 `role="owner"`를 직접 넣는다.
+
+`GroupMember(group=group, ...)`처럼 **객체 관계**로 연결하기 때문에, 프론트가 새 그룹 ID를 미리 만들어 보내거나 별도의 멤버 추가 요청을 보낼 필요가 없다. SQLAlchemy가 저장 과정에서 그룹의 ID를 멤버십의 `group_id`에 연결한다.
+
+<details>
+<summary>DB 모델 펼쳐 보기 · 어떤 테이블과 열에 연결되는가</summary>
+
+```python
+class Group(TimestampMixin, Base):
+    __tablename__ = "groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    members: Mapped[list[GroupMember]] = relationship(back_populates="group", cascade="all, delete-orphan")
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16))
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    group: Mapped[Group] = relationship(back_populates="members")
+    user: Mapped[User] = relationship()
+```
+
+`__tablename__`은 테이블 이름, `primary_key=True`는 각 행을 구별하는 기본 키, `ForeignKey(...)`는 다른 테이블의 행을 참조하는 관계다. `relationship`은 이 관계를 파이썬 객체로 다루도록 연결한다.
+
+</details>
+
+이번 요청으로 생기는 행은 다음 두 개다. `G`, `U`, `M`은 이해를 위한 기호이며 실제 ID 값은 아니다.
+
+| 테이블 | 새 행의 핵심 값 | 의미 |
+| --- | --- | --- |
+| `groups` | `id=G`, `name="주말 앙상블"`, `description=""` | 새 그룹 자체 |
+| `group_members` | `id=M`, `group_id=G`, `user_id=U`, `role="owner"` | 기존 사용자 U가 그룹 G의 소유자라는 관계 |
+
+ID는 [new_id](../apps/server/app/models.py#L30)의 UUID 기본값으로 채워진다. 그룹의 생성·수정 시각은 [TimestampMixin](../apps/server/app/models.py#L38), 멤버십 가입 시각은 `GroupMember.joined_at`의 기본값으로 정해진다. 사용자 행을 새로 만들지는 않는다.
+
+#### 10 · add_all → commit → refresh 순서로 저장을 확정한다
+
+**읽을 코드:** [groups.py · 32–35행](../apps/server/app/routers/groups.py#L32)
+
+```python
+db.add_all([group, membership])
+db.commit()
+db.refresh(group)
+db.refresh(membership)
+```
+
+| 코드 | 실제 역할 |
+| --- | --- |
+| `db.add_all([group, membership])` | 두 객체를 세션의 저장 대상으로 등록한다. 이 줄만으로 저장 완료가 되지는 않는다. |
+| `db.commit()` | 대기 중인 변경을 DB에 반영하고, 그룹·멤버십을 같은 트랜잭션으로 확정한다. |
+| `db.refresh(group)` | 저장된 그룹 값을 DB에서 다시 읽어 객체에 반영한다. |
+| `db.refresh(membership)` | 저장된 멤버십도 다시 읽는다. |
+
+트랜잭션은 관련 변경을 함께 확정하는 단위다. 정상적인 DB 트랜잭션 처리에서는 두 INSERT 중 하나가 실패하면 둘 다 확정되지 않는다. 이 라우터는 중간에 그룹만 따로 커밋하지 않는다.
+
+다만 **`commit()`이 성공한 이후에는 저장이 이미 끝났다.** 그다음의 `refresh`, 응답 직렬화, 네트워크 전달에서 문제가 생겨도 앞의 커밋이 자동으로 취소되는 것은 아니다. 이 구분은 실패 알림 뒤 재시도할 때 중요하다.
+
+#### 11 · group_out이 응답 필드를 골라 HTTP 201로 돌려준다
+
+**읽을 코드:** [serializers.py · 52–60행](../apps/server/app/serializers.py#L52) · [schemas.py · 168–174행](../apps/server/app/schemas.py#L168)
+
+```python
+def group_out(group: Group, membership: GroupMember) -> GroupOut:
+    return GroupOut(
+        id=group.id,
+        name=group.name,
+        description=group.description,
+        my_role=cast(Role, membership.role),
+        created_at=group.created_at,
+        updated_at=group.updated_at,
+    )
+```
+
+라우터 마지막 줄의 `return group_out(group, membership)`이 이 함수를 호출한다. 그룹 정보와 생성자의 멤버십 역할을 `GroupOut`이라는 응답 형태로 조합한다.
+
+```python
+class GroupOut(ApiModel):
+    id: str
+    name: str
+    description: str
+    my_role: Role
+    created_at: datetime
+    updated_at: datetime
+```
+
+[ApiModel의 alias_generator=to_camel](../apps/server/app/schemas.py#L15)에 따라 파이썬의 `my_role`, `created_at`, `updated_at`은 응답 JSON에서 `myRole`, `createdAt`, `updatedAt`으로 표현된다. 라우터에 지정한 성공 상태 코드는 **201 Created**다.
+
+응답의 모양을 설명하기 위한 예시다.
+
+```json
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "name": "주말 앙상블",
+  "description": "",
+  "myRole": "owner",
+  "createdAt": "2026-11-10T00:00:00Z",
+  "updatedAt": "2026-11-10T00:00:00Z"
+}
+```
+
+이 응답에는 멤버 목록, 멤버 수, 프로젝트 목록이 없다. 프론트 호출에 적힌 `post<GroupSummary>`는 TypeScript의 타입 지정일 뿐이고, [request의 JSON 반환](../apps/web/src/lib/api.ts#L112)이 없는 필드를 추가해 주지는 않는다. 현재 `createGroup`은 반환값을 변수에 담아 사용하지 않으며, 필요한 목록 정보는 뒤에서 재조회한다.
+
+---
+
+<a id="create-group-refresh"></a>
+
+**D · 생성 결과를 처리하고 목록을 다시 읽어 화면을 그린다**
+
+#### 12 · await가 끝나면 알림을 띄우고 모달을 닫는다
+
+**읽을 코드:** [DashboardPage.tsx · 70–84행](../apps/web/src/pages/DashboardPage.tsx#L70)
+
+```tsx
+  await client.post<GroupSummary>('/groups', { name: groupName });
+  notify({ title: '그룹을 만들었습니다.', tone: 'success' });
+  setCreateOpen(false);
+  setGroupName('');
+  groups.reload();
+} catch (error) {
+  notify({
+    title: '그룹을 만들지 못했습니다.',
+    description: error instanceof Error ? error.message : String(error),
+    tone: 'danger',
+  });
+} finally {
+  createGroupInFlight.current = false;
+  setCreatingGroup(false);
+}
+```
+
+성공 응답을 JSON으로 읽으면 `client.post`의 비동기 처리 결과인 Promise가 완료되어 `await` 다음 줄로 진행한다. 성공 알림을 띄우고, 모달을 닫고, 입력값을 비운 다음 `groups.reload()`를 호출한다.
+
+`post`가 오류를 던지면 `catch`에서 실패 알림을 띄운다. 이 경로에서는 성공 시의 모달 닫기와 입력 초기화를 실행하지 않는다. 정상 응답 여부와 관계없이 `finally`가 제출 잠금과 버튼의 진행 상태를 해제한다.
+
+**`groups.reload()`는 목록 조회 완료를 기다리는 함수가 아니다.** 재조회를 시작하게 하는 상태 변경이므로, 성공 알림과 제출 잠금 해제 뒤에도 목록은 로딩 중일 수 있다.
+
+#### 13 · reload가 useAsync의 조회 함수를 다시 실행하게 한다
+
+**읽을 코드:** [DashboardPage.tsx · 58–61행](../apps/web/src/pages/DashboardPage.tsx#L58) · [useAsync.ts · 19–52행](../apps/web/src/lib/useAsync.ts#L19)
+
+```tsx
+const groups = useAsync(async () => {
+  if (!user) return { groups: [], failures: [] };
+  return loadWorkspace(client);
+}, [client, user?.id]);
+```
+
+대시보드의 `groups`는 배열 자체가 아니라 `data`, `error`, `loading`, `reload`를 가진 조회 상태 객체다. 이 객체를 만드는 `useAsync`에는 “로그인했으면 `loadWorkspace(client)`를 실행하라”는 함수가 전달되어 있다.
+
+<details>
+<summary>useAsync 펼쳐 보기 · reload에서 화면 상태까지</summary>
+
+```ts
+const [revision, setRevision] = useState(0);
+const reload = useCallback(() => setRevision((current) => current + 1), []);
+// The caller owns dependency stability, mirroring useEffect's contract.
+// eslint-disable-next-line react-hooks/use-memo, react-hooks/exhaustive-deps
+const requestKey = useMemo(() => ({}), [...dependencies, revision]);
+
+useEffect(() => {
+  const controller = new AbortController();
+  void loader()
+    .then((value) => {
+      if (!controller.signal.aborted) {
+        setState({ data: value, error: null, requestKey });
+      }
+    })
+    .catch((reason: unknown) => {
+      if (!controller.signal.aborted) {
+        setState({
+          data: null,
+          error: reason instanceof Error ? reason : new Error(String(reason)),
+          requestKey,
+        });
+      }
+    });
+  return () => controller.abort();
+  // The caller owns dependency stability.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [requestKey]);
+
+return {
+  data: state.requestKey === requestKey ? state.data : null,
+  error: state.requestKey === requestKey ? state.error : null,
+  loading: state.requestKey !== requestKey,
+  reload,
+};
+```
+
+</details>
+
+`reload`는 내부 `revision`을 1 올린다. 그러면 `requestKey`가 바뀌고, 그 키를 의존성으로 둔 `useEffect`가 `loader()`를 다시 실행한다. 이때 호출되는 함수가 바로 `loadWorkspace`다.
+
+조회가 끝나면 `setState`에 새 데이터와 현재 요청 키를 함께 저장한다. 현재 키와 일치하지 않는 이전 데이터는 반환하지 않으므로, 새 조회 중에는 `loading=true`, `data=null`로 처리한다. 정리 함수의 `abort()`는 늦게 끝난 이전 요청이 화면 상태를 덮어쓰는 것을 막는다. 이 훅이 `loader`에 AbortSignal을 넘기는 구조는 아니므로, 이를 모든 HTTP 요청의 전송 취소로 해석하면 안 된다.
+
+#### 14 · GET /groups가 내 멤버십과 연결된 그룹을 DB에서 읽는다
+
+**읽을 코드:** [workspace.ts · 81–84행](../apps/web/src/lib/workspace.ts#L81) · [groups.py · 39–47행](../apps/server/app/routers/groups.py#L39)
+
+```ts
+export async function loadWorkspace(client: ApiClient): Promise<WorkspaceLoadResult> {
+  // The root request remains authoritative: without it there is no safe workspace shape to show.
+  const groups = await client.get<GroupResponse[]>('/groups');
+  const limit = createRequestLimiter(WORKSPACE_REQUEST_CONCURRENCY);
+```
+
+`loadWorkspace`의 첫 네트워크 요청은 `GET /groups`다. 공용 클라이언트와 프록시를 통과하면 서버의 `GET /api/groups`로 들어간다. 서버는 다음 쿼리를 실행한다.
+
+```python
+@router.get("/groups", response_model=list[GroupOut])
+def list_groups(db: DbSession, user: CurrentUser) -> list[GroupOut]:
+    rows = db.execute(
+        select(Group, GroupMember)
+        .join(GroupMember, GroupMember.group_id == Group.id)
+        .where(GroupMember.user_id == user.id)
+        .order_by(Group.name)
+    ).all()
+    return [group_out(group, membership) for group, membership in rows]
+```
+
+`Group`과 `GroupMember`를 `group_id`로 연결하고, 멤버십의 `user_id`가 현재 사용자와 같은 행만 고른다. 그룹 이름순으로 정렬한 뒤, 생성 응답 때와 같은 `group_out`으로 목록을 만든다.
+
+09–10에서 생성자의 멤버십을 같이 저장했기 때문에 **새 그룹도 이 조회 조건에 들어온다.** 그룹 행만 저장하고 멤버십을 빠뜨린다면, 이 목록 조회로는 생성자의 그룹이라고 판단할 근거가 없다.
+
+#### 15 · 멤버·프로젝트를 읽어 화면용 GroupSummary를 완성한다
+
+**읽을 코드:** [workspace.ts · 86–91행](../apps/web/src/lib/workspace.ts#L86) · [workspace.ts · 165–172행](../apps/web/src/lib/workspace.ts#L165)
+
+```ts
+const groupLeafResults = await Promise.allSettled(
+  groups.flatMap((group) => [
+    limit(() => client.get<GroupMemberSummary[]>(`/groups/${group.id}/members`)),
+    limit(() => client.get<ProjectResponse[]>(`/groups/${group.id}/projects`)),
+  ]),
+);
+```
+
+그룹 목록을 받은 뒤에는 각 그룹의 멤버와 프로젝트를 추가 조회한다. `Promise.allSettled`는 일부 요청이 실패해도 다른 요청들의 결과를 모을 수 있게 한다. [요청 제한기](../apps/web/src/lib/workspace.ts#L46)는 하위 조회를 **동시에 최대 6개**까지 실행한다.
+
+| 추가 요청 | 서버에서 읽는 것 | 이 단계의 접근 확인 |
+| --- | --- | --- |
+| `GET /groups/{groupId}/members` | `group_members`와 연결된 사용자 정보 | `CurrentUser` + `require_group` |
+| `GET /groups/{groupId}/projects` | 해당 `group_id`의 `projects` | `CurrentUser` + `require_group` |
+| `GET /projects/{projectId}/repertoire` | 프로젝트가 있을 때 그 프로젝트의 레퍼토리 | [repertoire.py](../apps/server/app/routers/repertoire.py#L75)의 프로젝트 접근 확인 |
+
+<details>
+<summary>멤버·프로젝트 조회 코드 펼쳐 보기</summary>
+
+[groups.py · 102–111행](../apps/server/app/routers/groups.py#L102)
+
+```python
+@router.get("/groups/{group_id}/members", response_model=list[GroupMemberOut])
+def list_members(group_id: str, db: DbSession, user: CurrentUser) -> list[GroupMemberOut]:
+    require_group(db, user, group_id)
+    rows = db.scalars(
+        select(GroupMember)
+        .options(selectinload(GroupMember.user))
+        .where(GroupMember.group_id == group_id)
+        .order_by(GroupMember.joined_at)
+    ).all()
+    return [member_out(row) for row in rows]
+```
+
+[groups.py · 185–189행](../apps/server/app/routers/groups.py#L185)
+
+```python
+@router.get("/groups/{group_id}/projects", response_model=list[ProjectOut])
+def list_projects(group_id: str, db: DbSession, user: CurrentUser) -> list[ProjectOut]:
+    require_group(db, user, group_id)
+    rows = db.scalars(select(Project).where(Project.group_id == group_id).order_by(Project.name)).all()
+    return [project_out(row) for row in rows]
+```
+
+[require_group](../apps/server/app/access.py#L31)은 그룹 존재 여부와 현재 사용자의 멤버십·역할을 확인한다. 멤버 조회의 `selectinload(GroupMember.user)`는 연결된 사용자 정보도 함께 사용할 수 있도록 추가 조회한다.
+
+</details>
+
+기존 프로젝트가 있다면 [126–133행](../apps/web/src/lib/workspace.ts#L126)에서 레퍼토리 조회까지 이어간다. 새로 만든 그룹에는 이 생성 코드가 프로젝트를 추가하지 않으므로, 다른 변경이 없는 예시에서는 프로젝트 목록이 비어 있다.
+
+마지막에는 그룹 기본 정보에 조회 결과를 붙여 화면용 데이터를 만든다.
+
+```ts
+return {
+  ...group,
+  memberCount: members.length,
+  members,
+  ...(membersFailure ? { membersLoadError: membersFailure.message } : {}),
+  projects: hydratedProjectsByGroup.get(group.id) ?? [],
+  ...(projectsFailure ? { projectsLoadError: projectsFailure.message } : {}),
+};
+```
+
+이 시점의 `GroupSummary`에는 `memberCount`, `members`, `projects`가 들어간다. 하위 조회가 실패한 경우에는 빈 배열과 함께 해당 영역의 오류 필드와 `failures`를 남긴다. 따라서 빈 배열만 보고 “원래 데이터가 없다”고 판단하지 않고 오류 표시도 함께 확인해야 한다.
+
+#### 16 · React가 새 데이터로 그룹 이름·역할·멤버 수를 표시한다
+
+**읽을 코드:** [DashboardPage.tsx · 384–395행](../apps/web/src/pages/DashboardPage.tsx#L384) · [로딩·오류 표시 · 347–368행](../apps/web/src/pages/DashboardPage.tsx#L347)
+
+```tsx
+<div className="dashboard-groups">
+  {groups.data?.groups.map((group) => (
+    <section key={group.id} className="group-section">
+      <header className="group-section__header">
+        <div>
+          <div className="cluster">
+            <h2>{group.name}</h2>
+            <StatusBadge>{group.myRole}</StatusBadge>
+          </div>
+          <span className="subtle">
+            {group.membersLoadError ? '멤버 정보를 불러오지 못함' : `${group.memberCount}명`}
+          </span>
+```
+
+`loadWorkspace`의 결과를 `useAsync`가 상태에 저장하면 React가 대시보드를 다시 그린다. `groups.data.groups`의 각 항목이 그룹 영역이 되고, 이름은 `group.name`, 역할 배지는 `group.myRole`, 인원은 `group.memberCount`로 표시된다.
+
+다른 사용자의 추가나 하위 조회 실패가 없는 예시에서는 **주말 앙상블 / owner / 1명**이 나타난다. 1명은 서버가 그룹 응답에 넣어 준 숫자가 아니라, 프론트가 조회한 멤버 배열의 길이로 계산한 값이다.
+
+`/groups` 자체가 실패하면 전체 조회 오류와 **다시 시도** 버튼이 보인다. 멤버·프로젝트·레퍼토리 일부만 실패하면 성공한 데이터와 함께 **일부 프로젝트 정보를 불러오지 못했습니다**라는 안내를 표시한다. 멤버 조회가 실패한 그룹은 인원 대신 **멤버 정보를 불러오지 못함**을 보여 준다.
+
+---
+
+<a id="create-group-failures"></a>
+
+**실패했을 때는 어느 단계로 돌아가야 할까?**
+
+| 보이는 상황 | 코드상 의미 | 먼저 볼 곳 |
+| --- | --- | --- |
+| 빈 이름으로 폼 제출이 진행되지 않음 | HTML `required` 검사가 입력을 막음 | `DashboardPage`의 `Field`, 공용 `Field` |
+| 공백만 있는 이름 등으로 서버가 검증 오류 반환 | `GroupCreate` 검증에 실패해 생성 본문에 도달하지 않음 | `schemas.py` → `ApiClient.request` → `createGroup.catch` |
+| 인증 실패 | 토큰·사용자·SSO 일치 확인을 통과하지 못함. 클라이언트의 401 재시도 조건도 확인 필요 | `dependencies.py`, `security.py`, `api.ts` |
+| 생성 실패 알림은 있는데 DB 저장 여부가 애매함 | 커밋 전에 실패했을 수도 있고, 커밋 후 응답 전달이 실패했을 수도 있음 | `create_group`의 `commit` 이후 경계 |
+| 생성 성공 알림 뒤 목록 조회 오류 | 생성 요청은 성공했고, 이후 별도의 GET 흐름이 실패한 상태 | `useAsync`, `loadWorkspace`, 화면의 재조회 버튼 |
+| 그룹은 보이는데 멤버·프로젝트 정보 일부가 없음 | 하위 조회의 부분 실패를 표시 중일 수 있음 | `failures`, `membersLoadError`, `projectsLoadError` |
+
+응답을 못 받았다는 사실만으로 저장 실패를 단정해서는 안 된다. 현재 생성 경로에는 같은 요청을 다시 보내도 한 번만 생성되도록 하는 별도 키나 그룹 이름의 고유 제약이 없다. `group_members`의 `(group_id, user_id)` 고유 제약은 **한 그룹 안의 중복 가입**을 막을 뿐, 같은 이름의 새 그룹 생성을 막지는 않는다. 결과가 불명확한 경우 목록을 먼저 확인해야 하는 이유다.
+
+**리뷰할 때 직접 답해 볼 질문**
+
+1. 폼의 입력값이 HTTP 본문이 되는 경계는 어디인가? — `groupName` → `client.post` → `JSON.stringify`.
+2. 생성자를 `owner`로 결정하는 권한은 어디에 있는가? — 인증된 `user`를 받아 멤버십을 만드는 서버의 `create_group`.
+3. 두 DB 행이 함께 저장되는 지점은 어디인가? — 두 객체를 등록한 뒤 실행하는 한 번의 `db.commit()`.
+4. 생성 응답과 화면 데이터의 모양이 같은가? — 응답은 `GroupOut`, 멤버 수·프로젝트까지 조합한 화면 데이터는 `GroupSummary`. 현재 POST의 타입 인자와 실제 응답 범위도 여기서 대조한다.
+5. “생성 실패”와 “생성 후 재조회 실패”를 화면에서 구분하는가? — 생성 알림은 `createGroup`, 조회 오류는 `useAsync`와 대시보드의 별도 오류 영역이 담당한다.
+
+**관련 테스트를 읽을 순서**
+
+| 파일 | 소스에서 확인할 수 있는 범위 |
+| --- | --- |
+| [서버 테스트의 ensemble fixture](../apps/server/tests/conftest.py#L174) | `POST /api/groups`로 그룹을 만들고 그 그룹으로 멤버·프로젝트 테스트 데이터를 준비하는 사용 예 |
+| [workspace.test.ts · 정상 조회](../apps/web/src/lib/workspace.test.ts#L55) | 그룹·멤버·프로젝트·레퍼토리를 화면용 구조로 조합하는지 |
+| [workspace.test.ts · 부분 실패](../apps/web/src/lib/workspace.test.ts#L137) | 일부 레퍼토리 조회 실패 시 성공한 데이터와 오류 정보를 함께 유지하는지 |
+| [workspace.test.ts · 그룹 목록 실패](../apps/web/src/lib/workspace.test.ts#L176) | 첫 `/groups` 요청 실패 시 전체 조회가 실패하는지 |
+| [useAsync.test.tsx](../apps/web/src/lib/useAsync.test.tsx#L16) | 새 의존성의 조회 중이거나 실패했을 때 이전 데이터가 노출되지 않는지 |
+
+이번 문서 작업에서는 테스트 **코드를 읽었으며 실행하지 않았다.** 위 테스트가 `createGroup`의 모든 제출 경쟁 상황이나 커밋 전후 실패를 검증한다고 확대해서 해석하지 않는다. 실제 API 호출·그룹 생성·DB 변경 없이 소스 경로, 코드 발췌와 문서 링크를 대조했다.
+
+[↑ 이 흐름의 처음으로](#create-group-walkthrough) · [↑ 파일별 역할로](#create-group-files)
+
+---
 
 ## 6. 인증·보안·배치·설정 전반
 
@@ -413,7 +1109,12 @@ TempoMap
 ├── sections[]
 │   ├── measure 범위, meter, BPM, beat unit
 │   ├── accent/subdivision
-│   └── rit./accel. target
+│   ├── rit./accel. target, aTempo immediate target
+│   └── 기본 section-end fermata/breath
+├── measureExpressions[]
+│   ├── 고유 measure, tempoChange + optional endMeasure
+│   ├── fermata.extraBeats + optional beat
+│   └── breath.durationSec + countIn
 └── jumps[]
     ├── repeat + volta endings
     ├── D.C. / D.S.
@@ -421,6 +1122,10 @@ TempoMap
 ```
 
 API 직렬화는 값이 없는 optional 필드를 `null` 대신 생략한다. [`schemas.py`](../apps/server/app/schemas.py)의 필드별 `exclude_if`가 저장 응답·최신본·revision 목록·특정 revision·MusicXML 초안에 함께 적용된다. 입력의 생략과 legacy `null`은 계속 받아들이고 유효한 `false`·`0`·빈 문자열은 보존한다.
+
+마디별 표현은 같은 revision JSON의 `measureExpressions`에 저장하므로 별도 DB migration이나 WS 메시지가 필요하지 않다. Editor는 구간 분할 없이 임의의 마디를 편집한다. 마디 record가 있으면 그 마디의 페르마타·쉼표는 record만 사용하며 빈 `{ measure }`도 기존 section 끝 기본 표현을 해제하는 의미가 있다. record가 없는 마디만 기존 section 끝 표현을 사용한다.
+
+rit./accel.은 해당 마디부터 optional `endMeasure`까지의 포함 범위에서 변화한다. span끼리 중복을 거부하고 구간 경계를 넘는 span도 우선 적용한다. 목표 BPM은 span이 끝난 뒤 시작되는 새 section 또는 다음 마디 템포 지시까지 유지한다. 서버와 코어는 앞선 mark·section의 박 위치별 템포·못갖춘마디를 반영해 방향을 검증한다. 아 템포는 `targetBpm`을 즉시 적용하고 끝 마디를 두지 않는다. 페르마타는 선택한 본박을 늘이며 optional `beat`를 생략하면 마지막 박이다. 쉼표는 해당 마디 뒤 무음 초와 필수 `countIn` boolean을 가진다. 유한한 양수·상한(추가 16박, 무음 300초)과 실제 존재하는 박을 검사하고 소수·`false`를 보존한다.
 
 변환 흐름은 다음과 같다.
 
@@ -439,6 +1144,8 @@ flowchart LR
 - 반복·볼타·D.C./D.S./Coda 전개: [`timeline.ts`](../packages/core/src/timeline.ts)
 - 편집 화면: [`EditorPage.tsx`](../apps/web/src/pages/EditorPage.tsx)
 - 웹 통합 transport: [`useMetronome.ts`](../apps/web/src/lib/useMetronome.ts)
+
+`expandTimeline`은 해당 마디의 모든 방문에 페르마타·쉼표를 넣고 실제 다음 연주 항목의 박자·템포로 `resumeCountIn`을 만든다. 재진입 예비박은 기존 마디·pass를 추가하지 않으며 맵의 `countIn.measures`만큼 지속한다. 마지막 항목은 무음·늘임 꼬리만 유지한다. [`scheduler.ts`](../packages/audio/src/scheduler.ts)는 마지막 클릭을 처리한 뒤에도 전체 `totalDurationSec`까지 재생 수명을 유지한다. hook과 공용 visualizer는 같은 타임라인의 상태를 메트로놈·세션·악보에 전달하므로 표시용 타이머로 재개 시각을 만들지 않는다. 페르마타의 박 번호와 쉼표의 `쉼` 표시도 이 frame에서 구분한다.
 
 ### 결정론적 앙상블 동기화
 
@@ -468,6 +1175,8 @@ sequenceDiagram
 `prepareAudio(): Promise<void>`는 사용자 제스처에서 엔진 생성·시작을 공유하고 클릭 예약·rAF·Keep Awake·playing 상태를 시작하지 않는다. 중복 준비는 같은 startup을 기다리며 stop·unmount로 취소된 준비는 `AbortError`로 끝나고 새 재생 수명을 건드리지 않는다. 진행 중인 방의 미준비 참가자는 `소리 켜고 합류` 클릭 뒤 다음 마디 경계에 합류한다. `악보 보기`는 세션 route와 오디오 수명을 유지하며 방의 고정 revision을 소비하고, 편집본은 새 방에 적용한다.
 
 `MetronomePosition`과 `BeatFrame`의 optional `isWaiting`은 예약 뒤 첫 오디오 전의 표시 상태다. 최종 재생 anchor의 마디·pass·section·박 수를 예약 대기와 예비박까지 유지하며, 첫 오디오 전에는 박 강조·announcement·반응 배경을 억제한다. 표시 anchor는 기존 오디오 예약 시각을 변경하지 않는다.
+
+예비박 팝업은 [`BeatVisualizer`](../packages/ui/src/BeatVisualizer.tsx)의 공통 표시 경로에서 같은 오디오 frame/rAF를 읽는다. 별도 카운트다운 타이머·transport를 만들지 않고 시작·쉼표 뒤 재진입을 같은 비모달 카드로 표시하며, 본박 시작·정지 또는 예비박 off에서 제거한다. 카드의 라벨·`--count-in` 색·숫자·진입 마디는 표시 정보이며 focus나 정지·메뉴 조작을 변경하지 않는다. 메트로놈의 모바일 일반·집중 화면은 큰 숫자 visualizer만 카드를 표시하고 하단 원형·배경 progress의 예비박 중복을 억제한다. desktop/fullscreen·세션·단독 악보도 같은 표시를 쓰되 embedded score는 세션 카드만 사용한다. 기본 inline 모드는 기존 소비자와 호환 유지하고 짧은 악보 바는 가로형 카드를 사용한다.
 
 중요한 코드:
 
@@ -858,3 +1567,7 @@ flowchart LR
 8. 외부 객체 삭제를 DB commit보다 먼저 수행하지 않는다.
 9. 운영 DB·volume·공용 `cksDB`를 앱 배포가 생성하거나 삭제하지 않는다.
 10. 기능 완료와 실기기·실운영 검증 완료를 같은 의미로 보고하지 않는다.
+
+### 반응형 작업 공간의 코드 경계
+
+`MetronomePage.tsx`의 `isMobileMetronomeViewport()`는 폭 599px 이하 또는 600–839px·높이 599px 이하를 폰 표시로 선택한다. 나머지는 `.metronome-page--workspace`이며 `index.css`에서 1000px부터 설정을 옆 열로 배치한다. 기존 오디오 hook과 canvas를 공유하고 resize로 재생 엔진을 다시 만들지 않는다. `practice-page`, `settings-page`는 1000px부터 두 열을 쓴다. AppShell의 내비게이션 기준은 840px로 유지하며 좁은 rail의 법적 안내는 이름과 tooltip을 가진 아이콘으로 표시한다. 웹 `ROUTER_BASENAME`은 `/feelmyrythm/`의 마지막 slash를 보존해 홈 이동 후 새로고침도 Vite의 정상 기본 경로를 연다.

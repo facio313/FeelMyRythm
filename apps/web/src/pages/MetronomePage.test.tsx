@@ -56,6 +56,7 @@ vi.mock('@feelmyrythm/ui', async (importOriginal) => {
       progressStyle,
       variant,
       numberScale,
+      countInDisplay,
     }: FeelMyRythmUi.BeatVisualizerProps) => (
       <div
         className={className}
@@ -65,6 +66,7 @@ vi.mock('@feelmyrythm/ui', async (importOriginal) => {
         data-progress-style={progressStyle}
         data-variant={variant}
         data-number-scale={numberScale}
+        data-count-in-display={countInDisplay}
       />
     ),
     useToast: () => ({ notify }),
@@ -147,6 +149,25 @@ describe('MetronomePage contracts', () => {
     delete (document as { exitFullscreen?: unknown }).exitFullscreen;
   });
 
+  it.each([
+    { width: 599, height: 900, workspace: false },
+    { width: 768, height: 599, workspace: false },
+    { width: 600, height: 600, workspace: true },
+    { width: 768, height: 1024, workspace: true },
+    { width: 840, height: 390, workspace: true },
+    { width: 1440, height: 900, workspace: true },
+  ])('uses the appropriate controls at $width × $height', async ({ width, height, workspace }) => {
+    vi.stubGlobal('innerWidth', width);
+    vi.stubGlobal('innerHeight', height);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled(),
+    );
+    expect(screen.queryByRole('button', { name: '집중 화면' }) !== null).toBe(!workspace);
+    expect(screen.queryByRole('heading', { name: '재생 설정' }) !== null).toBe(workspace);
+    expect(screen.queryByRole('button', { name: 'BPM 1 높이기' }) !== null).toBe(workspace);
+  });
+
   it('accepts only finite BPM values in the 20–400 contract', () => {
     expect(normalizeBpm(20)).toBe(20);
     expect(normalizeBpm(120.6)).toBe(121);
@@ -173,6 +194,11 @@ describe('MetronomePage contracts', () => {
     const number = container.querySelector('.metronome-number__visualizer');
     expect(number).not.toHaveAttribute('data-meter');
     expect(number).toHaveAttribute('data-number-scale', '0.8');
+    expect(number).toHaveAttribute('data-count-in-display', 'overlay');
+    expect(container.querySelector('.metronome-visualizer')).toHaveAttribute(
+      'data-count-in-display',
+      'hidden',
+    );
     expect(number).toHaveAttribute('data-progress-style', 'background');
     expect(container.querySelector('.metronome-controls .count-in-button')).toBeNull();
     expect(number).toHaveAttribute('data-progress', 'false');
@@ -180,6 +206,7 @@ describe('MetronomePage contracts', () => {
     expect(progress?.parentElement).toBe(container.querySelector('.metronome-page'));
     expect(progress).toHaveAttribute('data-variant', 'progress');
     expect(progress).toHaveAttribute('data-progress', 'true');
+    expect(progress).toHaveAttribute('data-count-in-display', 'hidden');
     expect(container.querySelector('.metronome-screen-progress')).toBe(progress);
     expect(container.querySelector('.metronome-visualizer')).toHaveAttribute(
       'data-progress',
@@ -206,6 +233,10 @@ describe('MetronomePage contracts', () => {
 
     vi.stubGlobal('innerWidth', 840);
     fireEvent(window, new Event('resize'));
+    expect(container.querySelector('.metronome-visualizer')).toHaveAttribute(
+      'data-count-in-display',
+      'overlay',
+    );
     expect(container.querySelector('.metronome-heading .performance-context')).toBeNull();
     expect(container.querySelector('.metronome-stage .performance-context')).toHaveTextContent(
       '마디 1',
@@ -518,6 +549,25 @@ describe('MetronomePage contracts', () => {
     }
   });
 
+  it('rejects meter edits that would remove a marked fermata beat without changing the map', async () => {
+    const map = createDefaultTempoMap();
+    map.measureExpressions = [{ measure: 1, fermata: { beat: 4, extraBeats: 1 } }];
+    database.listTempoMaps.mockResolvedValue([map]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled(),
+    );
+    database.putTempoMap.mockClear();
+    const meter = screen.getByRole('combobox', { name: '박자' });
+    fireEvent.change(meter, { target: { value: '3/4' } });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '템포맵 표현을 확인해 주세요.', tone: 'danger' }),
+    );
+    expect(meter).toHaveValue('4/4');
+    expect(database.putTempoMap).not.toHaveBeenCalled();
+    expect(map.measureExpressions[0]!.fermata?.beat).toBe(4);
+  });
+
   it('edits BPM in an accessible bounded number dialog', async () => {
     renderPage();
     const trigger = await screen.findByRole('button', {
@@ -647,6 +697,13 @@ describe('MetronomePage contracts', () => {
     ).toEqual(['BPM 5 낮추기', '메트로놈 재생', 'BPM 5 높이기', '탭 템포']);
     fireEvent.click(launcher);
     const pad = screen.getByRole('button', { name: '박자에 맞춰 탭' });
+    expect(container.querySelector('.metronome-mobile-controls')).toHaveAttribute('inert');
+    expect(container.querySelector('.metronome-mobile-controls')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+    expect(container.querySelector('.quick-settings')).not.toHaveAttribute('hidden');
+    expect(container.querySelector('.quick-settings')).toHaveAttribute('inert');
     await waitFor(() => expect(pad).toHaveFocus());
     expect(screen.queryByRole('button', { name: '메트로놈 재생' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '현재 BPM 100, 눌러서 직접 입력' })).toBeEnabled();

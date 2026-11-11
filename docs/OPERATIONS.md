@@ -174,7 +174,7 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 ## 7. RPi 복구 후 마지막 단계
 
-RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. Validate와 deploy workflow는 checkout의 실제 source branch를 `PORTFOLIO_BRANCH`로 주입하고 resolver가 만든 mode를 이후 step에 전달한다. `dev`도 `dev/sso`로 ARM64 server/web image build와 runtime smoke를 완료하지만 registry push, latest/release 취급, 제한 SSH 운영 배포는 실행하지 않는다. main image build와 운영 Compose에는 `main/sso`가 모두 명시되어야 한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
+RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. Validate와 deploy workflow는 checkout의 실제 source branch를 `PORTFOLIO_BRANCH`로 주입하고 resolver가 만든 mode를 이후 step에 전달한다. 현재 릴리스는 승인된 tool branch를 `main`으로 직접 통합한다. `dev`는 2026-09-21부터 갱신·동기화·푸시·배포에 사용하지 않는다. workflow의 기존 `dev/sso` 이미지 검증 조건은 남아 있으나 운영 절차의 단계로 실행하지 않는다. main image build와 운영 Compose에는 `main/sso`가 모두 명시되어야 한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
 
 GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최대 20분 대기할 수 있으므로 timeout을 40분으로 유지한다. 이 직렬화는 다른 Compose project가 동시에 변경되어 snapshot 검증이 무의미해지는 것을 막는다.
 
@@ -198,3 +198,7 @@ Validate의 JavaScript job은 `@playwright/test`와 같은 버전의 digest 고�
 1. main의 `Validate`가 정확한 대상 SHA로 성공한다.
 2. 같은 SHA의 `Build and deploy to RPi5`에서 publish와 restricted deployment job이 모두 성공한다.
 3. 공개 health와 HTML/asset 응답이 새 배포 이후 값으로 바뀌고, 핵심 경로 smoke가 통과한다.
+
+### 로컬 미리보기의 홈 주소
+
+Vite 기본 주소는 `http://127.0.0.1:5173/feelmyrythm/`이다. 웹 router basename도 마지막 `/`를 보존하므로 메뉴에서 홈으로 돌아온 뒤 새로고침해도 정상 앱이 열린다. 모바일 검토는 iframe으로 감싸지 않고 앱 주소를 직접 연 뒤 브라우저 viewport를 적용한다. 전체 문서 탐색 후 viewport override가 풀리면 다시 적용한다.

@@ -10,6 +10,11 @@ export interface BeatFrame {
   countInValue?: number;
   measureNumber?: number;
   isWaiting?: boolean;
+  isResting?: boolean;
+  isFermata?: boolean;
+  bpm?: number;
+  pass?: number;
+  sectionId?: string;
 }
 
 export interface BeatVisualizerProps {
@@ -22,6 +27,7 @@ export interface BeatVisualizerProps {
   progressStyle?: 'bar' | 'background';
   meterLabel?: string;
   numberScale?: number;
+  countInDisplay?: 'inline' | 'overlay' | 'hidden';
 }
 
 const css = (name: string, fallback: string): string =>
@@ -139,21 +145,31 @@ function drawFrame(
   progressStyle: 'bar' | 'background',
   meterLabel: string | undefined,
   numberScale: number,
+  countInDisplay: 'inline' | 'overlay' | 'hidden',
 ) {
   const ratio = window.devicePixelRatio || 1;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
+  if (frame.isCountIn && countInDisplay !== 'inline') return;
 
   if (variant === 'progress') {
-    if (showProgress && running && !frame.isWaiting && !reducedMotion) {
+    if (
+      showProgress &&
+      running &&
+      !frame.isWaiting &&
+      !frame.isResting &&
+      !frame.isFermata &&
+      !reducedMotion
+    ) {
       drawBackgroundProgress(context, canvas, width, height, frame.progress);
     }
     return;
   }
 
   if (variant === 'number') {
-    const value = frame.isWaiting
-      ? '—'
+    if (frame.isWaiting) return;
+    const value = frame.isResting
+      ? '쉼'
       : String(
           frame.isCountIn && frame.countInValue !== undefined
             ? frame.countInValue
@@ -161,12 +177,18 @@ function drawFrame(
         );
     const backgroundProgress = progressStyle === 'background';
     const showBar = showProgress && !backgroundProgress;
-    if (showProgress && backgroundProgress && running && !frame.isWaiting && !reducedMotion) {
+    if (
+      showProgress &&
+      backgroundProgress &&
+      running &&
+      !frame.isWaiting &&
+      !frame.isResting &&
+      !frame.isFermata &&
+      !reducedMotion
+    ) {
       drawBackgroundProgress(context, canvas, width, height, frame.progress);
     }
-    const progress = frame.isSubdivision ? 1 : Math.min(1, Math.max(0, frame.progress));
-    context.globalAlpha =
-      running && !frame.isWaiting && !reducedMotion ? 0.6 + 0.4 * (1 - progress) ** 3 : 1;
+    context.globalAlpha = 1;
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillStyle = css('--text', '#f4f1e8');
@@ -179,7 +201,7 @@ function drawFrame(
         meterLabel,
         width,
         contentHeight,
-        frame.isCountIn || frame.isWaiting ? 0 : frame.beatCount,
+        frame.isCountIn || frame.isWaiting || frame.isResting ? 0 : frame.beatCount,
         numberScale,
       );
     } else {
@@ -210,6 +232,15 @@ function drawFrame(
         );
       }
     }
+    return;
+  }
+
+  if (frame.isResting || frame.isFermata) {
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = css('--text', '#f4f1e8');
+    context.font = `500 ${Math.max(18, Math.min(48, width / 7, height * 0.4))}px 'Pretendard Variable', sans-serif`;
+    context.fillText(frame.isResting ? '숨 고르기' : '페르마타', width / 2, height / 2);
     return;
   }
 
@@ -326,6 +357,7 @@ export function BeatVisualizer({
   progressStyle = 'bar',
   meterLabel,
   numberScale = 1,
+  countInDisplay = 'inline',
 }: BeatVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sourceRef = useRef(frameSource);
@@ -333,6 +365,8 @@ export function BeatVisualizer({
   const announcementRef = useRef('');
   const boundaryActiveRef = useRef(false);
   const lastAnnouncedRef = useRef('');
+  const [countIn, setCountIn] = useState<{ value: number; measure: number } | null>(null);
+  const countInRef = useRef(countIn);
 
   useEffect(() => {
     sourceRef.current = frameSource;
@@ -359,6 +393,23 @@ export function BeatVisualizer({
         canvas.height = Math.round(height * ratio);
       }
       const frame = sourceRef.current();
+      const nextCountIn =
+        running &&
+        countInDisplay === 'overlay' &&
+        frame.isCountIn &&
+        !frame.isWaiting &&
+        !frame.isResting &&
+        !frame.isFermata &&
+        frame.countInValue !== undefined
+          ? { value: frame.countInValue - 1, measure: frame.measureNumber ?? 1 }
+          : null;
+      if (
+        nextCountIn?.value !== countInRef.current?.value ||
+        nextCountIn?.measure !== countInRef.current?.measure
+      ) {
+        countInRef.current = nextCountIn;
+        setCountIn(nextCountIn);
+      }
       drawFrame(
         context,
         canvas,
@@ -372,21 +423,36 @@ export function BeatVisualizer({
         progressStyle,
         meterLabel,
         numberScale,
+        countInDisplay,
       );
-      const boundaryAnnouncement = frame.isCountIn
-        ? frame.countInValue === undefined
-          ? null
-          : {
-              key: `count-in:${frame.countInValue}`,
-              text: `예비박 ${frame.countInValue}`,
-            }
-        : frame.beatIndex === 0 && !frame.isSubdivision
+      const boundaryAnnouncement =
+        frame.isResting || frame.isFermata
           ? {
-              key: `measure:${frame.measureNumber ?? 1}`,
-              text: `${frame.measureNumber ?? 1}마디 시작`,
+              key: `${frame.isResting ? 'breath' : 'fermata'}:${frame.measureNumber ?? 1}`,
+              text: frame.isResting ? '숨 고르기' : '페르마타',
             }
-          : null;
-      if (!running || frame.isWaiting || variant !== 'beats') {
+          : frame.isCountIn
+            ? frame.countInValue === undefined
+              ? null
+              : {
+                  key: `count-in:${frame.countInValue}`,
+                  text:
+                    countInDisplay === 'overlay'
+                      ? `예비박 ${frame.countInValue - 1}, ${frame.measureNumber ?? 1}마디에서 시작`
+                      : `예비박 ${frame.countInValue}`,
+                }
+            : frame.beatIndex === 0 && !frame.isSubdivision
+              ? {
+                  key: `measure:${frame.measureNumber ?? 1}`,
+                  text: `${frame.measureNumber ?? 1}마디 시작`,
+                }
+              : null;
+      if (
+        !running ||
+        frame.isWaiting ||
+        (frame.isCountIn && countInDisplay === 'hidden') ||
+        (variant !== 'beats' && !nextCountIn)
+      ) {
         boundaryActiveRef.current = false;
         lastAnnouncedRef.current = '';
         if (announcementRef.current) {
@@ -436,10 +502,23 @@ export function BeatVisualizer({
       themeObserver?.disconnect();
       window.removeEventListener('resize', renderWhenIdle);
     };
-  }, [frameSource, running, variant, showProgress, progressStyle, meterLabel, numberScale]);
+  }, [
+    frameSource,
+    running,
+    variant,
+    showProgress,
+    progressStyle,
+    meterLabel,
+    numberScale,
+    countInDisplay,
+  ]);
 
   return (
-    <div className={className}>
+    <div
+      className={[className, countInDisplay === 'overlay' && 'fmr-beat-visualizer--overlay']
+        .filter(Boolean)
+        .join(' ')}
+    >
       <canvas
         ref={canvasRef}
         className="fmr-beat-canvas"
@@ -447,7 +526,16 @@ export function BeatVisualizer({
         aria-label={variant === 'progress' ? undefined : label}
         aria-hidden={variant === 'progress' ? true : undefined}
       />
-      {variant === 'beats' ? (
+      {running && countInDisplay === 'overlay' && countIn ? (
+        <div className="fmr-count-in" aria-hidden="true">
+          <div className="fmr-count-in__card">
+            <span className="fmr-count-in__label">예비박</span>
+            <strong className="fmr-count-in__value fmr-tabular">{countIn.value}</strong>
+            <span className="fmr-count-in__destination">{countIn.measure}마디에서 시작</span>
+          </div>
+        </div>
+      ) : null}
+      {variant === 'beats' || countInDisplay === 'overlay' ? (
         <span className="fmr-sr-only" aria-live="polite" aria-atomic="true">
           {announcement.text ? <span key={announcement.sequence}>{announcement.text}</span> : null}
         </span>

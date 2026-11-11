@@ -2,9 +2,11 @@ import {
   assertValidTempoMap,
   beatsPerMeasure,
   expandTimeline,
+  tempoAtMeasureStart,
   validateTempoMap,
   type Accent,
   type JumpDirective,
+  type MeasureExpression,
   type TempoMap,
   type TempoMapValidationIssue,
   type TempoSection,
@@ -112,6 +114,7 @@ function tempoMapContract(map: TempoMap): TempoMap {
     jumps: map.jumps,
     countIn: map.countIn,
     ...(map.anacrusis ? { anacrusis: map.anacrusis } : {}),
+    ...(map.measureExpressions ? { measureExpressions: map.measureExpressions } : {}),
   };
   assertValidTempoMap(contract);
   return contract;
@@ -126,8 +129,143 @@ function cloneSection(section: TempoSection): TempoSection {
     ...section,
     timeSignature: { ...section.timeSignature },
     ...(section.tempoChange ? { tempoChange: { ...section.tempoChange } } : {}),
+    ...(section.fermata ? { fermata: { ...section.fermata } } : {}),
+    ...(section.breath ? { breath: { ...section.breath } } : {}),
     ...(section.accentPattern ? { accentPattern: [...section.accentPattern] } : {}),
   };
+}
+
+function restoredTempo(map: TempoMap, selected: TempoSection): number {
+  if (validateTempoMap(map).valid) return restoredTempoAtMeasure(map, selected.startMeasure);
+  const index = map.sections.findIndex((section) => section.id === selected.id);
+  const preceding = map.sections.slice(0, index);
+  const ramp = preceding.findLast(
+    (section) => section.tempoChange?.type === 'rit' || section.tempoChange?.type === 'accel',
+  );
+  const previous = preceding.at(-1);
+  return (
+    ramp?.bpm ??
+    (previous?.tempoChange?.type === 'aTempo' ? previous.tempoChange.targetBpm : previous?.bpm) ??
+    selected.bpm
+  );
+}
+
+function sectionExpressionSummary(section: TempoSection): string {
+  const expressions: string[] = [];
+  if (section.tempoChange) {
+    const { type, targetBpm } = section.tempoChange;
+    expressions.push(
+      type === 'aTempo'
+        ? `아 템포 ${targetBpm}`
+        : `${type === 'rit' ? '리타르단도' : '아첼레란도'} ${section.bpm} → ${targetBpm}`,
+    );
+  }
+  if (section.fermata) {
+    expressions.push(
+      `페르마타 ${section.fermata.beat ? `${section.fermata.beat}박 · ` : ''}+${section.fermata.extraBeats}박`,
+    );
+  }
+  if (section.breath) {
+    expressions.push(
+      `쉼표 ${section.breath.durationSec}초 · 예비박 ${section.breath.countIn ? '켬' : '끔'}`,
+    );
+  }
+  return expressions.join(' · ');
+}
+
+function sectionBpm(section: TempoSection): number {
+  return section.tempoChange?.type === 'aTempo' ? section.tempoChange.targetBpm : section.bpm;
+}
+
+function updateMeasureExpression(
+  map: TempoMap,
+  index: number,
+  expression: MeasureExpression,
+): TempoMap {
+  return {
+    ...map,
+    measureExpressions:
+      map.measureExpressions?.map((current, currentIndex) =>
+        currentIndex === index ? expression : current,
+      ) ?? [],
+  };
+}
+
+function withoutMeasureTempo(expression: MeasureExpression): MeasureExpression {
+  const next = { ...expression };
+  delete next.tempoChange;
+  return next;
+}
+
+function restoredTempoAtMeasure(map: TempoMap, measure: number): number {
+  const measureTempoSpans = (map.measureExpressions ?? []).flatMap((expression) =>
+    expression.tempoChange
+      ? [
+          {
+            start: expression.measure,
+            end:
+              expression.tempoChange.type === 'aTempo'
+                ? expression.measure
+                : (expression.tempoChange.endMeasure ?? expression.measure),
+          },
+        ]
+      : [],
+  );
+  const rampStarts = [
+    ...map.sections
+      .filter(
+        (section) =>
+          section.startMeasure < measure &&
+          (section.tempoChange?.type === 'rit' || section.tempoChange?.type === 'accel') &&
+          !measureTempoSpans.some(
+            (span) => span.start <= section.startMeasure && span.end >= section.startMeasure,
+          ),
+      )
+      .map((section) => section.startMeasure),
+    ...(map.measureExpressions ?? [])
+      .filter(
+        (expression) =>
+          expression.measure < measure &&
+          (expression.tempoChange?.type === 'rit' || expression.tempoChange?.type === 'accel'),
+      )
+      .map((expression) => expression.measure),
+  ];
+  return tempoAtMeasureStart(
+    map,
+    rampStarts.length
+      ? rampStarts.reduce((latest, start) => Math.max(latest, start))
+      : Math.max(1, measure - 1),
+  );
+}
+
+/** Suggestions use the real timeline only for a valid map; invalid drafts keep editable values. */
+function suggestedMeasureTempo(map: TempoMap, index: number, restore: boolean): number | undefined {
+  const expression = map.measureExpressions?.[index];
+  if (!expression) return undefined;
+  const section = map.sections.find(
+    (current) =>
+      current.startMeasure <= expression.measure && current.endMeasure >= expression.measure,
+  );
+  if (!section) return undefined;
+  const inherited = updateMeasureExpression(map, index, withoutMeasureTempo(expression));
+  if (!validateTempoMap(inherited).valid) {
+    return expression.tempoChange?.targetBpm ?? sectionBpm(section);
+  }
+  return restore
+    ? restoredTempoAtMeasure(inherited, expression.measure)
+    : tempoAtMeasureStart(inherited, expression.measure);
+}
+
+function primaryBeatsAtMeasure(map: TempoMap, measure: number): number[] {
+  const section = map.sections.find(
+    (current) => current.startMeasure <= measure && current.endMeasure >= measure,
+  );
+  if (!section) return [];
+  const count = beatsPerMeasure(section);
+  if (!Number.isInteger(count) || count < 1 || count > 64) return [];
+  const first = measure === 1 && map.anacrusis ? count - map.anacrusis.beats + 1 : 1;
+  if (!Number.isInteger(first) || first < 1 || first > count) return [];
+  return Array.from({ length: count - first + 1 }, (_, index) => first + index);
 }
 
 function accentsFor(section: TempoSection, previous: Accent[] = []): Accent[] {
@@ -142,6 +280,22 @@ function updateSection(map: TempoMap, id: string, patch: Partial<TempoSection>):
     sections: map.sections
       .map((section) => (section.id === id ? { ...section, ...patch } : section))
       .sort((left, right) => left.startMeasure - right.startMeasure),
+  };
+}
+
+function removeSectionExpression(
+  map: TempoMap,
+  id: string,
+  key: 'tempoChange' | 'fermata' | 'breath',
+): TempoMap {
+  return {
+    ...map,
+    sections: map.sections.map((section) => {
+      if (section.id !== id) return section;
+      const next = { ...section };
+      delete next[key];
+      return next;
+    }),
   };
 }
 
@@ -206,11 +360,14 @@ function splitTempoSection(
     label: selected.label ? `${selected.label} 2` : 'New',
     startMeasure: splitMeasure,
   };
+  const opening = cloneSection(selected);
+  delete opening.fermata;
+  delete opening.breath;
   return {
     ...map,
     sections: map.sections
       .map((section) =>
-        section.id === selected.id ? { ...section, endMeasure: splitMeasure - 1 } : section,
+        section.id === selected.id ? { ...opening, endMeasure: splitMeasure - 1 } : section,
       )
       .concat(next)
       .sort((left, right) => left.startMeasure - right.startMeasure),
@@ -222,12 +379,20 @@ function mergeTempoSectionWithPrevious(map: TempoMap, id: string): TempoMap {
   const selected = map.sections[index];
   const previous = map.sections[index - 1];
   if (!selected || !previous) return map;
+  if (previous.fermata || previous.breath) return map;
   return {
     ...map,
     sections: map.sections
       .filter((section) => section.id !== selected.id)
       .map((section) =>
-        section.id === previous.id ? { ...section, endMeasure: selected.endMeasure } : section,
+        section.id === previous.id
+          ? {
+              ...section,
+              endMeasure: selected.endMeasure,
+              ...(selected.fermata ? { fermata: { ...selected.fermata } } : {}),
+              ...(selected.breath ? { breath: { ...selected.breath } } : {}),
+            }
+          : section,
       ),
   };
 }
@@ -315,6 +480,20 @@ function updateJump(map: TempoMap, index: number, jump: JumpDirective): TempoMap
 }
 
 function friendlyIssue(issue: TempoMapValidationIssue): string {
+  if (issue.path.endsWith('.fermata.extraBeats')) return '0보다 크고 16 이하인 박 수를 입력하세요.';
+  if (issue.path.endsWith('.breath.durationSec')) return '0보다 크고 300 이하인 초를 입력하세요.';
+  if (issue.path.endsWith('.fermata.beat')) return '해당 마디에서 실제 연주하는 박을 선택하세요.';
+  if (issue.path.startsWith('measureExpressions[') && issue.path.endsWith('.measure')) {
+    return issue.code === 'duplicate'
+      ? '한 마디에는 표현 설정을 하나만 둘 수 있습니다.'
+      : '곡 전체 범위 안의 마디 번호를 입력하세요.';
+  }
+  if (issue.path.startsWith('measureExpressions[') && issue.code === 'ambiguous') {
+    return '템포 변화 범위가 겹칩니다. 앞선 변화의 끝 마디를 조정하세요.';
+  }
+  if (issue.path.startsWith('measureExpressions[') && issue.path.endsWith('.endMeasure')) {
+    return '표현 마디부터 곡 마지막 마디 사이의 번호를 입력하세요.';
+  }
   const fallbacks: Record<TempoMapValidationIssue['code'], string> = {
     required: '필수 값을 입력하세요.',
     range: '곡과 반복 범위 안의 값을 입력하세요.',
@@ -323,7 +502,8 @@ function friendlyIssue(issue: TempoMapValidationIssue): string {
     coverage: '모든 마디를 빈틈이나 겹침 없이 한 번씩 포함해야 합니다.',
     duplicate: '중복 값을 제거하세요.',
     meter: '박자표와 박 단위가 한 마디를 정확히 나누도록 수정하세요.',
-    tempo: 'BPM과 rit./accel. 목표의 방향을 확인하세요.',
+    tempo:
+      'BPM과 템포 변화 목표를 확인하세요. 리타르단도는 느리게, 아첼레란도는 빠르게 설정합니다.',
     accent: '강세 수를 해당 박자의 박 수와 맞추고 0–2만 사용하세요.',
     jump: '이동 마디와 Fine/Coda 연결을 곡 범위 안에서 완성하세요.',
     ambiguous: '서로 겹치거나 중복되는 진행 지시를 정리하세요.',
@@ -360,6 +540,7 @@ function SelectField({
   error,
   children,
   ariaLabel,
+  disabled,
 }: {
   label: string;
   value: string | number;
@@ -367,6 +548,7 @@ function SelectField({
   error?: string | undefined;
   children: ReactNode;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   const generatedId = useId();
   const id = `editor-select-${generatedId.replaceAll(':', '')}`;
@@ -380,6 +562,7 @@ function SelectField({
         value={value}
         onChange={onChange}
         aria-label={ariaLabel}
+        disabled={disabled}
         aria-invalid={Boolean(error)}
         aria-describedby={descriptionId}
       >
@@ -417,6 +600,245 @@ function CheckboxField({
         {hint ? <small>{hint}</small> : null}
       </span>
     </label>
+  );
+}
+
+function MeasureExpressionFields({
+  map,
+  expression,
+  index,
+  issues,
+  onChange,
+  onDelete,
+}: {
+  map: TempoMap;
+  expression: MeasureExpression;
+  index: number;
+  issues: readonly TempoMapValidationIssue[];
+  onChange: (expression: MeasureExpression) => void;
+  onDelete: () => void;
+}) {
+  const path = `measureExpressions[${index}]`;
+  const primaryBeats = primaryBeatsAtMeasure(map, expression.measure);
+  const hasLegacyEnd = map.sections.some(
+    (section) => section.endMeasure === expression.measure && (section.fermata || section.breath),
+  );
+  return (
+    <fieldset className="jump-editor" aria-label={`${expression.measure}마디 연주 표현`}>
+      <legend>{expression.measure}마디</legend>
+      <div className="jump-editor__header">
+        <EditorField
+          label="표현 마디"
+          aria-label="표현 마디"
+          type="number"
+          min={1}
+          max={map.totalMeasures}
+          value={expression.measure}
+          error={issueFor(issues, `${path}.measure`)}
+          onChange={(event) => onChange({ ...expression, measure: Number(event.target.value) })}
+        />
+        <Button
+          variant="ghost"
+          onClick={onDelete}
+          aria-label={`${expression.measure}마디 표현 삭제`}
+        >
+          <Trash2 size={16} aria-hidden /> 표현 삭제
+        </Button>
+      </div>
+      <div className="property-grid">
+        <SelectField
+          label="템포 변화"
+          ariaLabel="템포 변화"
+          value={expression.tempoChange?.type ?? 'none'}
+          disabled={primaryBeats.length === 0}
+          error={issueFor(issues, `${path}.tempoChange`, true)}
+          onChange={(event) => {
+            const type = event.target.value;
+            if (type === 'none') {
+              onChange(withoutMeasureTempo(expression));
+              return;
+            }
+            const base = suggestedMeasureTempo(map, index, type === 'aTempo');
+            if (base === undefined) return;
+            onChange({
+              ...expression,
+              tempoChange:
+                type === 'aTempo'
+                  ? { type, targetBpm: base }
+                  : {
+                      type: type as 'rit' | 'accel',
+                      targetBpm: type === 'rit' ? Math.max(base / 2, base - 10) : base + 10,
+                      endMeasure: expression.measure,
+                    },
+            });
+          }}
+        >
+          <option value="none">없음 · 앞의 빠르기 이어받기</option>
+          <option value="rit">리타르단도 · rit. (점점 느리게)</option>
+          <option value="accel">아첼레란도 · accel. (점점 빠르게)</option>
+          <option value="aTempo">아 템포 · a tempo (원래 빠르기로)</option>
+        </SelectField>
+        {expression.tempoChange ? (
+          <>
+            <EditorField
+              label={expression.tempoChange.type === 'aTempo' ? '복귀 BPM' : '도착 BPM'}
+              aria-label={expression.tempoChange.type === 'aTempo' ? '복귀 BPM' : '도착 BPM'}
+              type="number"
+              min={0}
+              step="any"
+              value={expression.tempoChange.targetBpm}
+              hint={
+                expression.tempoChange.type === 'aTempo'
+                  ? '이 마디 첫 박부터 적용합니다. 복귀할 빠르기를 직접 바꿀 수 있습니다.'
+                  : '지정한 마지막 마디까지 점차 바뀐 뒤 다음 템포 지시나 새 구간까지 유지합니다.'
+              }
+              error={
+                issueFor(issues, `${path}.tempoChange.targetBpm`) ??
+                issueFor(issues, `${path}.tempoChange`)
+              }
+              onChange={(event) =>
+                onChange({
+                  ...expression,
+                  tempoChange: {
+                    ...expression.tempoChange!,
+                    targetBpm: Number(event.target.value),
+                  },
+                })
+              }
+            />
+            {expression.tempoChange.type !== 'aTempo' ? (
+              <EditorField
+                label="변화 끝 마디"
+                aria-label="변화 끝 마디"
+                type="number"
+                min={expression.measure}
+                max={map.totalMeasures}
+                value={expression.tempoChange.endMeasure ?? expression.measure}
+                hint="시작 마디와 같으면 그 한 마디에서 변화합니다."
+                error={issueFor(issues, `${path}.tempoChange.endMeasure`)}
+                onChange={(event) =>
+                  onChange({
+                    ...expression,
+                    tempoChange: {
+                      ...expression.tempoChange!,
+                      endMeasure: Number(event.target.value),
+                    },
+                  })
+                }
+              />
+            ) : null}
+          </>
+        ) : null}
+        <CheckboxField
+          label="페르마타"
+          hint="이 마디의 선택한 박을 더 늘입니다."
+          checked={Boolean(expression.fermata)}
+          onChange={(checked) => {
+            const next = { ...expression };
+            if (checked) next.fermata = { extraBeats: 1 };
+            else delete next.fermata;
+            onChange(next);
+          }}
+        />
+        {expression.fermata ? (
+          <>
+            <SelectField
+              label="늘일 박"
+              ariaLabel="늘일 박"
+              value={expression.fermata.beat ?? 'last'}
+              error={issueFor(issues, `${path}.fermata.beat`)}
+              onChange={(event) => {
+                const fermata = { ...expression.fermata! };
+                if (event.target.value === 'last') delete fermata.beat;
+                else fermata.beat = Number(event.target.value);
+                onChange({ ...expression, fermata });
+              }}
+            >
+              <option value="last">
+                마지막 박{primaryBeats.at(-1) ? ` · ${primaryBeats.at(-1)}박` : ''}
+              </option>
+              {primaryBeats.map((beat) => (
+                <option key={beat} value={beat}>
+                  {beat}박
+                </option>
+              ))}
+              {expression.fermata.beat !== undefined &&
+              !primaryBeats.includes(expression.fermata.beat) ? (
+                <option value={expression.fermata.beat}>
+                  {expression.fermata.beat}박 · 범위 확인
+                </option>
+              ) : null}
+            </SelectField>
+            <EditorField
+              label="추가로 늘일 박 수"
+              aria-label="추가로 늘일 박 수"
+              type="number"
+              min={0}
+              max={16}
+              step="any"
+              value={expression.fermata.extraBeats}
+              hint="0보다 크고 16 이하 · 예: 0.5박, 1박"
+              error={issueFor(issues, `${path}.fermata.extraBeats`)}
+              onChange={(event) =>
+                onChange({
+                  ...expression,
+                  fermata: { ...expression.fermata!, extraBeats: Number(event.target.value) },
+                })
+              }
+            />
+          </>
+        ) : null}
+        <CheckboxField
+          label="쉼표 · 숨 고르기"
+          hint="이 마디가 끝나면 잠시 쉰 뒤 자동으로 다시 시작합니다."
+          checked={Boolean(expression.breath)}
+          onChange={(checked) => {
+            const next = { ...expression };
+            if (checked) next.breath = { durationSec: 2, countIn: true };
+            else delete next.breath;
+            onChange(next);
+          }}
+        />
+        {expression.breath ? (
+          <>
+            <EditorField
+              label="쉬는 시간 (초)"
+              aria-label="쉬는 시간 (초)"
+              type="number"
+              min={0}
+              max={300}
+              step="any"
+              value={expression.breath.durationSec}
+              hint="0보다 크고 300 이하 · 예비박 시간은 별도입니다."
+              error={issueFor(issues, `${path}.breath.durationSec`)}
+              onChange={(event) =>
+                onChange({
+                  ...expression,
+                  breath: { ...expression.breath!, durationSec: Number(event.target.value) },
+                })
+              }
+            />
+            <CheckboxField
+              label="재개 전 예비박"
+              hint={`쉰 뒤 다음 마디의 박자·빠르기로 ${map.countIn.measures}마디를 듣습니다. 연주가 끝나면 생략합니다.`}
+              checked={expression.breath.countIn}
+              onChange={(checked) =>
+                onChange({
+                  ...expression,
+                  breath: { ...expression.breath!, countIn: checked },
+                })
+              }
+            />
+          </>
+        ) : null}
+      </div>
+      {hasLegacyEnd ? (
+        <p className="subtle">
+          이 마디의 페르마타·쉼표는 아래 구간 끝 기본 표현보다 우선합니다. 여기서 끄면 구간 기본값도
+          적용하지 않습니다.
+        </p>
+      ) : null}
+    </fieldset>
   );
 }
 
@@ -731,6 +1153,7 @@ export function EditorPage() {
   const [savedFingerprint, setSavedFingerprint] = useState('');
   const [undoDelete, setUndoDelete] = useState<UndoDelete>();
   const [newJumpType, setNewJumpType] = useState<JumpType>('repeat');
+  const [newExpressionMeasure, setNewExpressionMeasure] = useState(1);
   const [tapStatus, setTapStatus] = useState('두 번 이상 일정하게 두드리세요.');
   const tapTimesRef = useRef<number[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
@@ -792,6 +1215,7 @@ export function EditorPage() {
       setRemoteRole(undefined);
       setSplitOpen(false);
       setUndoDelete(undefined);
+      setNewExpressionMeasure(1);
 
       const readCachedMap = async (): Promise<{ map?: TempoMap; error?: unknown }> => {
         const results = await Promise.allSettled([
@@ -947,6 +1371,16 @@ export function EditorPage() {
 
   const selectedIndex = map.sections.findIndex((section) => section.id === selectedId);
   const selected = map.sections[selectedIndex] ?? map.sections[0];
+  const previousSection = map.sections[selectedIndex - 1];
+  const mergeBlockedByExpression = Boolean(previousSection?.fermata || previousSection?.breath);
+  const expressionMeasureError =
+    !Number.isInteger(newExpressionMeasure) ||
+    newExpressionMeasure < 1 ||
+    newExpressionMeasure > map.totalMeasures
+      ? `1부터 ${map.totalMeasures} 사이의 마디 번호를 입력하세요.`
+      : map.measureExpressions?.some((expression) => expression.measure === newExpressionMeasure)
+        ? '이미 표현이 있는 마디입니다. 아래 설정을 편집하세요.'
+        : undefined;
   const validation = useMemo(() => validateTempoMap(map), [map]);
   const preview = useMemo(() => {
     if (!validation.valid) {
@@ -1104,6 +1538,29 @@ export function EditorPage() {
     await save();
   };
 
+  const addMeasureExpression = () => {
+    if (expressionMeasureError) return;
+    const legacy = map.sections.find((section) => section.endMeasure === newExpressionMeasure);
+    const expression: MeasureExpression = {
+      measure: newExpressionMeasure,
+      ...(legacy?.fermata ? { fermata: { ...legacy.fermata } } : {}),
+      ...(legacy?.breath ? { breath: { ...legacy.breath } } : {}),
+    };
+    editMap((current) => ({
+      ...current,
+      measureExpressions: [...(current.measureExpressions ?? []), expression].sort(
+        (left, right) => left.measure - right.measure,
+      ),
+    }));
+    const occupied = new Set([
+      ...(map.measureExpressions ?? []).map((current) => current.measure),
+      newExpressionMeasure,
+    ]);
+    let nextMeasure = 1;
+    while (occupied.has(nextMeasure) && nextMeasure < map.totalMeasures) nextMeasure += 1;
+    setNewExpressionMeasure(nextMeasure);
+  };
+
   const split = () => {
     if (!selected) return;
     try {
@@ -1120,7 +1577,7 @@ export function EditorPage() {
   };
 
   const mergePrevious = () => {
-    if (!selected) return;
+    if (!selected || mergeBlockedByExpression) return;
     const previous = map.sections[selectedIndex - 1];
     if (!previous) return;
     editMap((current) => mergeTempoSectionWithPrevious(current, selected.id));
@@ -1151,7 +1608,14 @@ export function EditorPage() {
       setTapStatus('한 번 더 두드리세요.');
       return;
     }
-    editMap((current) => updateSection(current, selected.id, { bpm }));
+    editMap((current) =>
+      updateSection(current, selected.id, {
+        bpm,
+        ...(selected.tempoChange?.type === 'aTempo'
+          ? { tempoChange: { type: 'aTempo', targetBpm: bpm } }
+          : {}),
+      }),
+    );
     setTapStatus(`탭 평균 ${bpm} BPM`);
   };
 
@@ -1234,7 +1698,7 @@ export function EditorPage() {
       <PageHeader
         eyebrow="Tempo map"
         title="템포맵 편집기"
-        description="마디별 박자와 템포, 반복 진행을 연주 순서로 설계합니다."
+        description="마디별 박자와 템포, 페르마타와 쉼표, 반복 진행을 연주 순서로 설계합니다."
         actions={editorActions}
       />
 
@@ -1359,6 +1823,68 @@ export function EditorPage() {
               </div>
             </Card>
 
+            <Card className="map-settings" aria-label="마디별 연주 표현">
+              <header>
+                <div>
+                  <span className="eyebrow">Measure expressions</span>
+                  <h2>마디별 연주 표현</h2>
+                </div>
+                <StatusBadge>{map.measureExpressions?.length ?? 0}마디 설정</StatusBadge>
+              </header>
+              <p className="subtle">
+                구간을 나누지 않고 원하는 마디에 직접 지정합니다. 마디 번호는 구간을 이동·나누거나
+                합쳐도 유지됩니다.
+              </p>
+              <div className="jump-adder">
+                <EditorField
+                  label="표현을 추가할 마디"
+                  aria-label="표현을 추가할 마디"
+                  type="number"
+                  min={1}
+                  max={map.totalMeasures}
+                  value={newExpressionMeasure}
+                  error={expressionMeasureError}
+                  onChange={(event) => setNewExpressionMeasure(Number(event.target.value))}
+                />
+                <Button onClick={addMeasureExpression} disabled={Boolean(expressionMeasureError)}>
+                  <Plus size={16} aria-hidden /> 마디 표현 추가
+                </Button>
+              </div>
+              <div className="jump-list">
+                {(map.measureExpressions ?? []).map((expression, index) => (
+                  <MeasureExpressionFields
+                    key={index}
+                    map={map}
+                    expression={expression}
+                    index={index}
+                    issues={validation.issues}
+                    onChange={(next) =>
+                      editMap((current) => updateMeasureExpression(current, index, next))
+                    }
+                    onDelete={() =>
+                      editMap((current) => ({
+                        ...current,
+                        measureExpressions:
+                          current.measureExpressions?.filter(
+                            (_, currentIndex) => currentIndex !== index,
+                          ) ?? [],
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+              {map.measureExpressions?.length ? (
+                <p className="subtle">
+                  마디별 설정의 페르마타·쉼표가 구간 끝 기본값보다 우선합니다. 표현 행을 삭제하면
+                  구간 기본값을 다시 따릅니다.
+                </p>
+              ) : (
+                <p className="subtle">
+                  아직 마디별 표현이 없습니다. 위에서 마디 번호를 지정해 추가하세요.
+                </p>
+              )}
+            </Card>
+
             <Card className="timeline-card">
               <header className="timeline-card__header">
                 <div className="cluster">
@@ -1427,7 +1953,12 @@ export function EditorPage() {
                           <td>
                             {section.timeSignature.num}/{section.timeSignature.denom}
                           </td>
-                          <td>{section.bpm}</td>
+                          <td>
+                            <div>{sectionBpm(section)}</div>
+                            {sectionExpressionSummary(section) ? (
+                              <small>{sectionExpressionSummary(section)}</small>
+                            ) : null}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1451,6 +1982,7 @@ export function EditorPage() {
                               ? 'tempo-block tempo-block--selected'
                               : 'tempo-block'
                           }
+                          title={sectionExpressionSummary(section) || undefined}
                           style={
                             {
                               left: `${left}%`,
@@ -1462,8 +1994,11 @@ export function EditorPage() {
                         >
                           <strong>{section.label ?? `S${index + 1}`}</strong>
                           <span>
-                            {section.startMeasure}–{section.endMeasure} · {section.bpm}
+                            {section.startMeasure}–{section.endMeasure} · {sectionBpm(section)}
                           </span>
+                          {sectionExpressionSummary(section) ? (
+                            <span>{sectionExpressionSummary(section)}</span>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -1590,11 +2125,21 @@ export function EditorPage() {
                       type="number"
                       min={20}
                       max={400}
-                      value={selected.bpm}
+                      value={sectionBpm(selected)}
                       error={issueFor(validation.issues, `sections[${selectedIndex}].bpm`)}
                       onChange={(event) =>
                         editMap((current) =>
-                          updateSection(current, selected.id, { bpm: Number(event.target.value) }),
+                          updateSection(current, selected.id, {
+                            bpm: Number(event.target.value),
+                            ...(selected.tempoChange?.type === 'aTempo'
+                              ? {
+                                  tempoChange: {
+                                    type: 'aTempo',
+                                    targetBpm: Number(event.target.value),
+                                  },
+                                }
+                              : {}),
+                          }),
                         )
                       }
                     />
@@ -1710,33 +2255,40 @@ export function EditorPage() {
                         const type = event.target.value;
                         editMap((current) => {
                           if (type === 'none') {
-                            return {
-                              ...current,
-                              sections: current.sections.map((section) => {
-                                if (section.id !== selected.id) return section;
-                                const { tempoChange: _removed, ...withoutChange } = section;
-                                void _removed;
-                                return withoutChange;
-                              }),
-                            };
+                            return removeSectionExpression(current, selected.id, 'tempoChange');
                           }
+                          const targetBpm =
+                            type === 'aTempo'
+                              ? restoredTempo(current, selected)
+                              : type === 'rit'
+                                ? Math.max(1, selected.bpm - 10)
+                                : selected.bpm + 10;
                           return updateSection(current, selected.id, {
+                            ...(type === 'aTempo' ? { bpm: targetBpm } : {}),
                             tempoChange: {
-                              type: type as 'rit' | 'accel',
-                              targetBpm:
-                                type === 'rit' ? Math.max(1, selected.bpm - 10) : selected.bpm + 10,
+                              type: type as NonNullable<TempoSection['tempoChange']>['type'],
+                              targetBpm,
                             },
                           });
                         });
                       }}
                     >
                       <option value="none">없음</option>
-                      <option value="rit">rit. (느려짐)</option>
-                      <option value="accel">accel. (빨라짐)</option>
+                      <option value="rit">리타르단도 · rit. (점점 느리게)</option>
+                      <option value="accel">아첼레란도 · accel. (점점 빠르게)</option>
+                      <option value="aTempo">아 템포 · a tempo (원래 빠르기로)</option>
                     </SelectField>
                     {selected.tempoChange ? (
                       <EditorField
-                        label="도착 BPM"
+                        label={selected.tempoChange.type === 'aTempo' ? '복귀 BPM' : '도착 BPM'}
+                        aria-label={
+                          selected.tempoChange.type === 'aTempo' ? '복귀 BPM' : '도착 BPM'
+                        }
+                        hint={
+                          selected.tempoChange.type === 'aTempo'
+                            ? '이 구간 첫 박부터 적용합니다. 기본값은 앞선 템포 변화 전의 빠르기이며 직접 바꿀 수 있습니다.'
+                            : '이 구간 전체에 걸쳐 도착 BPM까지 점차 바뀝니다.'
+                        }
                         type="number"
                         min={20}
                         max={400}
@@ -1750,6 +2302,9 @@ export function EditorPage() {
                         onChange={(event) =>
                           editMap((current) =>
                             updateSection(current, selected.id, {
+                              ...(selected.tempoChange?.type === 'aTempo'
+                                ? { bpm: Number(event.target.value) }
+                                : {}),
                               tempoChange: {
                                 ...selected.tempoChange!,
                                 targetBpm: Number(event.target.value),
@@ -1760,6 +2315,109 @@ export function EditorPage() {
                       />
                     ) : null}
                   </div>
+                  <fieldset className="accent-editor">
+                    <legend>구간 끝 기본 표현</legend>
+                    <p>
+                      {selected.endMeasure}마디의 기본값입니다. 원하는 마디·박에 직접 넣으려면 위의
+                      마디별 연주 표현을 사용하세요. 같은 마디에 마디별 설정이 있으면 해당 설정의
+                      페르마타·쉼표가 우선합니다.
+                    </p>
+                    <div className="property-grid">
+                      <CheckboxField
+                        label="페르마타"
+                        hint="구간 마지막 마디의 박을 지정한 박 수만큼 더 늘입니다."
+                        checked={Boolean(selected.fermata)}
+                        onChange={(checked) =>
+                          editMap((current) =>
+                            checked
+                              ? updateSection(current, selected.id, { fermata: { extraBeats: 1 } })
+                              : removeSectionExpression(current, selected.id, 'fermata'),
+                          )
+                        }
+                      />
+                      {selected.fermata ? (
+                        <EditorField
+                          label="추가로 늘일 박 수"
+                          aria-label="추가로 늘일 박 수"
+                          type="number"
+                          min={0}
+                          max={16}
+                          step="any"
+                          value={selected.fermata.extraBeats}
+                          hint="0보다 크고 16 이하 · 예: 0.5박, 1박"
+                          error={issueFor(
+                            validation.issues,
+                            `sections[${selectedIndex}].fermata`,
+                            true,
+                          )}
+                          onChange={(event) =>
+                            editMap((current) =>
+                              updateSection(current, selected.id, {
+                                fermata: {
+                                  ...selected.fermata!,
+                                  extraBeats: Number(event.target.value),
+                                },
+                              }),
+                            )
+                          }
+                        />
+                      ) : null}
+                      <CheckboxField
+                        label="쉼표 · 숨 고르기"
+                        hint="구간이 끝나면 잠시 쉰 뒤 자동으로 다시 시작합니다."
+                        checked={Boolean(selected.breath)}
+                        onChange={(checked) =>
+                          editMap((current) =>
+                            checked
+                              ? updateSection(current, selected.id, {
+                                  breath: { durationSec: 2, countIn: true },
+                                })
+                              : removeSectionExpression(current, selected.id, 'breath'),
+                          )
+                        }
+                      />
+                      {selected.breath ? (
+                        <>
+                          <EditorField
+                            label="쉬는 시간 (초)"
+                            aria-label="쉬는 시간 (초)"
+                            type="number"
+                            min={0}
+                            max={300}
+                            step="any"
+                            value={selected.breath.durationSec}
+                            hint="0보다 크고 300 이하 · 예비박 시간은 별도입니다."
+                            error={issueFor(
+                              validation.issues,
+                              `sections[${selectedIndex}].breath.durationSec`,
+                            )}
+                            onChange={(event) =>
+                              editMap((current) =>
+                                updateSection(current, selected.id, {
+                                  breath: {
+                                    ...selected.breath!,
+                                    durationSec: Number(event.target.value),
+                                  },
+                                }),
+                              )
+                            }
+                          />
+                          <CheckboxField
+                            label="재개 전 예비박"
+                            hint={`쉰 뒤 다음 구간의 박자·빠르기로 ${map.countIn.measures}마디를 듣습니다. 연주가 끝나면 생략합니다.`}
+                            checked={selected.breath.countIn}
+                            onChange={(checked) =>
+                              editMap((current) =>
+                                updateSection(current, selected.id, {
+                                  breath: { ...selected.breath!, countIn: checked },
+                                }),
+                              )
+                            }
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  </fieldset>
                   <fieldset className="accent-editor">
                     <legend>박별 강세 패턴</legend>
                     <p>0은 무음, 1은 일반 박, 2는 강박입니다.</p>
@@ -1811,7 +2469,10 @@ export function EditorPage() {
                     >
                       <Scissors size={17} aria-hidden /> 구간 나누기
                     </Button>
-                    <Button onClick={mergePrevious} disabled={selectedIndex <= 0}>
+                    <Button
+                      onClick={mergePrevious}
+                      disabled={selectedIndex <= 0 || mergeBlockedByExpression}
+                    >
                       <GitMerge size={17} aria-hidden /> 이전과 합치기
                     </Button>
                     <Button
@@ -1822,6 +2483,12 @@ export function EditorPage() {
                       <Trash2 size={17} aria-hidden /> 삭제
                     </Button>
                   </div>
+                  {mergeBlockedByExpression ? (
+                    <p className="subtle">
+                      이전 구간 끝의 페르마타·쉼표를 먼저 해제해야 합칠 수 있습니다. 합치면 중간
+                      경계가 사라지므로 해당 표현을 보존할 수 없습니다.
+                    </p>
+                  ) : null}
                 </Card>
 
                 <Card className="jump-panel">

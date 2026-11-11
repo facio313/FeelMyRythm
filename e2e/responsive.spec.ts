@@ -241,8 +241,8 @@ async function auditLayout(page: Page): Promise<LayoutAudit> {
 }
 
 for (const viewport of viewports) {
-  const metronomeCompactHeightLimit =
-    viewport.width <= 599 ? 900 : viewport.width <= 839 ? 820 : viewport.width >= 840 ? 640 : 0;
+  const workspace = viewport.width >= 840 || (viewport.width >= 600 && viewport.height >= 600);
+  const metronomeCompactHeightLimit = workspace ? 0 : viewport.width <= 599 ? 900 : 820;
 
   test.describe(`${viewport.name} ${viewport.width}x${viewport.height}`, () => {
     test.describe.configure({ timeout: 90_000 });
@@ -320,7 +320,7 @@ for (const viewport of viewports) {
               await expect(page.locator('.tap-button__optional-label')).toBeHidden();
             }
 
-            if (viewport.height <= 539) {
+            if (!workspace && viewport.height <= 539) {
               const settings = page.getByRole('button', { name: '세부 설정' });
               await expect(settings).toBeVisible();
               await settings.click();
@@ -411,13 +411,13 @@ test('idle metronome geometry follows width and height changes before playback',
     element.setAttribute('data-playing', 'true');
     element.setAttribute('data-beat-tone', 'downbeat');
   });
-  await expect(stagePage).toHaveCSS('background-image', /radial-gradient/);
+  await expect(stagePage).toHaveCSS('background-image', 'none');
   await stagePage.evaluate((element) => element.setAttribute('data-beat-tone', 'beat'));
   await expect(stagePage).toHaveCSS('background-image', 'none');
   await stagePage.evaluate((element) => element.removeAttribute('data-playing'));
 
   const canvasMatchesCssSize = () =>
-    canvas.evaluate((element) => {
+    canvas.evaluate((element: HTMLCanvasElement) => {
       const bounds = element.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       return {
@@ -431,7 +431,7 @@ test('idle metronome geometry follows width and height changes before playback',
   await page.setViewportSize({ width: 1_440, height: 1_200 });
   await expect.poll(canvasMatchesCssSize).toEqual({ heightError: 0, widthError: 0 });
   const tallHeight = await canvas.evaluate((element) => element.getBoundingClientRect().height);
-  expect(tallHeight).toBeGreaterThan(regularHeight + 40);
+  expect(tallHeight).toBe(regularHeight);
 
   const verticalRhythm = await page.evaluate(() => {
     const stage = document.querySelector('.metronome-stage')?.getBoundingClientRect();
@@ -442,9 +442,9 @@ test('idle metronome geometry follows width and height changes before playback',
     return stage && visualizer && context && controls
       ? {
           gap: controls.top - stage.bottom,
-          contentGap: controls.top - context.bottom,
-          stageBottomPadding: stage.bottom - context.bottom,
-          stageTopPadding: (number && number.height > 0 ? number.top : visualizer.top) - stage.top,
+          contentGap: controls.top - visualizer.bottom,
+          stageBottomPadding: stage.bottom - visualizer.bottom,
+          stageTopPadding: (number && number.height > 0 ? number.top : context.top) - stage.top,
           stageBottom: stage.bottom,
           controlsTop: controls.top,
         }
@@ -901,7 +901,8 @@ test('start measure stays available in compact and tall-medium layouts', async (
 
   await page.setViewportSize({ width: 768, height: 1_024 });
   await expect(page.locator('.metronome-settings')).toBeVisible();
-  await expect(mobileTempo).toBeVisible();
+  await expect(mobileTempo).toHaveCount(0);
+  await expect(page.locator('.bpm-display')).toBeVisible();
   await expect(
     page.locator('.metronome-settings').getByRole('combobox', { name: '박자', exact: true }),
   ).toHaveValue('3/4');
@@ -909,16 +910,17 @@ test('start measure stays available in compact and tall-medium layouts', async (
   await expect(
     page.locator('.metronome-settings').getByRole('button', { name: '예비박', exact: true }),
   ).toBeVisible();
-  const inlineStartMeasure = page.locator('.quick-settings').getByRole('spinbutton', {
+  const inlineStartMeasure = page.locator('.metronome-settings').getByRole('spinbutton', {
     name: '시작 마디',
   });
   await expect(inlineStartMeasure).toBeVisible();
   await expect(inlineStartMeasure).toHaveValue('4');
-  await expect(screenCanvas).toBeVisible();
-  await assertContentProgressBounds();
+  await expect(screenCanvas).toHaveCount(0);
+  await expect(page.locator('.metronome-page')).toHaveClass(/metronome-page--workspace/);
 
   await page.setViewportSize({ width: 768, height: 600 });
-  await assertContentProgressBounds();
+  await expect(screenCanvas).toHaveCount(0);
+  await expect(page.locator('.metronome-settings')).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => {
     document.documentElement.style.fontSize = '32px';
@@ -967,7 +969,7 @@ test('start measure stays available in compact and tall-medium layouts', async (
 test('settings dialog restores focus when its compact trigger disappears', async ({ page }) => {
   for (const boundary of [
     { width: 599, compactHeight: 900, restoredHeight: 901 },
-    { width: 768, compactHeight: 820, restoredHeight: 821 },
+    { width: 768, compactHeight: 599, restoredHeight: 600 },
   ]) {
     await page.setViewportSize({ width: boundary.width, height: boundary.compactHeight });
     await page.goto('/feelmyrythm/');
@@ -981,12 +983,47 @@ test('settings dialog restores focus when its compact trigger disappears', async
     await expect(settings).toBeHidden();
     await dialog.getByRole('button', { name: '닫기' }).click();
 
-    const inlineStartMeasure = page.locator('.quick-settings').getByRole('spinbutton', {
-      name: '시작 마디',
-    });
+    const inlineStartMeasure = page
+      .locator('.quick-settings, .metronome-settings')
+      .getByRole('spinbutton', {
+        name: '시작 마디',
+      });
     await expect(inlineStartMeasure).toBeVisible();
     await expect(inlineStartMeasure).toBeFocused();
   }
+});
+
+test('mobile number remains opaque above the progress background in normal and focused views', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/feelmyrythm/');
+  const number = page.locator('.metronome-number');
+  await expect(number).toHaveCSS('z-index', '1');
+  await page.getByRole('button', { name: '메트로놈 재생', exact: true }).click();
+  await expect(page.locator('.metronome-page')).toHaveAttribute('data-count-in', 'true');
+  await expect(page.locator('.metronome-page')).not.toHaveAttribute('data-count-in', 'true');
+  for (const focused of [false, true]) {
+    if (focused) await number.click();
+    const alphas = await number.locator('canvas').evaluate(async (canvas: HTMLCanvasElement) => {
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Number canvas context is missing');
+      const samples: number[] = [];
+      for (let frame = 0; frame < 45; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        let maxAlpha = 0;
+        for (let i = 3; i < pixels.length; i += 4) maxAlpha = Math.max(maxAlpha, pixels[i]!);
+        samples.push(maxAlpha);
+      }
+      return samples;
+    });
+    expect(alphas).toHaveLength(45);
+    expect(alphas.every((alpha) => alpha === 255)).toBe(true);
+    await expect(number).toHaveCSS('z-index', '1');
+    await expect(page.locator('.metronome-screen-progress')).toHaveCSS('z-index', '-1');
+  }
+  await page.getByRole('button', { name: '메트로놈 정지', exact: true }).click();
 });
 
 test('mobile tap pad separates entry from measured taps and restores focus', async ({
@@ -999,6 +1036,7 @@ test('mobile tap pad separates entry from measured taps and restores focus', asy
   const bpm = page.locator('.bpm-display > button[aria-label^="현재 BPM"] > span');
   await expect(bpm).toHaveText('100');
   await page.clock.pauseAt(new Date('2026-09-29T00:01:00Z'));
+  const controlsBefore = await page.locator('.metronome-mobile-controls').boundingBox();
   await launcher.click();
   await page.clock.runFor(32);
 
@@ -1015,9 +1053,11 @@ test('mobile tap pad separates entry from measured taps and restores focus', asy
   const panelGeometry = await panel.evaluate((element) => {
     const pad = element.querySelector<HTMLElement>('.tap-tempo-pad');
     const close = element.querySelector<HTMLElement>('[aria-label="탭 템포 닫기"]');
+    const label = pad?.querySelector<HTMLElement>('span[aria-hidden]');
     const controls = element.closest<HTMLElement>('.metronome-controls');
     const main = element.closest<HTMLElement>('#main-content');
-    if (!pad || !close || !controls || !main) throw new Error('Tap pad regions are missing');
+    if (!pad || !close || !label || !controls || !main)
+      throw new Error('Tap pad regions are missing');
     const panel = element.getBoundingClientRect();
     const padRect = pad.getBoundingClientRect();
     const closeRect = close.getBoundingClientRect();
@@ -1034,11 +1074,12 @@ test('mobile tap pad separates entry from measured taps and restores focus', asy
       padHeight: padRect.height,
       closeWidth: closeRect.width,
       closeHeight: closeRect.height,
-      closeInUpperRight:
-        closeRect.left >= panel.left + panel.width / 2 &&
-        closeRect.right <= panel.right &&
-        closeRect.top >= panel.top &&
-        closeRect.top + closeRect.height / 2 <= panel.top + panel.height / 2,
+      labelCenterOffset:
+        label.getBoundingClientRect().left +
+        label.getBoundingClientRect().width / 2 -
+        (panel.left + panel.width / 2),
+      closeCenterOffset: closeRect.top + closeRect.height / 2 - (panel.top + panel.height / 2),
+      closeRightGap: panel.right - closeRect.right,
       panelBottom: panel.bottom,
       mainBottom: main.getBoundingClientRect().bottom,
     };
@@ -1048,10 +1089,13 @@ test('mobile tap pad separates entry from measured taps and restores focus', asy
     Math.abs(panelGeometry.panelWidth - panelGeometry.controlsContentWidth),
   ).toBeLessThanOrEqual(1);
   expect(panelGeometry.padWidth).toBeGreaterThanOrEqual(240);
-  expect(panelGeometry.padHeight).toBeGreaterThanOrEqual(100);
+  expect(panelGeometry.padHeight).toBeGreaterThanOrEqual(48);
+  expect(panelGeometry.padHeight).toBe(controlsBefore?.height);
   expect(panelGeometry.closeWidth).toBeGreaterThanOrEqual(48);
   expect(panelGeometry.closeHeight).toBeGreaterThanOrEqual(48);
-  expect(panelGeometry.closeInUpperRight).toBe(true);
+  expect(Math.abs(panelGeometry.labelCenterOffset)).toBeLessThanOrEqual(1);
+  expect(Math.abs(panelGeometry.closeCenterOffset)).toBeLessThanOrEqual(1);
+  expect(panelGeometry.closeRightGap).toBeGreaterThanOrEqual(4);
   expect(panelGeometry.panelBottom).toBeLessThanOrEqual(panelGeometry.mainBottom + 1);
   await page.screenshot({ path: testInfo.outputPath('mobile-390-tempo-background-tap-pad.png') });
 
@@ -1102,9 +1146,85 @@ test('mobile tap pad separates entry from measured taps and restores focus', asy
   await expect(panel).toBeHidden();
 });
 
-test('medium-height layout restores inline settings without a large boundary jump', async ({
+test('mobile tap pad preserves the upper layout at different sizes and text scales', async ({
   page,
 }) => {
+  for (const viewport of [
+    { width: 390, height: 844, textScale: 1 },
+    { width: 256, height: 844, textScale: 2 },
+    { width: 568, height: 320, textScale: 1 },
+    { width: 768, height: 599, textScale: 1 },
+    { width: 390, height: 1024, textScale: 2 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/feelmyrythm/');
+    await page.evaluate((scale) => {
+      document.documentElement.style.fontSize = `${16 * scale}px`;
+    }, viewport.textScale);
+    const launcher = page.getByRole('button', { name: '탭 템포', exact: true });
+    await expect(launcher).toBeEnabled();
+    const layout = () =>
+      page.locator('.metronome-page').evaluate((container) => {
+        return [
+          '.metronome-heading',
+          '.metronome-stage',
+          '.metronome-number',
+          '.bpm-display',
+          '.metronome-mobile-controls',
+          '.quick-settings',
+        ].map((selector) => {
+          const element = container.querySelector(selector);
+          if (!element) throw new Error(`Missing layout region: ${selector}`);
+          const rect = element.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        });
+      });
+    await launcher.scrollIntoViewIfNeeded();
+    // Let the resize observer finish fitting the number before measuring it.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    const before = await layout();
+    await launcher.click();
+    const pad = page.getByRole('button', { name: '박자에 맞춰 탭', exact: true });
+    await expect(pad).toBeFocused();
+    await expect.poll(layout).toEqual(before);
+    const padRect = await pad.boundingBox();
+    expect(padRect?.height).toBe(before[4].height);
+    expect(padRect?.height).toBeGreaterThanOrEqual(48);
+    const alignment = () =>
+      pad.evaluate((element) => {
+        const label = element.querySelector('span[aria-hidden]');
+        const close = element.parentElement?.querySelector('[aria-label="탭 템포 닫기"]');
+        if (!label || !close) throw new Error('Tap pad alignment regions are missing');
+        const panelRect = element.getBoundingClientRect();
+        const labelRect = label.getBoundingClientRect();
+        const closeRect = close.getBoundingClientRect();
+        return {
+          labelOffset:
+            labelRect.left + labelRect.width / 2 - (panelRect.left + panelRect.width / 2),
+          closeOffset:
+            closeRect.top + closeRect.height / 2 - (panelRect.top + panelRect.height / 2),
+          labelClearOfClose: labelRect.right <= closeRect.left,
+        };
+      });
+    for (const measured of [false, true]) {
+      if (measured) await pad.click();
+      const positions = await alignment();
+      expect(Math.abs(positions.labelOffset)).toBeLessThanOrEqual(1);
+      expect(Math.abs(positions.closeOffset)).toBeLessThanOrEqual(1);
+      expect(positions.labelClearOfClose).toBe(true);
+    }
+    await page.getByRole('button', { name: '탭 템포 닫기', exact: true }).click();
+    await expect(launcher).toBeFocused();
+    await expect.poll(layout).toEqual(before);
+  }
+});
+
+test('tablet layout keeps inline settings without height boundary jumps', async ({ page }) => {
   const geometry = async (height: number) => {
     await page.setViewportSize({ width: 839, height });
     await page.goto('/feelmyrythm/');
@@ -1133,8 +1253,8 @@ test('medium-height layout restores inline settings without a large boundary jum
   const beforeExit = await geometry(1_180);
   const afterExit = await geometry(1_181);
 
-  expect(compact.settingsVisible).toBe(false);
-  expect(compact.shortSettingsVisible).toBe(true);
+  expect(compact.settingsVisible).toBe(true);
+  expect(compact.shortSettingsVisible).toBe(false);
   expect(restored.settingsVisible).toBe(true);
   expect(restored.shortSettingsVisible).toBe(false);
   expect(Math.abs(restored.stageHeight - compact.stageHeight)).toBeLessThanOrEqual(40);
@@ -1186,28 +1306,41 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
         48,
       );
     }
-    const controlRow = await page.locator('.metronome-mobile-controls').evaluate((element) => {
-      const buttons = [...element.querySelectorAll('button')];
-      const rects = buttons.map((button) => button.getBoundingClientRect());
-      const row = element.getBoundingClientRect();
-      return {
-        names: buttons.map((button) => button.getAttribute('aria-label')),
-        centerSpread:
-          Math.max(...rects.map((rect) => rect.top + rect.height / 2)) -
-          Math.min(...rects.map((rect) => rect.top + rect.height / 2)),
-        leftToRight: rects.slice(1).every((rect, index) => rect.left >= rects[index]!.right),
-        transportCenterError: Math.abs(
-          (rects[0]!.left + rects[2]!.right) / 2 - (row.left + row.width / 2),
-        ),
-      };
-    });
-    expect(controlRow.names).toEqual(['BPM 5 낮추기', '메트로놈 재생', 'BPM 5 높이기', '탭 템포']);
-    expect(controlRow.centerSpread, `${viewport.width}px one-row controls`).toBeLessThanOrEqual(1);
-    expect(controlRow.leftToRight, `${viewport.width}px control order`).toBe(true);
-    expect(
-      controlRow.transportCenterError,
-      `${viewport.width}px centered transport`,
-    ).toBeLessThanOrEqual(1);
+    const phoneControls = viewport.width < 600 || viewport.height < 600;
+    if (phoneControls) {
+      const controlRow = await page.locator('.metronome-mobile-controls').evaluate((element) => {
+        const buttons = [...element.querySelectorAll('button')];
+        const rects = buttons.map((button) => button.getBoundingClientRect());
+        const row = element.getBoundingClientRect();
+        return {
+          names: buttons.map((button) => button.getAttribute('aria-label')),
+          centerSpread:
+            Math.max(...rects.map((rect) => rect.top + rect.height / 2)) -
+            Math.min(...rects.map((rect) => rect.top + rect.height / 2)),
+          leftToRight: rects.slice(1).every((rect, index) => rect.left >= rects[index]!.right),
+          transportCenterError: Math.abs(
+            (rects[0]!.left + rects[2]!.right) / 2 - (row.left + row.width / 2),
+          ),
+        };
+      });
+      expect(controlRow.names).toEqual([
+        'BPM 5 낮추기',
+        '메트로놈 재생',
+        'BPM 5 높이기',
+        '탭 템포',
+      ]);
+      expect(controlRow.centerSpread, `${viewport.width}px one-row controls`).toBeLessThanOrEqual(
+        1,
+      );
+      expect(controlRow.leftToRight, `${viewport.width}px control order`).toBe(true);
+      expect(
+        controlRow.transportCenterError,
+        `${viewport.width}px centered transport`,
+      ).toBeLessThanOrEqual(1);
+    } else {
+      await expect(page.locator('.metronome-page')).toHaveClass(/metronome-page--workspace/);
+      await expect(page.getByRole('button', { name: 'BPM 1 높이기' })).toBeVisible();
+    }
     await expect(page.locator('.metronome-controls .count-in-button')).toHaveCount(0);
     const settings = page.getByRole('button', { name: '세부 설정' });
     const usesSettingsDialog = await settings.isVisible();
@@ -1232,7 +1365,7 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
       await expect(settings).toBeFocused();
     }
     const tempo = page
-      .locator('.bpm-display--mobile')
+      .locator('.bpm-display')
       .getByRole('button', { name: '현재 BPM 100, 눌러서 직접 입력' });
     await expect(tempo).toBeVisible();
     const tempoBounds = await tempo.boundingBox();
@@ -1260,7 +1393,7 @@ test('compact coarse-pointer controls keep 48px targets without overflow', async
     const retryBounds = await retry.boundingBox();
     expect(retryBounds).not.toBeNull();
     expect(retryBounds!.height).toBeGreaterThanOrEqual(48);
-    await expect(page.locator('.metronome-stage .bpm-display--mobile')).toBeVisible();
+    await expect(page.locator('.metronome-stage .bpm-display')).toBeVisible();
     const audit = await auditLayout(page);
     expect(audit.documentOverflow).toBeLessThanOrEqual(1);
     expect(audit.navOverlaps).toEqual([]);
@@ -1581,4 +1714,99 @@ test('BPM dialog keeps its initial focus visible at effective 256px and 200% tex
   await expect(tempo).toBeFocused();
 
   await context.close();
+});
+
+test('tablet and desktop workspace exposes compact controls and settings together', async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 600, height: 960 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/feelmyrythm/');
+    const panel = page.locator('.metronome-settings');
+    const play = page.getByRole('button', { name: '메트로놈 재생', exact: true });
+    await expect(play).toBeEnabled();
+    await expect(page.locator('.metronome-page')).toHaveClass(/metronome-page--workspace/);
+    await expect(page.getByRole('heading', { name: '재생 설정' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '세부 설정' })).toBeHidden();
+    await expect(page.locator('.metronome-screen-progress')).toHaveCount(0);
+    const start = panel.getByRole('spinbutton', { name: '시작 마디' });
+    await start.fill('2');
+    await panel.getByRole('combobox', { name: '박자', exact: true }).selectOption('3/4');
+    await expect(panel.locator('.accent-dot')).toHaveCount(3);
+    const countIn = panel.getByRole('button', { name: '예비박', exact: true });
+    if ((await countIn.getAttribute('aria-pressed')) === 'true') await countIn.click();
+    const bpm = page.getByRole('button', { name: /^현재 BPM / });
+    const before = Number(await bpm.innerText());
+    await page.getByRole('button', { name: 'BPM 1 높이기', exact: true }).click();
+    await expect(bpm).toHaveText(String(before + 1));
+    await page.getByRole('button', { name: 'BPM 1 낮추기', exact: true }).click();
+    await expect(bpm).toHaveText(String(before));
+    await play.click();
+    await expect(start).toBeDisabled();
+    await expect(page.locator('.performance-context')).toContainText('마디 2');
+    await page.getByRole('button', { name: '메트로놈 정지', exact: true }).click();
+    await expect(start).toBeEnabled();
+    const stageBounds = await page.locator('.metronome-stage').boundingBox();
+    const panelBounds = await panel.boundingBox();
+    expect(stageBounds).not.toBeNull();
+    expect(panelBounds).not.toBeNull();
+    if (viewport.width >= 1000) {
+      expect(panelBounds!.x).toBeGreaterThanOrEqual(stageBounds!.x + stageBounds!.width);
+      expect(panelBounds!.y).toBe(stageBounds!.y);
+    } else {
+      expect(panelBounds!.y).toBeGreaterThan(stageBounds!.y + stageBounds!.height);
+    }
+    const audit = await auditLayout(page);
+    expect(audit.escaped).toEqual([]);
+    expect(audit.undersized).toEqual([]);
+    expect(audit.navOverlaps).toEqual([]);
+  }
+});
+
+test('home navigation keeps the canonical base path after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/feelmyrythm/settings');
+  await page.getByRole('link', { name: '메트로놈', exact: true }).click();
+  await expect(page).toHaveURL(/\/feelmyrythm\/$/);
+  await page.reload();
+  await expect(page.getByRole('button', { name: '메트로놈 재생' })).toBeEnabled();
+});
+
+test('wide forms and metronome reflow with 200% text in both themes', async ({ browser }) => {
+  test.setTimeout(90000);
+  for (const viewport of [
+    { width: 768, height: 1024 },
+    { width: 1440, height: 900 },
+  ]) {
+    const context = await browser.newContext({ viewport, hasTouch: true, serviceWorkers: 'block' });
+    const page = await context.newPage();
+    for (const theme of ['dark', 'light']) {
+      for (const route of ['', 'settings', 'practice']) {
+        await page.goto(`/feelmyrythm/${route}`);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await page.evaluate((theme) => {
+          document.documentElement.style.fontSize = '32px';
+          document.documentElement.dataset.theme = theme;
+        }, theme);
+        const audit = await auditLayout(page);
+        expect(audit.documentOverflow, `${route} ${theme} page overflow`).toBeLessThanOrEqual(1);
+        expect(audit.escaped, `${route} ${theme} clipped contents`).toEqual([]);
+        expect(audit.undersized, `${route} ${theme} touch targets`).toEqual([]);
+        expect(audit.navOverlaps, `${route} ${theme} navigation overlap`).toEqual([]);
+        const action = page.getByRole('button', {
+          name: route === '' ? '메트로놈 재생' : route === 'settings' ? '저장' : '일지 저장',
+          exact: true,
+        });
+        await action.focus();
+        await expect(action).toBeInViewport();
+      }
+    }
+    await context.close();
+  }
 });

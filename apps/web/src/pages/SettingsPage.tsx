@@ -293,13 +293,13 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="page page--narrow">
+    <div className="page page--narrow settings-page">
       <PageHeader
         eyebrow="Preferences"
         title="설정"
         description="이 기기의 연습 환경과 오프라인 저장 공간을 관리합니다."
       />
-      <div className="stack">
+      <div className="stack settings-grid">
         <Card>
           <div className="settings-heading">
             <Palette aria-hidden />
@@ -338,7 +338,7 @@ export function SettingsPage() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="settings-defaults">
           <form
             className="stack"
             onSubmit={(event) => {

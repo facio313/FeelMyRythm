@@ -10,6 +10,96 @@ import {
 import { section, tempoMap } from './fixtures.js';
 
 describe('expandTimeline', () => {
+  it('performs ritardando, a silent fermata and breath, then a-tempo reentry cues', () => {
+    const map = tempoMap({
+      totalMeasures: 2,
+      sections: [
+        section(1, 1, {
+          id: 'rit',
+          bpm: 120,
+          subdivision: 2,
+          tempoChange: { type: 'rit', targetBpm: 60 },
+          fermata: { extraBeats: 1 },
+          breath: { durationSec: 2, countIn: true },
+        }),
+        section(2, 2, {
+          id: 'return',
+          bpm: 60,
+          tempoChange: { type: 'aTempo', targetBpm: 120 },
+        }),
+      ],
+    });
+    const timeline = expandTimeline(map);
+    const held = timeline.entries[0]!;
+    const resume = timeline.entries[1]!;
+    const normalEnd = 4 * Math.log(2);
+    const lastBeatLength = 4 * Math.log(75 / 60);
+    const breathStart = normalEnd + lastBeatLength;
+    expect(held.fermata?.startTimeSec).toBeCloseTo(normalEnd - lastBeatLength, 10);
+    expect(held.fermata?.endTimeSec).toBeCloseTo(breathStart, 10);
+    expect(held.beats.filter((beat) => beat.beatIndex === 3)).toHaveLength(1);
+    expect(held.breath?.startTimeSec).toBeCloseTo(breathStart, 10);
+    expect(held.breath?.endTimeSec).toBeCloseTo(breathStart + 2, 10);
+    expect(held.resumeCountIn?.map((beat) => beat.countdown)).toEqual([4, 3, 2, 1]);
+    held.resumeCountIn?.forEach((beat, index) => {
+      expect(beat.timeSec).toBeCloseTo(breathStart + 2 + index * 0.5, 10);
+    });
+    expect(resume.startTimeSec).toBeCloseTo(breathStart + 4, 10);
+    expect(resume.beats[1]!.timeSec - resume.beats[0]!.timeSec).toBeCloseTo(0.5, 10);
+    expect(
+      buildCountIn(map, seekPoint(timeline, 2))[1]!.timeSec -
+        buildCountIn(map, seekPoint(timeline, 2))[0]!.timeSec,
+    ).toBeCloseTo(0.5, 10);
+    expect(timeline.totalDurationSec).toBeCloseTo(breathStart + 6, 10);
+    expect(expandTimeline(map)).toEqual(timeline);
+  });
+
+  it('can omit reentry cues and keeps rests and fermatas through repeats and the final tail', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 1,
+        sections: [
+          section(1, 1, {
+            bpm: 120,
+            fermata: { extraBeats: 2 },
+            breath: { durationSec: 1.5, countIn: false },
+          }),
+        ],
+        jumps: [{ type: 'repeat', startMeasure: 1, endMeasure: 1, times: 2 }],
+      }),
+    );
+    expect(timeline.entries.map((entry) => entry.startTimeSec)).toEqual([0, 4.5]);
+    expect(timeline.entries.every((entry) => entry.resumeCountIn === undefined)).toBe(true);
+    expect(timeline.totalDurationSec).toBe(9);
+    expect(locate(timeline, 4)).toEqual({ entryIndex: 0, beatIndex: 3 });
+    expect(seekPoint(timeline, 1, 2)).toBe(4.5);
+  });
+
+  it('counts into the next performed meter and never adds cues after the last entry', () => {
+    const timeline = expandTimeline(
+      tempoMap({
+        totalMeasures: 2,
+        countIn: { measures: 2, useSectionMeter: true },
+        sections: [
+          section(1, 1, { id: 'a', bpm: 120, breath: { durationSec: 1, countIn: true } }),
+          section(2, 2, {
+            id: 'b',
+            bpm: 60,
+            timeSignature: { num: 6, denom: 8 },
+            beatUnit: 'dottedQuarter',
+            accentPattern: [2, 1],
+            breath: { durationSec: 1, countIn: true },
+          }),
+        ],
+      }),
+    );
+    expect(timeline.entries[0]!.resumeCountIn?.map((beat) => beat.timeSec)).toEqual([3, 4, 5, 6]);
+    expect(timeline.entries[0]!.resumeCountIn?.map((beat) => beat.countdown)).toEqual([2, 1, 2, 1]);
+    expect(timeline.entries[1]!.startTimeSec).toBe(7);
+    expect(timeline.entries[1]!.resumeCountIn).toBeUndefined();
+    expect(timeline.totalDurationSec).toBe(10);
+  });
+
   it('expands the 1-25/26 tempo transition with first and second endings', () => {
     const map = tempoMap({
       revision: 7,

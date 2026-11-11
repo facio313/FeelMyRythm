@@ -110,6 +110,63 @@ function timeline(secondMeasureBeats = [1, 1.5]): PerformanceTimelineLike {
 }
 
 describe('LookaheadScheduler', () => {
+  it('leaves breath silence empty, schedules reentry cues and waits for the complete final hold', () => {
+    const engine = new NativeBatchEngine();
+    const timer = new ManualTimer();
+    const scheduler = new LookaheadScheduler(engine, { timer });
+    let ended = 0;
+    scheduler.onEnded = () => {
+      ended += 1;
+    };
+    scheduler.start({
+      timeline: {
+        tempoMapRevision: 1,
+        totalDurationSec: 9,
+        entries: [
+          {
+            measureNumber: 1,
+            pass: 1,
+            sectionId: 'a',
+            startTimeSec: 0,
+            beats: [{ timeSec: 0, accent: 2, isSubdivision: false }],
+            resumeCountIn: [
+              { timeSec: 4, accent: 2, isSubdivision: false, countdown: 2 },
+              { timeSec: 5, accent: 1, isSubdivision: false, countdown: 1 },
+            ],
+          },
+          {
+            measureNumber: 2,
+            pass: 1,
+            sectionId: 'b',
+            startTimeSec: 6,
+            beats: [{ timeSec: 6, accent: 2, isSubdivision: false }],
+          },
+        ],
+      },
+      anchorTimelineTimeSec: 0,
+      anchorAudioTime: 0,
+    });
+    expect(engine.scheduled).toEqual([
+      { at: 0, kind: 'downbeat' },
+      { at: 4, kind: 'countIn' },
+      { at: 5, kind: 'countIn' },
+      { at: 6, kind: 'downbeat' },
+    ]);
+    expect(scheduler.beatQueue.snapshot()[1]).toMatchObject({
+      isCountIn: true,
+      countdown: 2,
+      measureNumber: 2,
+      sectionId: 'b',
+    });
+    engine.time = 6.2;
+    timer.fire();
+    expect(ended).toBe(0);
+    expect(scheduler.isRunning).toBe(true);
+    engine.time = 9.2;
+    timer.fire();
+    expect(ended).toBe(1);
+  });
+
   it('uses the specified 25 ms worker cadence and 120 ms lookahead window', () => {
     expect(SCHEDULER_TICK_MS).toBe(25);
     expect(LOOKAHEAD_SEC).toBe(0.12);

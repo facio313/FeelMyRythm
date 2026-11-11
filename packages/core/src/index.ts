@@ -26,7 +26,13 @@ export type {
 
 export { TempoMapValidationError, TimelineExpansionError } from './errors.js';
 
-export { buildCountIn, expandTimeline, locate, seekPoint } from './timeline.js';
+export {
+  buildCountIn,
+  expandTimeline,
+  locate,
+  seekPoint,
+  tempoAtMeasureStart,
+} from './timeline.js';
 
 export {
   assertValidTempoMap,
@@ -39,16 +45,21 @@ export type {
   Accent,
   Anacrusis,
   Beat,
+  BreathPolicy,
   CodaDirective,
   CountInPolicy,
   DaCapoDirective,
   DalSegnoDirective,
   ExpandTimelineOptions,
+  FermataPolicy,
   JumpDirective,
   LocateResult,
+  MeasureExpression,
+  MeasureTempoChange,
   NoteValue,
   PerformanceTimeline,
   RepeatDirective,
+  ResumeCountInBeat,
   TempoChange,
   TempoMap,
   TempoMapValidationCode,
@@ -56,6 +67,7 @@ export type {
   TempoMapValidationResult,
   TempoSection,
   TimelineMeasure,
+  TimelineHold,
   TimeSignature,
   VoltaEnding,
 } from './types.js';

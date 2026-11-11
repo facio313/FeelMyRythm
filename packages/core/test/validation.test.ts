@@ -10,6 +10,40 @@ import {
 import { section, tempoMap } from './fixtures.js';
 
 describe('validateTempoMap', () => {
+  it.each([
+    { fermata: { extraBeats: 0 } },
+    { fermata: { extraBeats: Number.NaN } },
+    { fermata: { extraBeats: 16.01 } },
+    { fermata: { extraBeats: '2' } },
+    { breath: { durationSec: -1, countIn: true } },
+    { breath: { durationSec: Number.POSITIVE_INFINITY, countIn: true } },
+    { breath: { durationSec: 301, countIn: false } },
+    { breath: { durationSec: 1 } },
+    { breath: { durationSec: 1, countIn: 0 } },
+    { tempoChange: { type: ['aTempo'], targetBpm: 120 } },
+  ])('rejects invalid expression data without coercion: %j', (patch) => {
+    const map = tempoMap();
+    expect(validateTempoMap({ ...map, sections: [{ ...map.sections[0], ...patch }] }).valid).toBe(
+      false,
+    );
+  });
+
+  it('accepts fractional holds, an explicit silent reentry and a-tempo without a ramp direction', () => {
+    expect(
+      validateTempoMap(
+        tempoMap({
+          sections: [
+            section(1, 4, {
+              tempoChange: { type: 'aTempo', targetBpm: 90 },
+              fermata: { extraBeats: 0.5 },
+              breath: { durationSec: 0.25, countIn: false },
+            }),
+          ],
+        }),
+      ).valid,
+    ).toBe(true);
+  });
+
   it('returns structural issues for untrusted JSON instead of throwing', () => {
     const malformed = {
       id: 42,

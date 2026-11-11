@@ -722,6 +722,11 @@ export function SessionPage() {
       (section) => currentMeasure >= section.startMeasure && currentMeasure <= section.endMeasure,
     ) ?? tempoMap.sections[0];
   const transportActive = transport?.status === 'playing' || transport?.status === 'armed';
+  const sectionBpm =
+    currentSection?.tempoChange?.type === 'aTempo'
+      ? currentSection.tempoChange.targetBpm
+      : currentSection?.bpm;
+  const displayedBpm = playing ? (metronome.position.bpm ?? sectionBpm) : sectionBpm;
   const readyCount = snapshot.roster.filter((participant) => participant.ready).length;
   const previewEntry = timeline.entries.find((entry) => entry.measureNumber === currentMeasure);
   const previewBeatCount = Math.max(
@@ -839,6 +844,7 @@ export function SessionPage() {
           </div>
           <BeatVisualizer
             className="session-visualizer"
+            countInDisplay="overlay"
             running={playing}
             frameSource={sessionFrameSource}
             label="앙상블 동기 박자"
@@ -847,17 +853,22 @@ export function SessionPage() {
             <strong>
               {metronome.position.isWaiting && playing
                 ? '시작 대기'
-                : metronome.position.isCountIn && playing
-                  ? '예비박'
-                  : playing
-                    ? '연주 중'
-                    : transportActive
-                      ? '합류 대기'
-                      : '대기'}
+                : metronome.position.isResting && playing
+                  ? '숨 고르기'
+                  : metronome.position.isFermata && playing
+                    ? '페르마타'
+                    : metronome.position.isCountIn && playing
+                      ? '예비박'
+                      : playing
+                        ? '연주 중'
+                        : transportActive
+                          ? '합류 대기'
+                          : '대기'}
             </strong>
             <span className="fmr-tabular">
-              {currentMeasure}마디 · {currentSection?.bpm} BPM · {currentSection?.timeSignature.num}
-              /{currentSection?.timeSignature.denom}
+              {currentMeasure}마디 ·{' '}
+              {displayedBpm === undefined ? '—' : Math.round(displayedBpm * 10) / 10} BPM ·{' '}
+              {currentSection?.timeSignature.num}/{currentSection?.timeSignature.denom}
             </span>
           </div>
           {transportActive && !audioPrepared ? (

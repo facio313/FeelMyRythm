@@ -262,6 +262,77 @@ test('builds and saves the 100 BPM → measure 26 at 130 BPM → 1st/2nd ending 
   expect(pageErrors).toEqual([]);
 });
 
+test('edits expressions at arbitrary measures without splitting on a phone and preserves them through JSON and playback navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/feelmyrythm/editor');
+  await page.getByLabel('총 마디 수').fill('12');
+  const panel = page.getByRole('region', { name: '마디별 연주 표현' });
+  const addExpression = async (measure: number) => {
+    await panel.getByLabel('표현을 추가할 마디', { exact: true }).fill(String(measure));
+    await panel.getByRole('button', { name: '마디 표현 추가' }).click();
+    return panel.getByRole('group', { name: `${measure}마디 연주 표현`, exact: true });
+  };
+  const rit = await addExpression(3);
+  await rit.getByLabel('템포 변화').selectOption('rit');
+  await rit.getByLabel('도착 BPM', { exact: true }).fill('80');
+  await rit.getByLabel('변화 끝 마디', { exact: true }).fill('4');
+  const aTempo = await addExpression(5);
+  await aTempo.getByLabel('템포 변화').selectOption('aTempo');
+  await expect(aTempo.getByLabel('복귀 BPM', { exact: true })).toHaveValue('100');
+  await expect(aTempo.getByLabel('변화 끝 마디')).toHaveCount(0);
+  const fermata = await addExpression(7);
+  await fermata.getByRole('checkbox', { name: /페르마타/ }).check();
+  await fermata.getByLabel('늘일 박', { exact: true }).selectOption('2');
+  await fermata.getByLabel('추가로 늘일 박 수', { exact: true }).fill('0.5');
+  const breath = await addExpression(8);
+  await breath.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }).check();
+  await breath.getByLabel('쉬는 시간 (초)', { exact: true }).fill('2.5');
+  await expect(breath.getByRole('checkbox', { name: /재개 전 예비박/ })).toBeChecked();
+  await breath.getByRole('checkbox', { name: /재개 전 예비박/ }).uncheck();
+  await expect(page.getByText('유효함', { exact: true })).toBeVisible();
+  await expect(page.locator('.tempo-block')).toHaveCount(1);
+  await expect(page.locator('.tempo-block')).toContainText('1–12 · 100');
+  await page.locator('.editor-save-bar').getByRole('button', { name: '저장', exact: true }).click();
+  await expect(page.getByText('템포맵을 저장했습니다.', { exact: true })).toBeVisible();
+  const maps = await readCachedTempoMaps(page);
+  expect(maps).toHaveLength(1);
+  const saved = maps[0]!;
+  expect(saved.sections).toHaveLength(1);
+  expect(saved.measureExpressions).toEqual([
+    { measure: 3, tempoChange: { type: 'rit', targetBpm: 80, endMeasure: 4 } },
+    { measure: 5, tempoChange: { type: 'aTempo', targetBpm: 100 } },
+    { measure: 7, fermata: { extraBeats: 0.5, beat: 2 } },
+    { measure: 8, breath: { durationSec: 2.5, countIn: false } },
+  ]);
+  await page.goto(`/feelmyrythm/editor/${String(saved.id)}?source=local`);
+  await expect(
+    panel.getByRole('group', { name: '7마디 연주 표현' }).getByLabel('늘일 박', { exact: true }),
+  ).toHaveValue('2');
+  await expect(
+    panel
+      .getByRole('group', { name: '8마디 연주 표현' })
+      .getByRole('checkbox', { name: /재개 전 예비박/ }),
+  ).not.toBeChecked();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'measure-expressions.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ ...saved, id: 'imported-expression-map' })),
+  });
+  await expect(page.getByText('템포맵을 가져왔습니다.', { exact: true })).toBeVisible();
+  await page.locator('.editor-save-bar').getByRole('button', { name: '저장', exact: true }).click();
+  await expect.poll(async () => (await readCachedTempoMaps(page))[0]?.revision).toBe(3);
+  const imported = (await readCachedTempoMaps(page))[0]!;
+  expect(imported.id).toBe(saved.id);
+  expect(imported.measureExpressions).toEqual(saved.measureExpressions);
+  expect(imported.sections).toHaveLength(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: '메트로놈에서 열기' }).click();
+  await expect(page).toHaveURL(new RegExp(`tempoMap=${String(saved.id)}$`));
+  await expect(page.getByRole('heading', { name: '메트로놈', exact: true })).toBeVisible();
+});
+
 test('keeps the server authoritative online and requires an explicit save after a 409 rebase', async ({
   page,
 }) => {

@@ -340,7 +340,7 @@ export function PracticePage() {
   }
 
   return (
-    <div className="page page--narrow">
+    <div className="page page--narrow practice-page">
       <PageHeader
         eyebrow="Practice journal"
         title="연습일지"
@@ -350,7 +350,7 @@ export function PracticePage() {
             : '오프라인 개인 일지입니다. 로그인하면 프로젝트와 공유할 수 있습니다.'
         }
       />
-      <Card>
+      <Card className="practice-compose">
         <form className="practice-form" onSubmit={(event) => void createLog(event)}>
           <label>
             <span className="practice-form__label-row">
