@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown';
+import { memo } from 'react';
 
 function safeHref(href: string | undefined): string | undefined {
   if (!href) return undefined;
@@ -18,7 +19,7 @@ function safeHref(href: string | undefined): string | undefined {
   }
 }
 
-export function MarkdownContent({ children }: { children: string }) {
+export const MarkdownContent = memo(function MarkdownContent({ children }: { children: string }) {
   return (
     <div className="markdown-content">
       <ReactMarkdown
@@ -43,4 +44,4 @@ export function MarkdownContent({ children }: { children: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

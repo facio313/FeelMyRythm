@@ -17,7 +17,6 @@
     "@feelmyrythm/mobile": "workspace:*",
     "@feelmyrythm/protocol": "workspace:*",
     "@feelmyrythm/ui": "workspace:*",
-    "@radix-ui/react-tabs": "^1.1.21",
     "@tailwindcss/vite": "^4.3.3",
     "fflate": "^0.8.3",
     "idb": "^8.0.3",
@@ -30,8 +29,7 @@
     "react-router-dom": "^7.18.2",
     "tailwindcss": "^4.3.3",
     "vite-plugin-pwa": "^1.3.0",
-    "workbox-window": "^7.4.0",
-    "zustand": "^5.0.15"
+    "workbox-window": "^7.4.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",

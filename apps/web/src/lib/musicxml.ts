@@ -1,5 +1,9 @@
 import type { TempoMap, TempoSection } from '@feelmyrythm/core';
-import { unzipSync } from 'fflate';
+import { unzip, unzipSync, type UnzipFileInfo } from 'fflate';
+
+const MAX_MUSIC_XML_BYTES = 50 * 1024 * 1024;
+const MAX_CONTAINER_BYTES = 64 * 1024;
+const MAX_ARCHIVE_ENTRIES = 2048;
 
 const text = (element: Element | null, selector: string): string | null =>
   element?.querySelector(selector)?.textContent?.trim() ?? null;
@@ -7,24 +11,48 @@ const text = (element: Element | null, selector: string): string | null =>
 const optionalNumber = (value: string | null): number =>
   value === null || value === '' ? Number.NaN : Number(value);
 
-function decodeMusicXml(bytes: Uint8Array): string {
-  const files = unzipSync(bytes);
-  const container = files['META-INF/container.xml'];
-  let target = Object.keys(files).find(
-    (name) => name.endsWith('.musicxml') || name.endsWith('.xml'),
+async function decodeMusicXml(bytes: Uint8Array): Promise<string> {
+  const entries = new Map<string, UnzipFileInfo>();
+  // Inspect the central directory without inflating images, audio or other scores.
+  unzipSync(bytes, {
+    filter(entry) {
+      if (entries.size >= MAX_ARCHIVE_ENTRIES || entries.has(entry.name)) {
+        throw new Error('MXL 항목이 너무 많거나 파일 이름이 중복됩니다.');
+      }
+      entries.set(entry.name, entry);
+      return false;
+    },
+  });
+  const extract = (name: string, limit: number): Promise<string> => {
+    const entry = entries.get(name);
+    if (!entry) throw new Error('MXL에 지정된 MusicXML 파일이 없습니다.');
+    if (entry.originalSize > limit) throw new Error('MXL 압축 해제 크기 제한을 초과했습니다.');
+    return new Promise((resolve, reject) => {
+      unzip(bytes, { filter: (file) => file.name === name }, (error, files) => {
+        if (error) reject(error);
+        else resolve(new TextDecoder().decode(files[name]));
+      });
+    });
+  };
+  let target = [...entries.keys()].find(
+    (name) => !/^META-INF\//i.test(name) && /\.(musicxml|xml)$/i.test(name),
   );
-  if (container) {
+  if (entries.has('META-INF/container.xml')) {
     const containerXml = new DOMParser().parseFromString(
-      new TextDecoder().decode(container),
+      await extract('META-INF/container.xml', MAX_CONTAINER_BYTES),
       'application/xml',
     );
+    if (containerXml.querySelector('parsererror')) {
+      throw new Error('MXL container.xml 문법을 확인해 주세요.');
+    }
     target = containerXml.querySelector('rootfile')?.getAttribute('full-path') ?? target;
   }
-  if (!target || !files[target]) throw new Error('MXL에 MusicXML 악보가 없습니다.');
-  return new TextDecoder().decode(files[target]);
+  if (!target || /^META-INF\//i.test(target)) throw new Error('MXL에 MusicXML 악보가 없습니다.');
+  return extract(target, MAX_MUSIC_XML_BYTES);
 }
 
 export async function readMusicXml(file: File): Promise<string> {
+  if (file.size > MAX_MUSIC_XML_BYTES) throw new Error('MusicXML 파일은 50 MiB 이하여야 합니다.');
   if (file.name.toLowerCase().endsWith('.mxl')) {
     return decodeMusicXml(new Uint8Array(await file.arrayBuffer()));
   }
@@ -115,14 +143,59 @@ export function musicXmlToTempoMap(xml: string, title = 'MusicXML'): TempoMap {
   };
 }
 
-export async function renderMusicXml(container: HTMLElement, xml: string): Promise<void> {
-  container.replaceChildren();
+export async function renderMusicXml(
+  container: HTMLElement,
+  xml: string,
+  signal: AbortSignal,
+  onError: (error: unknown) => void,
+): Promise<void> {
   const { OpenSheetMusicDisplay } = await import('opensheetmusicdisplay');
-  const renderer = new OpenSheetMusicDisplay(container, {
-    autoResize: true,
+  if (signal.aborted) return;
+  const surface = document.createElement('div');
+  container.replaceChildren(surface);
+  const renderer = new OpenSheetMusicDisplay(surface, {
+    // OSMD 2.1.2 has no dispose(): its window resize listener cannot be removed.
+    autoResize: false,
     backend: 'svg',
     drawingParameters: 'compacttight',
   });
-  await renderer.load(xml);
-  renderer.render();
+  let frame: number | undefined;
+  let observer: ResizeObserver | undefined;
+  const cleanup = () => {
+    signal.removeEventListener('abort', cleanup);
+    observer?.disconnect();
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    renderer.clear();
+    surface.remove();
+  };
+  signal.addEventListener('abort', cleanup, { once: true });
+  try {
+    await renderer.load(xml);
+    if (signal.aborted) {
+      // load() may finish after cleanup and repopulate the instance's sheet.
+      renderer.clear();
+      return;
+    }
+    renderer.render();
+    let width = container.clientWidth;
+    observer = new ResizeObserver(() => {
+      if (signal.aborted || container.clientWidth === width) return;
+      width = container.clientWidth;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (signal.aborted) return;
+        try {
+          renderer.render();
+        } catch (error) {
+          cleanup();
+          onError(error);
+        }
+      });
+    });
+    observer.observe(container);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }

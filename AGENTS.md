@@ -202,6 +202,8 @@ anthropic ──┘
 - PDF·이미지 OMR은 revision에 묶인 persistent `OmrDraftJob`으로 Audiveris를 bounded background worker에서 실행한다. worker는 pending job을 원자 claim하고 timeout을 넘긴 orphan만 복구해 rolling startup이 다른 인스턴스의 정상 작업을 되돌리지 않는다. 결과는 정규화된 마디 영역의 best-effort 초안이며 기존 `MeasureMap`을 자동으로 덮어쓰지 않는다. 사용자가 미리보기 후 명시적으로 저장할 때도 시작 시점 revision으로 충돌을 검사한다.
 - 악보 좌표는 zoom과 무관한 score page surface 기준 0–1 정규화 값이다. 펜의 저장 좌표는 0–1로 유지하되 표시 선은 `non-scaling-stroke`로 zoom과 무관한 3 CSS px 두께를 사용한다. 재생 중 수동 페이지 이동은 auto-follow를 멈추고 명시적인 resume CTA를 제공한다. 독립 악보 화면의 compact 도구는 `top: auto`로 상단 위치를 해제한 고정 하단 overlay이고, 세션 안에 표시한 악보 도구는 일반 문서 흐름에 둔다. 독립 악보 재생 바는 재생 중이며 보기 모드일 때만 본문 상단 sticky이고, 정지·매핑·필기 중에는 일반 흐름에 둔다. 폭 600px 이상은 압축된 2열로 배치하고 재생 중에는 템포맵 연결 상세를 숨긴다. 세션 악보의 박·조작은 상단 sticky를 유지하며 520px 이상 무대는 압축된 2열을 사용한다. 세션 악보의 마디 선택은 화면 탐색만 바꾸며 방의 transport를 바꾸지 않는다.
 
+- **악보 렌더러 수명** — PDF.js 문서는 선택 Blob당 한 번 열고 페이지·폭·DPR 변경은 같은 문서를 재사용한다. 페이지 전환은 이전 RenderTask를 취소하고 문서 교체·이탈은 worker를 destroy한다. OSMD 2.1.2는 제거 API 없는 전역 autoResize를 끄고 앱 소유 ResizeObserver와 취소 신호로 폭 변경·clear를 관리한다. MXL은 중앙 디렉터리만 먼저 조사하고 container와 선택한 악보만 비동기로 해제한다. 브라우저 입력·악보 XML은 각각 50 MiB, container 64 KiB, ZIP 항목 2048개를 상한으로 둔다. 이미지 Blob URL은 render에서 만들지 않고 effect에서 생성·src 적용·revoke를 함께 소유한다.
+
 ### Application UX and install surface
 
 - AppShell의 본문 scroller는 history entry별 위치를 보존해 POP 탐색에서 복원하고, 새 탐색은 맨 위에서 시작한다. 페이지 전환 후 `h1`으로 focus를 이동하며 browser POP은 모바일 더보기 overlay를 닫는다.

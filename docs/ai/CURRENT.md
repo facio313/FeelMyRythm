@@ -1,3 +1,13 @@
+## 라이브러리 개선 운영 배포 — 진행 중 (2026-11-12)
+
+- 요청: 라이브러리 개선의 커밋·푸시·운영 배포까지 완료한다. codex에서 이번 개선만 별도 커밋하고 main으로 통합한다. dev와 기존 main worktree를 변경하지 않으며 기존 미커밋 템포맵·화면·코드 읽기 문서는 작업 트리에 보존한다.
+- 릴리스 범위: PDF 문서 재사용/렌더 취소/DPR 처리, OSMD 수명 정리, MXL 선택 비동기 해제/입력 제한, 이미지 Blob URL 회수, Markdown memo, 미사용 zustand/Radix Tabs 제거와 해당 문서/회귀만 포함한다. 서버 schema·API·migration·동기화·이전 화면 변경은 제외한다.
+- 근거: 전체 작업 트리는 Node 22.23.2에서 pnpm check(JS 504, 서버 173, 오디오 품질 9; DB/Redis 4 skipped), 관련 브라우저 5개, 모바일 web/자산 검사를 통과했다. 선택한 릴리스 tree의 관련 테스트 25개와 웹 타입 검사도 통과했다. 정확한 main SHA의 Validate 및 후속 immutable ARM64 publish/제한 배포를 최종 근거로 삼는다.
+- 배포/복구: 기존 GitHub Actions → 제한 SSH 배포기를 사용한다. DB backup·target canary·strict target-head 검증·서버/웹 실제 이미지 일치를 확인한다. migration 이후 server image-only rollback은 금지하며 실패 시 forward-fix한다. 공개 health와 배포 SHA를 확인한 뒤 결과를 갱신한다.
+- 환경: 원본의 dataless 파일 때문에 별도 checkout에서 통합·검증하되 원본 worktree/사용자 데이터는 보존한다. 운영 secret·DB·volume·SSO 설정은 변경하지 않는다.
+
+---
+
 # 사용성·UI·기능 통합 개선 — 2026-09-28
 
 - 목표: 실제 브라우저 조작으로 기존 감사 결함과 추가 핵심 흐름의 사용성 문제를 확인·수정한다. 모바일/패드/웹의 박 가독성, 구간별 박자·BPM 편집 후 악보/메트로놈 재생, 여러 참가자의 동기 연습을 연결한다.
