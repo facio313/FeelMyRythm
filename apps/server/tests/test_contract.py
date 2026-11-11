@@ -625,7 +625,7 @@ def test_portfolio_auth_contract_is_injected_into_builds_and_containers() -> Non
     assert "/etc/portfolio-auth-build" in web_dockerfile
     assert "portfolio-auth-mode check" in web_runtime_contract
     assert (repository_root / "apps/web/docker/40-validate-portfolio-auth.sh").stat().st_mode & 0o111
-    assert '"portfolio-auth:check": "scripts/test-portfolio-auth-mode.sh"' in package_manifest
+    assert '"portfolio-auth:check": "scripts/test-portfolio-auth-mode.sh && scripts/test-require-dev.sh"' in package_manifest
     assert (
         '"dev": "PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- '
         'corepack pnpm --filter @feelmyrythm/web dev"'

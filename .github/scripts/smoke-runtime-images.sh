@@ -147,7 +147,7 @@ docker exec "$server_container" sh -c \
 [[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.branch" }}' "$SERVER_RUNTIME_IMAGE")" == "$PORTFOLIO_BRANCH" ]]
 [[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.auth-mode" }}' "$SERVER_RUNTIME_IMAGE")" == "$PORTFOLIO_AUTH_MODE" ]]
 if server_resolver_failure="$(docker run --rm \
-  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_BRANCH=dev \
   --env PORTFOLIO_AUTH_MODE=local \
   "$SERVER_RUNTIME_IMAGE" 2>&1)"; then
   echo "Server runtime resolver accepted an auth contract different from its build." >&2
@@ -155,7 +155,7 @@ if server_resolver_failure="$(docker run --rm \
 fi
 grep -Fq 'does not match image' <<<"$server_resolver_failure"
 if server_contract_failure="$(docker run --rm \
-  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_BRANCH=dev \
   --env PORTFOLIO_AUTH_MODE=local \
   --entrypoint python \
   "$SERVER_RUNTIME_IMAGE" \
@@ -213,7 +213,7 @@ docker exec "$web_container" nginx -t >/dev/null
 [[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.branch" }}' "$WEB_RUNTIME_IMAGE")" == "$PORTFOLIO_BRANCH" ]]
 [[ "$(docker image inspect --format '{{ index .Config.Labels "work.bonifacio.portfolio.auth-mode" }}' "$WEB_RUNTIME_IMAGE")" == "$PORTFOLIO_AUTH_MODE" ]]
 if web_contract_failure="$(docker run --rm \
-  --env PORTFOLIO_BRANCH=runtime-smoke \
+  --env PORTFOLIO_BRANCH=dev \
   --env PORTFOLIO_AUTH_MODE=local \
   "$WEB_RUNTIME_IMAGE" 2>&1)"; then
   echo "Web runtime image accepted an auth contract different from its bundle." >&2

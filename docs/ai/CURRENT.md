@@ -6,6 +6,7 @@
 - Canonical authentication mapping: main=sso, dev=local, other branches rejected. Actual dev checkout guards local commands; CI validates main/dev and publishing/deployment accepts main only.
 - Replaced destructive worktree setup with a preserve-first dev setup. Updated AGENTS, README, OPERATIONS and environment guidance.
 - Validation: server 175 passed / 4 skipped (PostgreSQL and Redis integration services not configured); web auth contract 8 passed; shell auth/actual-dev guards and changed Python lint passed. Original-worktree migration is in progress. Original main/cursor file reads have timed out; their unknown local edits have not been overwritten or deleted.
+- CI follow-up corrected obsolete e2e/OpenAPI fixture branch labels and the expanded shell-check assertion. Contract tests (22), OpenAPI byte equality and dev web build pass. Full CI is rerunning on the corrective commit.
 - Fleet records and rollback bundles: ~/.local/share/cks-main-dev-migration/2026-11-12/.
 
 ## Prior completed release
