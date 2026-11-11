@@ -554,6 +554,22 @@ b881b6589baa  initial schema
 - 구형 `fmr-api` cache 삭제와 안전한 Service Worker 제어권 전환을 확인하기 전에는 앱을 마운트하지 않는다: [`pwaCache.ts`](../apps/web/src/lib/pwaCache.ts), [`main.tsx`](../apps/web/src/main.tsx).
 - 렌더러·공개 이미지 같은 비인증 정적 자산만 별도 cache한다.
 
+### 라이브러리 비용과 수명 (2026-11-12)
+
+| 라이브러리 | 실제 사용 경로와 판단 | 적용한 개선 |
+|---|---|---|
+| PDF.js 6.2.108 | PDF 해석·폰트·worker는 유지한다. 페이지마다 Blob 전체 읽기와 문서 생성을 반복하던 비용이 문제였다. | [`PdfPage`](../apps/web/src/components/PdfPage.tsx)가 문서 로드와 페이지 렌더를 분리한다. 폭/DPR/페이지 변경은 문서를 재사용하고 이전 RenderTask를 취소한다. 완료 페이지 graphics는 cleanup, 교체·이탈은 문서 task를 destroy한다. 고해상도 canvas 변환은 PDF.js의 `transform` 인수로 전달한다. |
+| OSMD 2.1.2 | 최신 온라인 문서의 dispose는 이 설치 버전에 없다. 내장 autoResize는 제거할 수 없는 window listener를 붙인다. | [`renderMusicXml`](../apps/web/src/lib/musicxml.ts)는 autoResize를 끄고 폭 변경만 관찰한다. AbortSignal로 observer·예약 frame·sheet를 정리하고 인스턴스마다 별도 surface를 사용해 늦은 load가 새 악보를 덮지 않게 한다. |
+| fflate 0.8.3 | 압축 알고리즘은 유지한다. 모든 항목을 동기 해제하던 호출을 바꾼다. | unzipSync의 filter=false로 목록만 조사한 뒤 container와 선택 XML만 unzip의 비동기 경로로 해제한다. 입력/선택 XML 50 MiB, container 64 KiB, 항목 2048개 제한과 중복 이름 검증을 적용한다. META-INF XML을 악보로 선택하지 않는다. |
+| 브라우저 Blob URL | 렌더 중 URL을 생성하면 StrictMode에서 버려진 렌더의 URL이 남을 수 있다. | [`ScoreImage`](../apps/web/src/components/ScoreImage.tsx)의 effect가 이미지 src와 URL 수명을 함께 소유한다. 교체·이탈 시 revoke하며 별도 상태 갱신 없이 표시한다. |
+| react-markdown 10.1.0 | Markdown 문법과 안전한 출력 처리는 유지한다. | [`MarkdownContent`](../apps/web/src/components/MarkdownContent.tsx)를 memo화해 문자열 내용이 같은 부모 갱신에서 재파싱을 생략한다. |
+| zustand / Radix Tabs | 현재 소스의 런타임 import가 없다. 인증은 AuthProvider, 악보 탭은 기존 직접 구현을 사용한다. | 직접 의존성과 더 이상 필요한 곳이 없는 전이 의존성을 lockfile에서 제거한다. 기존 번들에서도 사용되지 않았으므로 브라우저 크기 절감으로 주장하지 않는다. |
+| idb / Radix Dialog·Toast / React Router / Capacitor | IndexedDB transaction·접근성·탐색·플랫폼 경계를 담당한다. | 교체의 성능 이득이 확인되지 않아 유지한다. Python의 SQLAlchemy/FastAPI·bcrypt·JWT·defusedxml도 정확성·보안 계약을 보존한다. |
+
+기존 미커밋 기능을 포함한 조사 시점 작업 트리의 production 빌드에서 `ScoresPage` chunk는 78.38 → 83.38 kB(gzip 24.52 → 26.36 kB)였다. 비동기 압축 해제와 수명 관리 코드가 추가된 비용이며 초기 entry 202.98 kB와 App 189.31 kB는 같은 크기다. 실제 Chromium의 2페이지 PDF에서 1→2페이지 이동과 폭 390px 변경 후 Blob 읽기·PDF worker 생성은 각각 1회였고 서로 다른 페이지 그림과 canvas 폭 변경을 확인했다. 큰 MXL의 실제 worker 해제와 OSMD SVG 표시/폭 재계산도 확인했다. 전체 표시 시간·실기기 메모리의 백분율 개선으로 해석하지 않는다.
+
+PDF.js와 OSMD는 기존 dynamic import와 PWA renderer cache 경계를 유지한다. 큰 번들의 최초 다운로드/파싱 비용이 없어지는 것은 아니다. 회귀는 [PDF 수명 테스트](../apps/web/src/components/PdfPage.test.tsx), [OSMD 수명 테스트](../apps/web/src/lib/musicxml-renderer.test.ts), [MXL 선택 해제 테스트](../apps/web/src/test/musicxml.test.ts)로 확인한다. 호출 횟수 검증과 실기기에서의 전체 표시 시간·메모리 측정은 구분한다.
+
 ## 12. 악보 객체의 생명주기
 
 악보 metadata와 객체 저장소는 한 트랜잭션으로 묶을 수 없기 때문에 staging과 durable outbox를 사용한다.

@@ -404,6 +404,8 @@ sequenceDiagram
 | PDF/이미지 | 수동 매핑 기본 + 서버측 OMR(Audiveris) 초안 보조 | PDF.js | persistent job·bounded worker·원자 claim/orphan 복구, revision 고정, OMR은 베스트 에포트로 고지하고 자동 저장 금지 |
 | 이미지 (스캔/사진) | PDF와 동일 | 이미지 뷰어 | |
 
+PDF.js 문서는 선택한 Blob의 수명 동안 재사용하며 페이지 이동은 현재 렌더만 취소한다. 폭·device pixel ratio 변경은 새 canvas를 그리되 문서/worker를 재생성하지 않는다. OSMD 2.1.2는 `autoResize: false`로 생성하고 앱 소유 ResizeObserver가 실제 폭 변경만 묶어 그린다. 이탈·악보 교체 시 observer·예약 frame·sheet를 정리하고 늦게 끝난 load는 새 표면을 덮지 않는다. 브라우저 MXL은 ZIP 목록만 먼저 읽어 container와 선택한 XML만 비동기로 해제하며, 입력/악보 XML 50 MiB·container 64 KiB·항목 2048개 제한을 적용한다. 서버의 별도 XML/압축비 검증은 유지한다.
+
 - **수동 마디 매핑 도구**: 시스템(단) 단위로 드래그 → 마디 경계선 클릭으로 분할 → 마디 번호 자동 부여(시작 번호·못갖춘마디 보정 가능). 페이지당 1분 내 작업이 목표. 결과물이 `MeasureMap`.
 
 ```ts

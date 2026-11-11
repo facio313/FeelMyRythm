@@ -108,8 +108,8 @@ graph LR
 |---|---|
 | 업로드 | final과 분리된 presigned staging 업로드, PDF/이미지/MusicXML 타입 감지. complete는 멱등 promote 뒤 `ready`+staging 삭제 outbox를 원자 commit하고, stale pending reaper·late-write guard가 client 실패를 회수하며 악보 수는 `ready`만 집계 |
 | 저장 backend | DB에는 물리 경로가 아닌 backend-neutral object key·size·상태를 저장. 현재 단일 서버 운영은 Compose 밖에서 사전 생성한 external local volume을 사용하고, 다중 서버·off-host object storage가 필요할 때 같은 key 계약으로 S3를 선택 |
-| MusicXML | 파싱 → 마디 수·박자표·템포·도돌이 추출 → **템포맵 초안 자동 생성** (§7.1), OSMD 렌더링 |
-| PDF/이미지 | PDF.js 뷰어 + **수동 마디 매핑 도구**. pointer 좌표를 zoom과 무관한 score page surface 0–1 좌표로 저장. 로컬 악보에 저장된 템포맵을 연결하거나 `구간 편집`에서 첫 맵을 생성·연결 |
+| MusicXML | 파싱 → 마디 수·박자표·템포·도돌이 추출 → **템포맵 초안 자동 생성** (§7.1), OSMD 렌더링(앱 소유 resize/취소/clear), MXL 선택 비동기 해제·크기 제한 |
+| PDF/이미지 | PDF.js 문서 재사용·페이지 렌더 취소·폭/DPR 재렌더 + **수동 마디 매핑 도구**. pointer 좌표를 zoom과 무관한 score page surface 0–1 좌표로 저장. 로컬 악보에 저장된 템포맵을 연결하거나 `구간 편집`에서 첫 맵을 생성·연결 |
 | 원자적 저장 | `PUT /scores/:id/settings`로 metadata와 MeasureMap을 revision 검증 후 함께 저장. 최초 map 생성도 Score parent lock, 경합은 rollback + 409 |
 | 연동 | 독립 악보는 마디 선택 → 해당 마디부터 재생과 현재 마디·BPM·박자·박 카드 제공. 세션 내 악보는 route를 유지하고 방의 고정 revision·외부 transport를 받아 추적하며 자체 재생·seek를 만들지 않음. 수동 탐색은 auto-follow 중지 + resume CTA |
 | 파트보 | Score kind/instrument, 총보↔파트보 같은 마디 점프 (`measureNumberOffset`) |
