@@ -81,7 +81,7 @@ def test_production_settings_require_secret_postgres_and_migrations() -> None:
 
 def test_production_email_verification_configuration_fails_closed() -> None:
     base = {
-        "portfolio_branch": "release-candidate",
+        "portfolio_branch": "dev",
         "portfolio_auth_mode": "local",
         "environment": "production",
         "jwt_secret": "runtime-secret-with-at-least-32-characters",
@@ -280,7 +280,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     repository_root = Path(__file__).resolve().parents[3]
     example = (repository_root / ".env.example").read_text()
     configured = (
-        example.replace("PORTFOLIO_BRANCH=\n", "PORTFOLIO_BRANCH=test\n")
+        example.replace("PORTFOLIO_BRANCH=\n", "PORTFOLIO_BRANCH=dev\n")
         .replace("PORTFOLIO_AUTH_MODE=\n", "PORTFOLIO_AUTH_MODE=local\n")
         .replace(
             "FMR_JWT_SECRET=\n",
@@ -296,7 +296,7 @@ def test_env_example_loads_as_the_production_settings_contract(tmp_path: Path) -
     settings = Settings(_env_file=runtime_env)
 
     assert settings.environment == "production"
-    assert settings.portfolio_branch == "test"
+    assert settings.portfolio_branch == "dev"
     assert settings.portfolio_auth_mode == "local"
     assert settings.deployment_profile == "standard"
     assert settings.sso_enabled is False
@@ -448,19 +448,19 @@ def test_portfolio_auth_contract_drives_and_checks_the_legacy_sso_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     edge_secret = "test-fmr-edge-secret-with-at-least-32-characters"
-    for branch in ("main", "dev", "refs/heads/main"):
+    for branch in ("main", "refs/heads/main"):
         settings = Settings(
             _env_file=None,
             portfolio_branch=branch,
             portfolio_auth_mode="sso",
             sso_edge_secret=edge_secret,
         )
-        assert settings.portfolio_branch in {"main", "dev"}
+        assert settings.portfolio_branch == "main"
         assert settings.sso_enabled is True
 
     local = Settings(
         _env_file=None,
-        portfolio_branch="feature/local-auth",
+        portfolio_branch="dev",
         portfolio_auth_mode="local",
     )
     assert local.sso_enabled is False
@@ -474,16 +474,21 @@ def test_portfolio_auth_contract_drives_and_checks_the_legacy_sso_adapter(
     with pytest.raises(ValidationError, match="FMR_SSO_ENABLED conflicts"):
         Settings(
             _env_file=None,
-            portfolio_branch="feature/local-auth",
+            portfolio_branch="dev",
             portfolio_auth_mode="local",
             sso_enabled=True,
         )
     with pytest.raises(ValidationError, match="FMR_SSO_EDGE_SECRET"):
         Settings(
             _env_file=None,
-            portfolio_branch="dev",
+            portfolio_branch="main",
             portfolio_auth_mode="sso",
         )
+
+    with pytest.raises(ValidationError, match="unsupported branch"):
+        Settings(_env_file=None, portfolio_branch="codex", portfolio_auth_mode="local")
+    with pytest.raises(ValidationError, match="requires PORTFOLIO_AUTH_MODE=local"):
+        Settings(_env_file=None, portfolio_branch="dev", portfolio_auth_mode="sso")
 
     monkeypatch.delenv("PORTFOLIO_BRANCH")
     monkeypatch.delenv("PORTFOLIO_AUTH_MODE")
@@ -510,14 +515,14 @@ def test_server_image_contract_cannot_be_changed_at_runtime(
     with pytest.raises(ValidationError, match="differs from the immutable server image"):
         Settings(
             _env_file=None,
-            portfolio_branch="runtime-smoke",
+            portfolio_branch="dev",
             portfolio_auth_mode="local",
         )
     with pytest.raises(ValidationError, match="differs from the immutable server image"):
         Settings(
             _env_file=None,
             portfolio_branch="dev",
-            portfolio_auth_mode="sso",
+            portfolio_auth_mode="local",
         )
 
     build_contract.write_text("main\nlocal\n", encoding="ascii")
@@ -558,7 +563,7 @@ def test_shared_portfolio_auth_resolver_is_pinned_and_executable() -> None:
     resolver_test = repository_root / "scripts/test-portfolio-auth-mode.sh"
 
     assert hashlib.sha256(resolver.read_bytes()).hexdigest() == (
-        "d9496aeee5b13b27324857e2c726a214b564a511ed0c046a2477865a72303c53"
+        "9c910936083560bbe81d40f4bc704bc3c4e8028bd33b4d1079b24c8ec8ba5dcb"
     )
     assert resolver.stat().st_mode & 0o111
     assert resolver_test.stat().st_mode & 0o111
@@ -593,7 +598,8 @@ def test_portfolio_auth_contract_is_injected_into_builds_and_containers() -> Non
     assert "PORTFOLIO_BRANCH: ${{ github.event.workflow_run.head_branch }}" in deploy
     assert "PORTFOLIO_BRANCH=${{ steps.portfolio_auth.outputs.branch }}" in deploy
     assert "PORTFOLIO_AUTH_MODE=${{ steps.portfolio_auth.outputs.auth_mode }}" in deploy
-    assert "branches:\n      - dev\n      - main" in deploy
+    assert "branches:\n      - main" in deploy
+    assert "head_branch == 'dev'" not in deploy
     assert deploy.count("if: github.event.workflow_run.head_branch == 'main'") == 3
     assert ":latest" not in deploy
     assert development_compose.count("PORTFOLIO_BRANCH:") >= 4

@@ -1,3 +1,15 @@
+# Current work — main/dev migration (2026-11-12)
+
+- User requested only main (production) and dev (development/local), latest remote main fetched first.
+- Baseline: origin/main f117da36c7b2b5fea87daa168b7114f7a0e2ca32; current production remains at that release.
+- Legacy cursor 6255209 history merged into dev without reviving the old page extraction or unvalidated join-code proposal. Validated main code remains authoritative; all original remote histories have a verified durable Git bundle.
+- Canonical authentication mapping: main=sso, dev=local, other branches rejected. Actual dev checkout guards local commands; CI validates main/dev and publishing/deployment accepts main only.
+- Replaced destructive worktree setup with a preserve-first dev setup. Updated AGENTS, README, OPERATIONS and environment guidance.
+- Validation: server 175 passed / 4 skipped (PostgreSQL and Redis integration services not configured); web auth contract 8 passed; shell auth/actual-dev guards and changed Python lint passed. Original-worktree migration is in progress. Original main/cursor file reads have timed out; their unknown local edits have not been overwritten or deleted.
+- Fleet records and rollback bundles: ~/.local/share/cks-main-dev-migration/2026-11-12/.
+
+## Prior completed release
+
 ## 통합 CI의 짧은 데스크톱 회귀 교정 — 로컬 검증 완료 (2026-11-12)
 
 - 첫 통합: codex `45fafe4`, main `d4b7986`. [Validate 43107679240](https://github.com/facio313/FeelMyRythm/actions/runs/43107679240)에서 서버 176 + 별도 PostgreSQL migration 3, protocol·Android·iOS·웹 단위/빌드는 통과했으나 전체 브라우저는 91개 통과·2개 실패했다. PWA와 운영 배포는 이 실패를 통과로 처리하지 않는다.

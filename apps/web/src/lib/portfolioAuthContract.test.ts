@@ -7,9 +7,7 @@ import {
 describe('portfolio auth build contract', () => {
   it.each([
     ['main', 'sso'],
-    ['dev', 'sso'],
-    ['codex', 'local'],
-    ['feature/auth-contract', 'local'],
+    ['dev', 'local'],
   ] as const)('maps %s to %s', (branch, expected) => {
     expect(expectedPortfolioAuthMode(branch)).toBe(expected);
     expect(
@@ -18,6 +16,10 @@ describe('portfolio auth build contract', () => {
         PORTFOLIO_AUTH_MODE: expected,
       }),
     ).toMatchObject({ branch, authMode: expected, managedLocalSso: false });
+  });
+
+  it.each(['codex', 'cursor', 'feature/auth-contract'])('rejects retired branch %s', (branch) => {
+    expect(() => expectedPortfolioAuthMode(branch)).toThrow(/unsupported branch/);
   });
 
   it('normalizes refs/heads branch input', () => {
@@ -33,7 +35,7 @@ describe('portfolio auth build contract', () => {
     expect(() => resolvePortfolioAuthBuildContract({ PORTFOLIO_AUTH_MODE: 'local' })).toThrow(
       /PORTFOLIO_BRANCH is required/,
     );
-    expect(() => resolvePortfolioAuthBuildContract({ PORTFOLIO_BRANCH: 'topic' })).toThrow(
+    expect(() => resolvePortfolioAuthBuildContract({ PORTFOLIO_BRANCH: 'dev' })).toThrow(
       /PORTFOLIO_AUTH_MODE must be sso or local/,
     );
     expect(() =>
@@ -62,7 +64,7 @@ describe('portfolio auth build contract', () => {
     ).toThrow(/VITE_FMR_SSO_ENABLED conflicts/);
     expect(() =>
       resolvePortfolioAuthBuildContract({
-        PORTFOLIO_BRANCH: 'feature/local',
+        PORTFOLIO_BRANCH: 'dev',
         PORTFOLIO_AUTH_MODE: 'local',
         VITE_FMR_MANAGED_LOCAL_SSO: 'true',
       }),

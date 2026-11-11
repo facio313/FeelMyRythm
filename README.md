@@ -40,9 +40,9 @@ uv sync --project apps/server --frozen --all-groups
 cp .env.example .env
 ```
 
-로컬 개발은 `.env`의 `FMR_ENVIRONMENT=development`, SQLite `FMR_DATABASE_URL`, `FMR_STORAGE_BACKEND=local`을 사용하세요. `.env`와 비밀값은 커밋하지 않습니다. 인증 mode는 branch에 고정됩니다. `main`/`dev`는 `sso`, 그 밖의 branch는 `local`이며 [`scripts/portfolio-auth-mode.sh`](scripts/portfolio-auth-mode.sh)가 명시값 → `GITHUB_REF_NAME` → 현재 Git branch 순으로 판정합니다. 명시한 mode가 branch와 다르면 실행하지 않습니다.
+로컬 개발은 `.env`의 `FMR_ENVIRONMENT=development`, SQLite `FMR_DATABASE_URL`, `FMR_STORAGE_BACKEND=local`을 사용하세요. `.env`와 비밀값은 커밋하지 않습니다. 인증 mode는 branch에 고정됩니다. `main`은 `sso`, `dev`는 `local`이며 다른 branch는 거부합니다. [`scripts/portfolio-auth-mode.sh`](scripts/portfolio-auth-mode.sh)가 명시값 → `GITHUB_REF_NAME` → 현재 Git branch 순으로 판정합니다. 명시한 mode가 branch와 다르면 실행하지 않습니다.
 
-독립적인 회원가입·로그인과 proxy 없는 직접 접근은 tool/feature branch에서 실행합니다. 아래 server 명령과 root `pnpm dev`는 `local`을 명시적으로 요청하므로 `main`/`dev`에서는 즉시 실패합니다. 보호 branch는 앱 전용 edge secret과 중앙 SSO edge를 준비한 배포 경로로만 실행합니다.
+모든 로컬 개발과 직접 로그인은 `dev`에서 실행합니다. 시작 전에 `git fetch origin main`으로 최신 운영 기준을 받고, 미커밋 작업을 보존한 상태에서 `git switch dev`와 `git merge origin/main`으로 반영합니다. root `pnpm dev`와 `pnpm dev:server`는 실제 checkout이 dev인지 확인하므로 환경변수로 main 실행을 우회할 수 없습니다. main은 중앙 SSO 배포 경로로만 실행합니다.
 
 ```bash
 PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- \
@@ -63,7 +63,7 @@ corepack pnpm test:e2e:pwa
 
 `check`는 공통 branch/auth resolver, Prettier, ESLint, TypeScript, Vitest, Ruff, mypy, pytest, 프로덕션 빌드를 순서대로 실행합니다. `FMR_SSO_ENABLED`와 `VITE_FMR_SSO_ENABLED`는 canonical mode의 선택적 호환 adapter이며, 명시할 때는 canonical 결과와 일치해야 합니다. 일반 Playwright와 PWA는 배포 산출물이 아닌 명시적 `e2e*/local` fixture로 로컬 로그인 UI를 검증하고, CI의 별도 `pnpm build`는 실제 source branch의 canonical mode를 검증합니다. 일반 Playwright는 `/feelmyrythm/` basename, 템포 편집, 목 WS 세션 시작을 확인합니다. 별도 PWA 게이트는 구형 Service Worker와 `fmr-api` 캐시를 실제 브라우저에 만들고 보안 worker로 교체하는 중에 발생한 마지막 legacy write까지 제거되는지 확인합니다.
 
-GitHub `Validate`의 JavaScript job은 프로젝트의 Playwright 버전과 일치하는 digest 고정 공식 브라우저 이미지에서 실행하므로 매 실행마다 Chromium과 시스템 의존성을 내려받지 않습니다. 모바일 job은 clean checkout에서 웹 번들이 의존하는 `core`·`audio` workspace package를 먼저 빌드한 뒤 Android/iOS 프로젝트를 동기화하고 native shell을 compile합니다. Android job은 Gradle 및 Capacitor의 Java 21 source level과 같은 Temurin JDK 21을 명시적으로 설치합니다. 서버와 protocol job은 서버 이미지와 같은 Python patch를 명시적으로 설치하며, 해당 patch를 지원하는 동일한 uv 버전을 사용합니다. 저장소 루트의 `.env.example`·운영 Compose 계약은 이 전체 checkout 검증에서 강제하고, 격리된 서버 이미지 테스트 단계는 서버 빌드 컨텍스트 안의 테스트만 다시 실행합니다. 배포가 승인되면 tool branch를 `main`으로 직접 통합하고 해당 SHA의 검증·이미지 게시·RPi 배포를 확인합니다. `dev`는 2026-09-21부터 사용하지 않는 과거 브랜치로 유지합니다. workflow에 남은 `dev` 조건은 운영 절차나 필수 검증 단계가 아닙니다. 어느 job이라도 실패하면 image publish와 RPi 배포는 실행되지 않습니다.
+GitHub `Validate`의 JavaScript job은 프로젝트의 Playwright 버전과 일치하는 digest 고정 공식 브라우저 이미지에서 실행하므로 매 실행마다 Chromium과 시스템 의존성을 내려받지 않습니다. 모바일 job은 clean checkout에서 웹 번들이 의존하는 `core`·`audio` workspace package를 먼저 빌드한 뒤 Android/iOS 프로젝트를 동기화하고 native shell을 compile합니다. Android job은 Gradle 및 Capacitor의 Java 21 source level과 같은 Temurin JDK 21을 명시적으로 설치합니다. 서버와 protocol job은 서버 이미지와 같은 Python patch를 명시적으로 설치하며, 해당 patch를 지원하는 동일한 uv 버전을 사용합니다. 저장소 루트의 `.env.example`·운영 Compose 계약은 이 전체 checkout 검증에서 강제하고, 격리된 서버 이미지 테스트 단계는 서버 빌드 컨텍스트 안의 테스트만 다시 실행합니다. 개발과 로컬 실행은 `dev`, 운영은 `main`만 사용합니다. 두 branch를 CI에서 검증하고, 배포가 승인되면 검증한 dev 변경을 main에 통합하여 해당 SHA의 이미지 게시·RPi 배포를 확인합니다. 이미지 게시와 운영 배포는 main만 허용합니다. 어느 job이라도 실패하면 image publish와 RPi 배포는 실행되지 않습니다.
 
 웹 PWA는 App을 보이기 전에 구형 인증 API 캐시를 fail-closed로 정리합니다. 삭제나 versioned Service Worker 제어권 전환을 확인할 수 없으면 보안 안내와 재시도만 표시하며, `/feelmyrythm/api/*`는 Service Worker와 nginx 모두에서 캐시하지 않습니다.
 

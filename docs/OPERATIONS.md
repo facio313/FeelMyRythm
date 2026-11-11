@@ -174,7 +174,7 @@ clean device에 설치한 뒤 cold/warm Universal/App Link, secure session 재�
 
 ## 7. RPi 복구 후 마지막 단계
 
-RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. Validate와 deploy workflow는 checkout의 실제 source branch를 `PORTFOLIO_BRANCH`로 주입하고 resolver가 만든 mode를 이후 step에 전달한다. 현재 릴리스는 승인된 tool branch를 `main`으로 직접 통합한다. `dev`는 2026-09-21부터 갱신·동기화·푸시·배포에 사용하지 않는다. workflow의 기존 `dev/sso` 이미지 검증 조건은 남아 있으나 운영 절차의 단계로 실행하지 않는다. main image build와 운영 Compose에는 `main/sso`가 모두 명시되어야 한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
+RPi가 복구되기 전에는 여기부터 완료로 표시하지 않는다. Validate가 성공한 정확한 main commit SHA의 immutable ARM64 image만 publish한다. Validate와 deploy workflow는 checkout의 실제 source branch를 `PORTFOLIO_BRANCH`로 주입하고 resolver가 만든 mode를 이후 step에 전달한다. 2026-11-12부터 개발·로컬 실행은 `dev/local`, 운영은 `main/sso`만 사용한다. 작업 전 최신 origin/main을 받아 dev에 통합하고, CI는 dev와 main을 검증한다. 승인된 릴리스만 dev에서 main으로 승격하며 이미지 게시·RPi 배포는 main에 한정한다. main image build와 운영 Compose에는 `main/sso`가 모두 명시되어야 한다. 게시 전 스모크는 digest 고정 PostgreSQL과 Redis를 격리 네트워크에 띄워 준비 상태를 확인하고, 그 정확한 server/web image가 migration·Redis 연결·health·non-root/read-only 경계·nginx SPA/API proxy를 모두 만족할 때만 GHCR에 push한다. forced command가 임의 명령을 거부하는지 아래 순서를 지키는지 확인한다.
 
 GitHub deploy job은 여러 저장소가 공유하는 host 전역 lock에서 최대 20분 대기할 수 있으므로 timeout을 40분으로 유지한다. 이 직렬화는 다른 Compose project가 동시에 변경되어 snapshot 검증이 무의미해지는 것을 막는다.
 

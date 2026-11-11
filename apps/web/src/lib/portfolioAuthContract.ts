@@ -17,7 +17,9 @@ function readBooleanAdapter(environment: BuildEnvironment, name: string): boolea
 }
 
 export function expectedPortfolioAuthMode(branch: string): PortfolioAuthMode {
-  return branch === 'main' || branch === 'dev' ? 'sso' : 'local';
+  if (branch === 'main') return 'sso';
+  if (branch === 'dev') return 'local';
+  throw new Error('unsupported branch; use dev for development or main for production');
 }
 
 export function resolvePortfolioAuthBuildContract(

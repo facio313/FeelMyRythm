@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Unit tests exercise local authentication unless a test constructs an explicit SSO contract.
-os.environ["PORTFOLIO_BRANCH"] = "test"
+os.environ["PORTFOLIO_BRANCH"] = "dev"
 os.environ["PORTFOLIO_AUTH_MODE"] = "local"
 
 from app.config import Settings

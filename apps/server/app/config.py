@@ -31,7 +31,11 @@ def _normalize_portfolio_branch(branch: str, *, source: str) -> str:
 
 
 def _expected_portfolio_auth_mode(branch: str) -> Literal["sso", "local"]:
-    return "sso" if branch in {"main", "dev"} else "local"
+    if branch == "main":
+        return "sso"
+    if branch == "dev":
+        return "local"
+    raise ValueError("unsupported branch; use dev for development or main for production")
 
 
 def _read_portfolio_build_contract() -> tuple[str, Literal["sso", "local"]] | None:

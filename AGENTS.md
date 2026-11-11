@@ -7,23 +7,12 @@
 
 ## ⚠️ Agent Authority Boundaries — MUST READ FIRST
 
-### 1. Branch Scope per Agent
+### 1. Shared main/dev workflow
 
-Each AI agent may only work within its own persistent tool branch by default.
-**`main` and `dev` branches are managed exclusively by the user.**
-
-| Branch      | Who controls it |
-| ----------- | --------------- |
-| `main`      | User only       |
-| `dev`       | User only       |
-| `anthropic` | Claude Code     |
-| `cursor`    | Cursor          |
-| `codex`     | OpenAI Codex    |
-
-- Agents **must not** commit, merge, or push to `main` or `dev` without an explicit user request.
-- When the user explicitly asks, agents may assist with `main`/`dev` operations.
-- Agents work directly on their persistent tool branch and must not create or switch to a feature branch unless the user explicitly requests one.
-- If the user explicitly requests a feature branch, it remains controlled by the corresponding agent and must be merged back into the persistent tool branch before completion unless the user asks to leave it separate.
+- `dev` is the shared development branch for every tool. Local app execution and implementation use `dev`.
+- `main` is the production baseline. Promote validated `dev` changes only when release is authorized.
+- Before work, fetch the latest `origin/main`, inspect and preserve local changes, and integrate main into dev.
+- Keep only `main` and `dev`; do not recreate codex/cursor/anthropic or feature branches. Preserve old unique history and dirty/untracked/ignored files before cleanup.
 
 ### 2. Shared Project Information → Always Update `AGENTS.md`
 
@@ -110,41 +99,31 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 
 ## Branch Strategy
 
-### Worktree Layout
+### Development and release
 
-| Directory                          | Branch      | AI Tool              |
-| ---------------------------------- | ----------- | -------------------- |
-| `FeelMyRythm/` (main repo)         | `main`      | — (release baseline) |
-| `FeelMyRythm/worktrees/codex/`     | `codex`     | OpenAI Codex         |
-| `FeelMyRythm/worktrees/cursor/`    | `cursor`    | Cursor               |
-| `FeelMyRythm/worktrees/anthropic/` | `anthropic` | Claude Code          |
+All tools share `dev`; `main` holds the production baseline. Directory names left from earlier tool worktrees do not determine the branch. Old worktrees with uncommitted data are preserved as archives and must not be used to run the app.
 
-### Flow
-
-```text
-codex ──────┐
-cursor ─────┤→ main
-anthropic ──┘
+```bash
+git fetch origin refs/heads/main:refs/remotes/origin/main
+git switch dev
+git merge origin/main
+# Implement and validate on dev, then push it.
+git push origin dev
 ```
 
-1. Work and commit directly on the assigned persistent tool branch.
-2. Push that tool branch after the relevant local validation.
-3. When the user explicitly authorizes a release, integrate the tool branch directly into `main` and push it. The exact main SHA must pass `Validate` before immutable images are published and deployed.
-4. Since 2026-09-21, `dev` is historical state: do not update, synchronize, push, or deploy it. Existing workflow conditions mentioning `dev` do not make it a release prerequisite. Preserve its refs.
+Promote reviewed changes from dev to main only within release authorization. `scripts/setup-worktrees.sh` prepares dev without deleting directories or resetting branches.
 
 ### Branch-bound authentication
 
-- 저장소 공통 계약은 `PORTFOLIO_BRANCH`와 `PORTFOLIO_AUTH_MODE=sso|local`이다. `main`과 `dev`는 반드시 `sso`, 그 밖의 모든 branch는 반드시 `local`이며 명시값이 이 매핑과 다르면 시작·빌드·배포를 실패시킨다.
+- 저장소 공통 계약은 `PORTFOLIO_BRANCH`와 `PORTFOLIO_AUTH_MODE=sso|local`이다. `main`은 반드시 `sso`, `dev`는 반드시 `local`이며 다른 branch는 거부한다. 명시값이 이 매핑과 다르면 시작·빌드·배포를 실패시킨다.
 - canonical resolver는 byte-pinned [`scripts/portfolio-auth-mode.sh`](scripts/portfolio-auth-mode.sh)이다. branch source 우선순위는 명시적 `PORTFOLIO_BRANCH` → `GITHUB_REF_NAME` → 현재 Git branch이고, `print`, `check`, `exec -- <command>` 인터페이스를 유지한다. detached checkout과 packaged/container build는 branch를 명시적으로 주입한다.
-- 로컬 checkout의 server, Vite, Compose 명령은 resolver의 `exec`를 통하거나 root package script를 사용한다. root `pnpm dev`는 local mode를 명시적으로 요청하므로 `main`/`dev`에서 fail-closed한다. 보호 branch에서 local 인증을 억지로 켜지 말고 중앙 edge와 앱 전용 secret을 준비한다. 독립적인 local 가입·로그인·직접 접근은 tool/feature branch에서 검증한다.
+- 로컬 checkout의 server, Vite, Compose 명령은 resolver의 `exec`를 통하거나 root package script를 사용한다. root `pnpm dev`와 `pnpm dev:server`는 실제 Git checkout이 `dev`인지 먼저 검사한다. 환경변수로 main checkout의 로컬 실행을 우회하지 않는다. 독립적인 local 가입·로그인·직접 접근은 dev에서 검증하고, main은 중앙 edge와 앱 전용 secret을 준비한 운영 경로에서만 실행한다.
 - `FMR_SSO_ENABLED`와 `VITE_FMR_SSO_ENABLED`는 canonical mode의 호환 adapter일 뿐이다. 생략하면 canonical mode를 따르고, 명시하면 정확히 일치해야 한다. `FMR_DEPLOYMENT_PROFILE=managed_local_sso`와 `VITE_FMR_MANAGED_LOCAL_SSO=true`는 SSO mode에서만 허용한다.
 - CI는 checkout 이후 실제 source branch를 resolver에 명시하고, server/web image build arg와 runtime Compose 환경에도 branch와 resolved mode를 모두 전달한다.
 
-### Naming Rules
+### Branch names
 
-- Tool branches: `codex`, `cursor`, `anthropic`
-- Feature branches are exceptional and require an explicit user request. When requested, use `{tool}-feature-{kebab-case-feature}` — e.g. `cursor-feature-sync-session`.
-- English kebab-case only.
+Use only `main` and `dev` unless the user explicitly changes this policy.
 
 ---
 

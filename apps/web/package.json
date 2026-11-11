@@ -9,7 +9,8 @@
     "build:e2e": "tsc -b && vite build --mode e2e",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "test": "vitest run",
+    "predev": "../../scripts/require-dev.sh"
   },
   "dependencies": {
     "@feelmyrythm/audio": "workspace:*",

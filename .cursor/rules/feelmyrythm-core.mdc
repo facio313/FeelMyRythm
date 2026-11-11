@@ -12,4 +12,4 @@ alwaysApply: true
 - **오디오**: 클릭/시각은 오디오 클럭 기준. `packages/core`에 DOM 의존성 금지.
 - **`.env` 커밋 금지**. 키 하드코딩 금지.
 - **브랜치**: `{tool}/feature` → `{tool}` → `dev` → `main`. 영문 kebab-case만.
-- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor/*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.
+- 모든 도구는 `dev`에서 개발·로컬 실행한다. 작업 전 최신 `origin/main`을 받고 변경을 보존하며 dev에 통합한다. `main`은 승인된 운영 릴리스만 올린다. 도구별 브랜치는 만들지 않는다.

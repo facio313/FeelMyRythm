@@ -1,36 +1,19 @@
 #!/usr/bin/env bash
-# FeelMyRythm — Pilgrimage-style agent worktrees
-# Usage: ./scripts/setup-worktrees.sh
+# Prepare the shared dev branch without removing any existing worktree or local data.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
-git fetch origin
-
-mkdir -p worktrees
-
-for b in cursor codex anthropic; do
-  if git worktree list --porcelain | grep -q "worktrees/$b"; then
-    echo "remove existing worktree: worktrees/$b"
-    git worktree remove --force "worktrees/$b" || true
-    rm -rf "worktrees/$b"
-  fi
-  if ! git show-ref --verify --quiet "refs/heads/$b"; then
-    git branch "$b" "origin/$b" 2>/dev/null || git branch "$b" origin/main
-  else
-    git branch -f "$b" "origin/$b" 2>/dev/null || git branch -f "$b" origin/main
-  fi
-  git worktree add "worktrees/$b" "$b"
-  git -C "worktrees/$b" branch --set-upstream-to="origin/$b" "$b" 2>/dev/null || true
-  echo "ready: worktrees/$b ($b)"
-done
-
-if ! git show-ref --verify --quiet refs/heads/dev; then
-  git branch dev origin/dev 2>/dev/null || git branch dev origin/main
+git fetch origin refs/heads/main:refs/remotes/origin/main
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Preserve and commit the current changes before switching or integrating dev." >&2
+  exit 1
 fi
-
-echo
-git worktree list
-echo
-git branch -vv
+if git show-ref --verify --quiet refs/heads/dev; then
+  git switch dev
+elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+  git switch --track -c dev origin/dev
+else
+  git switch -c dev origin/main
+fi
+git merge --no-edit origin/main
+printf '%s\n' 'Ready: dev for local development; main is the production baseline.'

@@ -21,14 +21,16 @@
     "test:coverage": "corepack pnpm -r --if-present test:coverage",
     "test:e2e": "scripts/portfolio-auth-mode.sh exec -- playwright test",
     "test:e2e:pwa": "scripts/portfolio-auth-mode.sh exec -- playwright test --config=e2e/pwa.config.ts",
-    "portfolio-auth:check": "scripts/test-portfolio-auth-mode.sh",
+    "portfolio-auth:check": "scripts/test-portfolio-auth-mode.sh && scripts/test-require-dev.sh",
     "server:lint": "uv run --project apps/server ruff format --check apps/server && uv run --project apps/server ruff check apps/server && uv run --project apps/server mypy --config-file apps/server/pyproject.toml apps/server/app apps/server/scripts/production_preflight.py",
     "server:test": "uv run --project apps/server pytest apps/server/tests",
     "audio-quality:check": "python3 -m unittest discover -s scripts/audio_quality/tests -p 'test_*.py' && uv run --project apps/server ruff format --check scripts/audio_quality && uv run --project apps/server ruff check scripts/audio_quality && uv run --project apps/server mypy --config-file apps/server/pyproject.toml scripts/audio_quality",
     "production:preflight": "uv run --project apps/server python apps/server/scripts/production_preflight.py --pretty",
     "protocol:generate": "uv run --project apps/server python apps/server/scripts/export_openapi.py && openapi-typescript apps/server/openapi.json -o packages/protocol/src/openapi.ts",
     "protocol:check": "corepack pnpm protocol:generate && git diff --exit-code -- apps/server/openapi.json packages/protocol/src/openapi.ts",
-    "check": "corepack pnpm portfolio-auth:check && corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm server:lint && corepack pnpm server:test && corepack pnpm audio-quality:check && corepack pnpm build"
+    "check": "corepack pnpm portfolio-auth:check && corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm server:lint && corepack pnpm server:test && corepack pnpm audio-quality:check && corepack pnpm build",
+    "predev": "scripts/require-dev.sh",
+    "dev:server": "scripts/require-dev.sh && PORTFOLIO_BRANCH=dev PORTFOLIO_AUTH_MODE=local scripts/portfolio-auth-mode.sh exec -- uv run --project apps/server uvicorn app.main:app --app-dir apps/server --reload"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
