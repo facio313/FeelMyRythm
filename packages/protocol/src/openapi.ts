@@ -2147,6 +2147,13 @@ export interface components {
             /** Beats */
             beats: number;
         };
+        /** TempoMapBreath */
+        TempoMapBreath: {
+            /** Countin */
+            countIn: boolean;
+            /** Durationsec */
+            durationSec: number;
+        };
         /** TempoMapCoda */
         TempoMapCoda: {
             /** Codameasure */
@@ -2210,6 +2217,8 @@ export interface components {
             id: string;
             /** Jumps */
             jumps: (components["schemas"]["TempoMapRepeat"] | components["schemas"]["TempoMapDaCapo"] | components["schemas"]["TempoMapDalSegno"] | components["schemas"]["TempoMapCoda"])[];
+            /** Measureexpressions */
+            measureExpressions?: components["schemas"]["TempoMapMeasureExpression"][] | null;
             /** Repertoireitemid */
             repertoireItemId: string;
             /** Revision */
@@ -2218,6 +2227,33 @@ export interface components {
             sections: components["schemas"]["TempoMapSection"][];
             /** Totalmeasures */
             totalMeasures: number;
+        };
+        /** TempoMapFermata */
+        TempoMapFermata: {
+            /** Beat */
+            beat?: number | null;
+            /** Extrabeats */
+            extraBeats: number;
+        };
+        /** TempoMapMeasureExpression */
+        TempoMapMeasureExpression: {
+            breath?: components["schemas"]["TempoMapBreath"] | null;
+            fermata?: components["schemas"]["TempoMapFermata"] | null;
+            /** Measure */
+            measure: number;
+            tempoChange?: components["schemas"]["TempoMapMeasureTempoChange"] | null;
+        };
+        /** TempoMapMeasureTempoChange */
+        TempoMapMeasureTempoChange: {
+            /** Endmeasure */
+            endMeasure?: number | null;
+            /** Targetbpm */
+            targetBpm: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "rit" | "accel" | "aTempo";
         };
         /** TempoMapOut */
         TempoMapOut: {
@@ -2263,8 +2299,10 @@ export interface components {
             beatUnit: "whole" | "dottedWhole" | "half" | "dottedHalf" | "quarter" | "dottedQuarter" | "eighth" | "dottedEighth" | "sixteenth" | "dottedSixteenth" | "thirtySecond";
             /** Bpm */
             bpm: number;
+            breath?: components["schemas"]["TempoMapBreath"] | null;
             /** Endmeasure */
             endMeasure: number;
+            fermata?: components["schemas"]["TempoMapFermata"] | null;
             /** Id */
             id: string;
             /** Label */
@@ -2284,7 +2322,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "rit" | "accel";
+            type: "rit" | "accel" | "aTempo";
         };
         /** TempoMapTimeSignature */
         TempoMapTimeSignature: {

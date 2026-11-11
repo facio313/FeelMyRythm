@@ -246,8 +246,19 @@ export function AppShell() {
         </nav>
         <nav className="sidebar__legal" aria-label="개인정보와 계정">
           {visibleLegalNavigation.map(({ to, label }) => (
-            <Link key={to} to={to} aria-current={pathname === to ? 'page' : undefined}>
-              {label}
+            <Link
+              key={to}
+              to={to}
+              aria-current={pathname === to ? 'page' : undefined}
+              aria-label={label}
+              title={label}
+            >
+              {to === '/privacy' ? (
+                <ShieldCheck size={18} aria-hidden />
+              ) : (
+                <UserRound size={18} aria-hidden />
+              )}
+              <span>{label}</span>
             </Link>
           ))}
         </nav>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
@@ -277,8 +278,31 @@ class TempoMapTimeSignature(TempoMapContractModel):
 
 
 class TempoMapTempoChange(TempoMapContractModel):
-    type: Literal["rit", "accel"]
-    target_bpm: float = Field(gt=0)
+    type: Literal["rit", "accel", "aTempo"]
+    target_bpm: float = Field(gt=0, allow_inf_nan=False)
+
+
+class TempoMapMeasureTempoChange(TempoMapTempoChange):
+    end_measure: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+
+
+class TempoMapFermata(TempoMapContractModel):
+    extra_beats: float = Field(gt=0, le=16, allow_inf_nan=False)
+    beat: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+
+
+class TempoMapBreath(TempoMapContractModel):
+    duration_sec: float = Field(gt=0, le=300, allow_inf_nan=False)
+    count_in: bool
+
+
+class TempoMapMeasureExpression(TempoMapContractModel):
+    measure: int = Field(ge=1)
+    tempo_change: TempoMapMeasureTempoChange | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    fermata: TempoMapFermata | None = Field(default=None, exclude_if=lambda value: value is None)
+    breath: TempoMapBreath | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class TempoMapSection(TempoMapContractModel):
@@ -290,6 +314,8 @@ class TempoMapSection(TempoMapContractModel):
     bpm: float = Field(gt=0)
     beat_unit: NoteValue
     tempo_change: TempoMapTempoChange | None = Field(default=None, exclude_if=lambda value: value is None)
+    fermata: TempoMapFermata | None = Field(default=None, exclude_if=lambda value: value is None)
+    breath: TempoMapBreath | None = Field(default=None, exclude_if=lambda value: value is None)
     accent_pattern: list[Literal[0, 1, 2]] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -352,6 +378,9 @@ class TempoMapData(TempoMapContractModel):
     total_measures: int = Field(ge=1)
     anacrusis: TempoMapAnacrusis | None = Field(default=None, exclude_if=lambda value: value is None)
     sections: list[TempoMapSection] = Field(min_length=1)
+    measure_expressions: list[TempoMapMeasureExpression] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     jumps: list[TempoMapJump]
     count_in: TempoMapCountIn
 
@@ -359,6 +388,7 @@ class TempoMapData(TempoMapContractModel):
     def validate_semantics(self) -> TempoMapData:
         expected_start = 1
         section_ids: set[str] = set()
+        section_beat_counts: list[int] = []
         first_measure_beats: int | None = None
         for section in self.sections:
             if section.id in section_ids:
@@ -380,10 +410,12 @@ class TempoMapData(TempoMapContractModel):
             if not math.isfinite(measure_beats) or not measure_beats.is_integer():
                 raise ValueError("tempo map beatUnit must divide a measure into whole beats")
             beat_count = int(measure_beats)
+            section_beat_counts.append(beat_count)
             if first_measure_beats is None:
                 first_measure_beats = beat_count
             if section.accent_pattern is not None and len(section.accent_pattern) != beat_count:
                 raise ValueError("tempo map accentPattern must match the section beat count")
+            self._validate_fermata_beat(section.fermata, section.end_measure, beat_count)
             if section.tempo_change is not None:
                 change = section.tempo_change
                 if not math.isfinite(change.target_bpm):
@@ -401,6 +433,8 @@ class TempoMapData(TempoMapContractModel):
             and self.anacrusis.beats >= first_measure_beats
         ):
             raise ValueError("tempo map anacrusis must be shorter than the first measure")
+
+        self._validate_measure_expressions(section_beat_counts)
 
         repeats: list[TempoMapRepeat] = []
         coda_count = 0
@@ -458,6 +492,69 @@ class TempoMapData(TempoMapContractModel):
                 if identical or crosses:
                     raise ValueError("tempo map repeat ranges must be distinct, disjoint, or nested")
         return self
+
+    def _validate_fermata_beat(self, fermata: TempoMapFermata | None, measure: int, beat_count: int) -> None:
+        if fermata is None or fermata.beat is None:
+            return
+        first_beat = 1
+        if measure == 1 and self.anacrusis is not None:
+            first_beat = beat_count - self.anacrusis.beats + 1
+        if not first_beat <= fermata.beat <= beat_count:
+            raise ValueError("tempo map fermata beat must exist in the measure")
+
+    def _validate_measure_expressions(self, section_beat_counts: list[int]) -> None:
+        section_starts = [section.start_measure for section in self.sections]
+        seen_measures: set[int] = set()
+        previous_tempo_end = 0
+        previous_target: float | None = None
+        for expression in sorted(self.measure_expressions or [], key=lambda item: item.measure):
+            measure = expression.measure
+            if measure > self.total_measures:
+                raise ValueError("tempo map measure expression must stay within totalMeasures")
+            if measure in seen_measures:
+                raise ValueError("tempo map measure expressions must reference unique measures")
+            seen_measures.add(measure)
+            section_index = bisect_right(section_starts, measure) - 1
+            section = self.sections[section_index]
+            beat_count = section_beat_counts[section_index]
+            self._validate_fermata_beat(expression.fermata, measure, beat_count)
+            change = expression.tempo_change
+            if change is None:
+                continue
+            end_measure = change.end_measure if change.end_measure is not None else measure
+            if end_measure < measure or end_measure > self.total_measures:
+                raise ValueError("tempo map measure tempo span must stay within totalMeasures")
+            if change.type == "aTempo" and change.end_measure is not None:
+                raise ValueError("aTempo must omit endMeasure")
+            if measure <= previous_tempo_end:
+                raise ValueError("tempo map measure tempo spans must not overlap")
+
+            # A completed mark carries until a section starts after its inclusive span.
+            if previous_target is not None and section.start_measure <= previous_tempo_end:
+                start_bpm = previous_target
+            elif section.tempo_change is None:
+                start_bpm = section.bpm
+            elif section.tempo_change.type == "aTempo":
+                start_bpm = section.tempo_change.target_bpm
+            else:
+                total_beats = (section.end_measure - section.start_measure + 1) * beat_count
+                beat_offset = (measure - section.start_measure) * beat_count
+                if section.start_measure == 1 and self.anacrusis is not None:
+                    missing_beats = beat_count - self.anacrusis.beats
+                    total_beats -= missing_beats
+                    if measure > 1:
+                        beat_offset -= missing_beats
+                # Match the core operation order at exact tempo-direction boundaries.
+                start_bpm = (
+                    section.bpm
+                    + ((section.tempo_change.target_bpm - section.bpm) * beat_offset) / total_beats
+                )
+            if change.type == "rit" and change.target_bpm >= start_bpm:
+                raise ValueError("measure rit targetBpm must be lower than the effective starting BPM")
+            if change.type == "accel" and change.target_bpm <= start_bpm:
+                raise ValueError("measure accel targetBpm must be higher than the effective starting BPM")
+            previous_tempo_end = end_measure
+            previous_target = change.target_bpm
 
 
 class TempoMapWrite(ApiModel):

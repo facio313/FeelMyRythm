@@ -1,4 +1,5 @@
 import { TempoMapValidationError } from './errors.js';
+import { compileMeasureTempos } from './measure-tempo.js';
 import type {
   NoteValue,
   RepeatDirective,
@@ -81,6 +82,52 @@ function requireNumber(
   }
 }
 
+function validateExpressionStructure(
+  record: Readonly<Record<string, unknown>>,
+  path: string,
+  issues: TempoMapValidationIssue[],
+  measureLevel: boolean,
+): void {
+  if (record.tempoChange !== undefined) {
+    if (!isRecord(record.tempoChange)) {
+      addIssue(issues, 'required', `${path}.tempoChange`, 'must be an object');
+    } else {
+      if (
+        record.tempoChange.type !== 'rit' &&
+        record.tempoChange.type !== 'accel' &&
+        record.tempoChange.type !== 'aTempo'
+      ) {
+        addIssue(issues, 'tempo', `${path}.tempoChange.type`, 'must be rit, accel or aTempo');
+      }
+      requireNumber(record.tempoChange, 'targetBpm', `${path}.tempoChange.targetBpm`, issues);
+    }
+  }
+
+  if (record.fermata !== undefined) {
+    if (!isRecord(record.fermata)) {
+      addIssue(issues, 'required', `${path}.fermata`, 'must be an object');
+    } else {
+      requireNumber(record.fermata, 'extraBeats', `${path}.fermata.extraBeats`, issues);
+    }
+  }
+  if (record.breath !== undefined) {
+    if (!isRecord(record.breath)) {
+      addIssue(issues, 'required', `${path}.breath`, 'must be an object');
+    } else {
+      requireNumber(record.breath, 'durationSec', `${path}.breath.durationSec`, issues);
+      if (typeof record.breath.countIn !== 'boolean') {
+        addIssue(issues, 'required', `${path}.breath.countIn`, 'must be a boolean');
+      }
+    }
+  }
+  if (measureLevel && isRecord(record.tempoChange) && record.tempoChange.endMeasure !== undefined) {
+    requireNumber(record.tempoChange, 'endMeasure', `${path}.tempoChange.endMeasure`, issues);
+  }
+  if (isRecord(record.fermata) && record.fermata.beat !== undefined) {
+    requireNumber(record.fermata, 'beat', `${path}.fermata.beat`, issues);
+  }
+}
+
 function validateTempoMapStructure(input: unknown): TempoMapValidationIssue[] {
   const issues: TempoMapValidationIssue[] = [];
   if (!isRecord(input)) {
@@ -129,21 +176,7 @@ function validateTempoMapStructure(input: unknown): TempoMapValidationIssue[] {
         requireNumber(rawSection.timeSignature, 'denom', `${path}.timeSignature.denom`, issues);
       }
 
-      if (rawSection.tempoChange !== undefined) {
-        if (!isRecord(rawSection.tempoChange)) {
-          addIssue(issues, 'required', `${path}.tempoChange`, 'must be an object');
-        } else {
-          if (rawSection.tempoChange.type !== 'rit' && rawSection.tempoChange.type !== 'accel') {
-            addIssue(issues, 'tempo', `${path}.tempoChange.type`, 'must be rit or accel');
-          }
-          requireNumber(
-            rawSection.tempoChange,
-            'targetBpm',
-            `${path}.tempoChange.targetBpm`,
-            issues,
-          );
-        }
-      }
+      validateExpressionStructure(rawSection, path, issues, false);
 
       if (rawSection.accentPattern !== undefined) {
         if (!Array.isArray(rawSection.accentPattern)) {
@@ -165,6 +198,22 @@ function validateTempoMapStructure(input: unknown): TempoMapValidationIssue[] {
         addIssue(issues, 'required', `${path}.subdivision`, 'must be a number');
       }
     });
+  }
+
+  if (input.measureExpressions !== undefined) {
+    if (!Array.isArray(input.measureExpressions)) {
+      addIssue(issues, 'required', 'measureExpressions', 'must be an array');
+    } else {
+      input.measureExpressions.forEach((record, index) => {
+        const path = `measureExpressions[${index}]`;
+        if (!isRecord(record)) {
+          addIssue(issues, 'required', path, 'must be an object');
+          return;
+        }
+        requireNumber(record, 'measure', `${path}.measure`, issues);
+        validateExpressionStructure(record, path, issues, true);
+      });
+    }
   }
 
   if (!Array.isArray(input.jumps)) {
@@ -250,6 +299,164 @@ function validateTempoMapStructure(input: unknown): TempoMapValidationIssue[] {
   return issues;
 }
 
+function validateHoldValues(
+  record: Pick<TempoSection, 'fermata' | 'breath'>,
+  path: string,
+  issues: TempoMapValidationIssue[],
+): void {
+  if (record.fermata !== undefined) {
+    const { extraBeats } = record.fermata;
+    if (!isPositiveFinite(extraBeats) || extraBeats > 16) {
+      addIssue(
+        issues,
+        'range',
+        `${path}.fermata.extraBeats`,
+        'must be finite, greater than zero and at most 16',
+      );
+    }
+  }
+  if (record.breath !== undefined) {
+    const { durationSec } = record.breath;
+    if (!isPositiveFinite(durationSec) || durationSec > 300) {
+      addIssue(
+        issues,
+        'range',
+        `${path}.breath.durationSec`,
+        'must be finite, greater than zero and at most 300',
+      );
+    }
+  }
+}
+
+function validateFermataBeat(
+  fermata: NonNullable<TempoSection['fermata']>,
+  measure: number,
+  section: TempoSection,
+  map: TempoMap,
+  path: string,
+  issues: TempoMapValidationIssue[],
+): void {
+  if (fermata.beat === undefined) return;
+  const count = Math.round(beatsPerMeasure(section));
+  const first = measure === 1 && map.anacrusis ? count - map.anacrusis.beats + 1 : 1;
+  if (!Number.isInteger(fermata.beat) || fermata.beat < first || fermata.beat > count) {
+    addIssue(
+      issues,
+      'range',
+      `${path}.fermata.beat`,
+      'must be a primary beat present in this measure',
+    );
+  }
+}
+
+function validateMeasureExpressions(map: TempoMap, issues: TempoMapValidationIssue[]): void {
+  // Tempo resolution needs the previously validated section coverage and meter.
+  if (issues.length) return;
+  map.sections.forEach((section, index) => {
+    if (section.fermata)
+      validateFermataBeat(
+        section.fermata,
+        section.endMeasure,
+        section,
+        map,
+        `sections[${index}]`,
+        issues,
+      );
+  });
+  const seen = new Set<number>();
+  const indexed = (map.measureExpressions ?? []).map((expression, index) => ({
+    expression,
+    index,
+  }));
+  indexed.forEach(({ expression, index }) => {
+    const path = `measureExpressions[${index}]`;
+    validateHoldValues(expression, path, issues);
+    if (!isMeasure(expression.measure, map.totalMeasures)) {
+      addIssue(issues, 'range', `${path}.measure`, 'must be a measure in the map');
+      return;
+    }
+    if (seen.has(expression.measure))
+      addIssue(issues, 'duplicate', `${path}.measure`, 'must be unique');
+    seen.add(expression.measure);
+    let low = 0;
+    let high = map.sections.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (map.sections[mid]!.endMeasure < expression.measure) low = mid + 1;
+      else high = mid;
+    }
+    if (expression.fermata)
+      validateFermataBeat(
+        expression.fermata,
+        expression.measure,
+        map.sections[low]!,
+        map,
+        path,
+        issues,
+      );
+    const change = expression.tempoChange;
+    if (change) {
+      if (!isPositiveFinite(change.targetBpm))
+        addIssue(
+          issues,
+          'tempo',
+          `${path}.tempoChange.targetBpm`,
+          'must be finite and greater than zero',
+        );
+      if (
+        change.endMeasure !== undefined &&
+        (!isMeasure(change.endMeasure, map.totalMeasures) || change.endMeasure < expression.measure)
+      ) {
+        addIssue(
+          issues,
+          'range',
+          `${path}.tempoChange.endMeasure`,
+          'must be from the marked measure through totalMeasures',
+        );
+      }
+      if (change.type === 'aTempo' && change.endMeasure !== undefined) {
+        addIssue(
+          issues,
+          'tempo',
+          `${path}.tempoChange.endMeasure`,
+          'aTempo is immediate and must omit endMeasure',
+        );
+      }
+    }
+  });
+  const changes = indexed
+    .filter(({ expression }) => expression.tempoChange)
+    .sort((a, b) => a.expression.measure - b.expression.measure);
+  let previousEnd = 0;
+  for (const { expression, index } of changes) {
+    const change = expression.tempoChange!;
+    if (expression.measure <= previousEnd)
+      addIssue(
+        issues,
+        'ambiguous',
+        `measureExpressions[${index}].tempoChange`,
+        'tempo spans must not overlap',
+      );
+    previousEnd =
+      change.type === 'aTempo' ? expression.measure : (change.endMeasure ?? expression.measure);
+  }
+  if (issues.length) return;
+  const indices = new Map(indexed.map(({ expression, index }) => [expression.measure, index]));
+  for (const change of compileMeasureTempos(map, beatsPerMeasure).changes) {
+    if (
+      (change.type === 'rit' && change.targetBpm >= change.startBpm) ||
+      (change.type === 'accel' && change.targetBpm <= change.startBpm)
+    ) {
+      addIssue(
+        issues,
+        'tempo',
+        `measureExpressions[${indices.get(change.measure)!}].tempoChange`,
+        `${change.type} targetBpm must follow the effective starting tempo ${change.startBpm}`,
+      );
+    }
+  }
+}
+
 function validateSection(
   section: TempoSection,
   index: number,
@@ -310,6 +517,8 @@ function validateSection(
       addIssue(issues, 'tempo', `${path}.tempoChange`, 'accel targetBpm must be higher than bpm');
     }
   }
+
+  validateHoldValues(section, path, issues);
 
   if (section.accentPattern !== undefined) {
     if (
@@ -475,6 +684,8 @@ function validateTempoMapSemantics(map: TempoMap): TempoMapValidationResult {
   if (map.countIn.useSectionMeter !== true) {
     addIssue(issues, 'required', 'countIn.useSectionMeter', 'must be true');
   }
+
+  validateMeasureExpressions(map, issues);
 
   const repeats: { directive: RepeatDirective; index: number }[] = [];
   let codaCount = 0;

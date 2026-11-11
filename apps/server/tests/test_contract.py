@@ -688,6 +688,26 @@ def test_openapi_exposes_http_and_websocket_source_schemas(client: TestClient) -
     assert schemas["WsClientMessage"]["discriminator"]["propertyName"] == "type"
     assert schemas["WsServerMessage"]["discriminator"]["propertyName"] == "type"
     assert schemas["TempoMapWrite"]["properties"]["data"] == {"$ref": "#/components/schemas/TempoMapData"}
+    assert schemas["TempoMapTempoChange"]["properties"]["type"]["enum"] == ["rit", "accel", "aTempo"]
+    assert {"fermata", "breath"} <= schemas["TempoMapSection"]["properties"].keys()
+    assert {"fermata", "breath"}.isdisjoint(schemas["TempoMapSection"]["required"])
+    assert schemas["TempoMapFermata"]["properties"]["extraBeats"]["maximum"] == 16
+    assert schemas["TempoMapBreath"]["properties"]["durationSec"]["maximum"] == 300
+    assert schemas["TempoMapBreath"]["properties"]["countIn"]["type"] == "boolean"
+    assert set(schemas["TempoMapBreath"]["required"]) == {"durationSec", "countIn"}
+    assert "measureExpressions" in schemas["TempoMapData"]["properties"]
+    assert "measureExpressions" not in schemas["TempoMapData"]["required"]
+    assert schemas["TempoMapMeasureExpression"]["required"] == ["measure"]
+    assert set(schemas["TempoMapMeasureExpression"]["properties"]) == {
+        "measure",
+        "tempoChange",
+        "fermata",
+        "breath",
+    }
+    assert "endMeasure" in schemas["TempoMapMeasureTempoChange"]["properties"]
+    assert "endMeasure" not in schemas["TempoMapMeasureTempoChange"]["required"]
+    assert "beat" in schemas["TempoMapFermata"]["properties"]
+    assert "beat" not in schemas["TempoMapFermata"]["required"]
     assert schemas["JoinRoomPayload"]["properties"]["bluetooth"]["type"] == "boolean"
     assert "bluetooth" in schemas["RosterMember"]["required"]
 

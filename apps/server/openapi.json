@@ -3133,6 +3133,27 @@
         "title": "TempoMapAnacrusis",
         "type": "object"
       },
+      "TempoMapBreath": {
+        "additionalProperties": false,
+        "properties": {
+          "countIn": {
+            "title": "Countin",
+            "type": "boolean"
+          },
+          "durationSec": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 300.0,
+            "title": "Durationsec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "durationSec",
+          "countIn"
+        ],
+        "title": "TempoMapBreath",
+        "type": "object"
+      },
       "TempoMapCoda": {
         "additionalProperties": false,
         "properties": {
@@ -3328,6 +3349,20 @@
             "title": "Jumps",
             "type": "array"
           },
+          "measureExpressions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TempoMapMeasureExpression"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measureexpressions"
+          },
           "repertoireItemId": {
             "minLength": 1,
             "title": "Repertoireitemid",
@@ -3362,6 +3397,116 @@
           "countIn"
         ],
         "title": "TempoMapData",
+        "type": "object"
+      },
+      "TempoMapFermata": {
+        "additionalProperties": false,
+        "properties": {
+          "beat": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beat"
+          },
+          "extraBeats": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 16.0,
+            "title": "Extrabeats",
+            "type": "number"
+          }
+        },
+        "required": [
+          "extraBeats"
+        ],
+        "title": "TempoMapFermata",
+        "type": "object"
+      },
+      "TempoMapMeasureExpression": {
+        "additionalProperties": false,
+        "properties": {
+          "breath": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapBreath"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fermata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapFermata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measure": {
+            "minimum": 1.0,
+            "title": "Measure",
+            "type": "integer"
+          },
+          "tempoChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapMeasureTempoChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "measure"
+        ],
+        "title": "TempoMapMeasureExpression",
+        "type": "object"
+      },
+      "TempoMapMeasureTempoChange": {
+        "additionalProperties": false,
+        "properties": {
+          "endMeasure": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endmeasure"
+          },
+          "targetBpm": {
+            "exclusiveMinimum": 0.0,
+            "title": "Targetbpm",
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "rit",
+              "accel",
+              "aTempo"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "targetBpm"
+        ],
+        "title": "TempoMapMeasureTempoChange",
         "type": "object"
       },
       "TempoMapOut": {
@@ -3494,10 +3639,30 @@
             "title": "Bpm",
             "type": "number"
           },
+          "breath": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapBreath"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "endMeasure": {
             "minimum": 1.0,
             "title": "Endmeasure",
             "type": "integer"
+          },
+          "fermata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TempoMapFermata"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "minLength": 1,
@@ -3573,7 +3738,8 @@
           "type": {
             "enum": [
               "rit",
-              "accel"
+              "accel",
+              "aTempo"
             ],
             "title": "Type",
             "type": "string"

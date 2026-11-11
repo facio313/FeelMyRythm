@@ -29,6 +29,9 @@ export interface MetronomePosition {
   isCountIn: boolean;
   isWaiting?: boolean;
   countdown?: number;
+  isResting?: boolean;
+  isFermata?: boolean;
+  bpm?: number;
 }
 
 export interface MetronomeController {
@@ -124,6 +127,8 @@ function frameFor(
       progress: 0,
       accent: fallback.beatIndex === 0 ? 2 : 1,
       measureNumber: fallback.measureNumber,
+      pass: fallback.pass,
+      sectionId: fallback.sectionId,
       isWaiting: fallback.isWaiting ?? false,
     };
   }
@@ -136,6 +141,9 @@ function frameFor(
       progress: 0,
       accent: 0,
       measureNumber: anchor.position.measureNumber,
+      pass: anchor.position.pass,
+      sectionId: anchor.position.sectionId,
+      ...(anchor.position.bpm === undefined ? {} : { bpm: anchor.position.bpm }),
       isWaiting: true,
     };
   }
@@ -156,6 +164,9 @@ function frameFor(
         isCountIn: true,
         countInValue: current.countdown,
         measureNumber: anchor.position.measureNumber,
+        pass: anchor.position.pass,
+        sectionId: anchor.position.sectionId,
+        ...(anchor.position.bpm === undefined ? {} : { bpm: anchor.position.bpm }),
       };
     }
   }
@@ -169,17 +180,77 @@ function frameFor(
   const located = locate(activeTimeline, timelinePosition);
   const entry = activeTimeline.entries[located.entryIndex]!;
   const beat = entry.beats[located.beatIndex]!;
+  const nextEntry = activeTimeline.entries[located.entryIndex + 1];
+  const context = {
+    measureNumber: entry.measureNumber,
+    pass: entry.pass,
+    sectionId: entry.sectionId,
+    ...(beat.bpm === undefined ? {} : { bpm: beat.bpm }),
+  };
+  if (
+    entry.breath &&
+    timelinePosition >= entry.breath.startTimeSec &&
+    (!nextEntry || timelinePosition < entry.breath.endTimeSec)
+  ) {
+    return {
+      ...context,
+      beatIndex: beat.beatIndex,
+      beatCount: primaryBeatCount(activeTimeline, located.entryIndex),
+      progress: 0,
+      accent: 0,
+      isResting: true,
+    };
+  }
+  const cues = entry.resumeCountIn;
+  if (
+    nextEntry &&
+    cues?.length &&
+    timelinePosition >= cues[0]!.timeSec &&
+    timelinePosition < nextEntry.startTimeSec
+  ) {
+    const index = cues.findLastIndex((cue) => cue.timeSec <= timelinePosition);
+    const cue = cues[index]!;
+    return {
+      beatIndex: 0,
+      beatCount: primaryBeatCount(activeTimeline, located.entryIndex + 1),
+      progress: beatProgress(
+        timelinePosition,
+        cue.timeSec,
+        cues[index + 1]?.timeSec ?? nextEntry.startTimeSec,
+      ),
+      accent: cue.accent,
+      isCountIn: true,
+      countInValue: cue.countdown,
+      measureNumber: nextEntry.measureNumber,
+      pass: nextEntry.pass,
+      sectionId: nextEntry.sectionId,
+      ...(cue.bpm === undefined ? {} : { bpm: cue.bpm }),
+    };
+  }
+  const isFermata =
+    entry.fermata !== undefined &&
+    timelinePosition >= entry.fermata.startTimeSec &&
+    (timelinePosition < entry.fermata.endTimeSec ||
+      (!nextEntry &&
+        !entry.breath &&
+        entry.fermata.endTimeSec >= activeTimeline.totalDurationSec - 1e-9));
   const nextBeatTime =
     entry.beats[located.beatIndex + 1]?.timeSec ??
+    (entry.fermata && entry.fermata.endTimeSec > beat.timeSec
+      ? entry.fermata.endTimeSec
+      : undefined) ??
+    entry.breath?.startTimeSec ??
     activeTimeline.entries[located.entryIndex + 1]?.beats[0]?.timeSec ??
     activeTimeline.totalDurationSec;
   return {
+    ...context,
     beatIndex: beat.beatIndex,
     beatCount: primaryBeatCount(activeTimeline, located.entryIndex),
-    progress: beatProgress(timelinePosition, beat.timeSec, nextBeatTime),
+    progress: isFermata ? 0 : beatProgress(timelinePosition, beat.timeSec, nextBeatTime),
     accent: beat.accent,
     isSubdivision: beat.isSubdivision,
     measureNumber: entry.measureNumber,
+    isFermata,
   };
 }
 
@@ -192,12 +263,15 @@ function positionFromFrame(
   const entry = scheduled?.entryIndex === undefined ? null : timeline.entries[scheduled.entryIndex];
   return {
     measureNumber: frame.measureNumber ?? entry?.measureNumber ?? 1,
-    pass: scheduled?.pass ?? entry?.pass ?? fallback.pass,
+    pass: frame.pass ?? scheduled?.pass ?? entry?.pass ?? fallback.pass,
     beatIndex: frame.beatIndex,
     beatCount: frame.beatCount,
-    sectionId: scheduled?.sectionId ?? entry?.sectionId ?? fallback.sectionId,
+    sectionId: frame.sectionId ?? scheduled?.sectionId ?? entry?.sectionId ?? fallback.sectionId,
     isCountIn: frame.isCountIn ?? false,
     isWaiting: frame.isWaiting ?? false,
+    isResting: frame.isResting ?? false,
+    isFermata: frame.isFermata ?? false,
+    ...(frame.bpm === undefined ? {} : { bpm: frame.bpm }),
     ...(frame.countInValue === undefined ? {} : { countdown: frame.countInValue }),
   };
 }
@@ -248,6 +322,7 @@ export function useMetronome(map: TempoMap): MetronomeController {
     ) => {
       const located = locate(timeline, anchorTime);
       const entry = timeline.entries[located.entryIndex]!;
+      const anchorBeat = entry.beats[located.beatIndex]!;
       const position: MetronomePosition = {
         measureNumber: entry.measureNumber,
         pass: entry.pass,
@@ -256,6 +331,7 @@ export function useMetronome(map: TempoMap): MetronomeController {
         sectionId: entry.sectionId,
         isCountIn: false,
         isWaiting: true,
+        ...(anchorBeat.bpm === undefined ? {} : { bpm: anchorBeat.bpm }),
       };
       displayAnchorRef.current = {
         position,
@@ -276,7 +352,13 @@ export function useMetronome(map: TempoMap): MetronomeController {
   const clearDisplayPhase = useCallback(() => {
     displayAnchorRef.current = null;
     setPosition((current) => {
-      const next = { ...current, isWaiting: false, isCountIn: false };
+      const next = {
+        ...current,
+        isWaiting: false,
+        isCountIn: false,
+        isResting: false,
+        isFermata: false,
+      };
       positionRef.current = next;
       return next;
     });
@@ -421,6 +503,9 @@ export function useMetronome(map: TempoMap): MetronomeController {
           current.sectionId === nextPosition.sectionId &&
           current.isCountIn === nextPosition.isCountIn &&
           current.isWaiting === nextPosition.isWaiting &&
+          current.isResting === nextPosition.isResting &&
+          current.isFermata === nextPosition.isFermata &&
+          current.bpm === nextPosition.bpm &&
           current.countdown === nextPosition.countdown
         ) {
           return current;

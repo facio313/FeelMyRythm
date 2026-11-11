@@ -65,6 +65,7 @@ function renderEditor(path = '/editor/map-1') {
     [
       { path: '/editor/:tempoMapId', element: <EditorRoute /> },
       { path: '/destination', element: <h1>이동 완료</h1> },
+      { path: '/', element: <h1>메트로놈</h1> },
     ],
     { initialEntries: [path] },
   );
@@ -103,6 +104,406 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('EditorPage tempo expressions and automatic breaths', () => {
+  beforeEach(() => {
+    database.getTempoMapForRepertoire.mockReset().mockResolvedValue(storedMap);
+    database.getTempoMap.mockReset().mockResolvedValue(undefined);
+    database.putTempoMap.mockReset().mockResolvedValue(undefined);
+    authState.user = null;
+    authState.client.get.mockReset();
+    authState.client.put.mockReset();
+    notify.mockReset();
+  });
+
+  afterEach(cleanup);
+
+  function addMeasureExpression(measure: number) {
+    const panel = screen.getByRole('region', { name: '마디별 연주 표현' });
+    fireEvent.change(within(panel).getByLabelText('표현을 추가할 마디'), {
+      target: { value: String(measure) },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: '마디 표현 추가' }));
+    return within(panel).getByRole('group', { name: `${measure}마디 연주 표현` });
+  }
+
+  it('edits arbitrary measures and a specific fermata beat without splitting the section, then reloads exact settings', async () => {
+    const { unmount } = renderEditor('/editor/map-1?source=local');
+    await screen.findByLabelText('BPM');
+    const rit = addMeasureExpression(3);
+    fireEvent.change(within(rit).getByLabelText('템포 변화'), { target: { value: 'rit' } });
+    fireEvent.change(within(rit).getByLabelText('도착 BPM'), { target: { value: '80' } });
+    fireEvent.change(within(rit).getByLabelText('변화 끝 마디'), { target: { value: '4' } });
+    const aTempo = addMeasureExpression(5);
+    fireEvent.change(within(aTempo).getByLabelText('템포 변화'), { target: { value: 'aTempo' } });
+    expect(within(aTempo).getByLabelText('복귀 BPM')).toHaveValue(100);
+    expect(within(aTempo).queryByLabelText('변화 끝 마디')).not.toBeInTheDocument();
+    const fermata = addMeasureExpression(7);
+    fireEvent.click(within(fermata).getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.change(within(fermata).getByLabelText('늘일 박'), { target: { value: '2' } });
+    fireEvent.change(within(fermata).getByLabelText('추가로 늘일 박 수'), {
+      target: { value: '1.5' },
+    });
+    const breath = addMeasureExpression(8);
+    fireEvent.click(within(breath).getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.change(within(breath).getByLabelText('쉬는 시간 (초)'), { target: { value: '2.5' } });
+    fireEvent.click(within(breath).getByRole('checkbox', { name: /재개 전 예비박/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    const saved = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+    expect(saved.sections).toEqual(storedMap.sections);
+    expect(saved.measureExpressions).toEqual([
+      { measure: 3, tempoChange: { type: 'rit', targetBpm: 80, endMeasure: 4 } },
+      { measure: 5, tempoChange: { type: 'aTempo', targetBpm: 100 } },
+      { measure: 7, fermata: { extraBeats: 1.5, beat: 2 } },
+      { measure: 8, breath: { durationSec: 2.5, countIn: false } },
+    ]);
+    unmount();
+    database.getTempoMapForRepertoire.mockResolvedValue(saved);
+    renderEditor('/editor/map-1?source=local');
+    const reopened = await screen.findByRole('group', { name: '8마디 연주 표현' });
+    expect(within(reopened).getByLabelText('쉬는 시간 (초)')).toHaveValue(2.5);
+    expect(within(reopened).getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+    expect(
+      within(screen.getByRole('group', { name: '7마디 연주 표현' })).getByLabelText('늘일 박'),
+    ).toHaveValue('2');
+  });
+
+  it('keeps absolute measure expressions through section split, move and merge, and exposes rows beyond a shortened score', async () => {
+    database.getTempoMapForRepertoire.mockResolvedValue({
+      ...storedMap,
+      measureExpressions: [{ measure: 7, fermata: { extraBeats: 1, beat: 2 } }],
+    });
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    fireEvent.click(screen.getByRole('button', { name: '구간 나누기' }));
+    const dialog = screen.getByRole('dialog', { name: '구간 나누기' });
+    fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '8' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '나누기' }));
+    fireEvent.click(screen.getByRole('button', { name: '구간 위로 이동' }));
+    fireEvent.click(screen.getByRole('button', { name: '표' }));
+    fireEvent.click(screen.getByRole('button', { name: 'A' }));
+    fireEvent.click(screen.getByRole('button', { name: '이전과 합치기' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    const saved = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+    expect(saved.sections).toHaveLength(1);
+    expect(saved.measureExpressions).toEqual([{ measure: 7, fermata: { extraBeats: 1, beat: 2 } }]);
+    fireEvent.change(screen.getByLabelText('총 마디 수'), { target: { value: '6' } });
+    const outside = screen.getByRole('group', { name: '7마디 연주 표현' });
+    expect(within(outside).getByLabelText('표현 마디')).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    expect(database.putTempoMap).toHaveBeenCalledOnce();
+    fireEvent.change(within(outside).getByLabelText('표현 마디'), { target: { value: '6' } });
+    expect(screen.getByText('유효함', { exact: true })).toBeVisible();
+  });
+
+  it('restores the actual earlier ramp when a measure span overrides a later section ramp', async () => {
+    const opening = storedMap.sections[0]!;
+    database.getTempoMapForRepertoire.mockResolvedValue({
+      ...storedMap,
+      sections: [
+        { ...opening, endMeasure: 3 },
+        {
+          ...opening,
+          id: 'section-2',
+          label: 'B',
+          startMeasure: 4,
+          bpm: 140,
+          tempoChange: { type: 'rit', targetBpm: 120 },
+        },
+      ],
+      measureExpressions: [
+        { measure: 2, tempoChange: { type: 'rit', targetBpm: 80, endMeasure: 5 } },
+      ],
+    });
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    const row = addMeasureExpression(6);
+    fireEvent.change(within(row).getByLabelText('템포 변화'), { target: { value: 'aTempo' } });
+    expect(within(row).getByLabelText('복귀 BPM')).toHaveValue(100);
+  });
+
+  it('seeds section-end defaults, preserves an explicit empty override and restores inheritance when the row is deleted', async () => {
+    const section = {
+      ...storedMap.sections[0]!,
+      fermata: { extraBeats: 1.5 },
+      breath: { durationSec: 3, countIn: false },
+    };
+    database.getTempoMapForRepertoire.mockResolvedValue({ ...storedMap, sections: [section] });
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    const row = addMeasureExpression(16);
+    expect(within(row).getByLabelText('추가로 늘일 박 수')).toHaveValue(1.5);
+    expect(within(row).getByLabelText('쉬는 시간 (초)')).toHaveValue(3);
+    expect(within(row).getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+    fireEvent.click(within(row).getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.click(within(row).getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    const saved = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+    expect(saved.measureExpressions).toEqual([{ measure: 16 }]);
+    expect(saved.sections).toEqual([section]);
+    fireEvent.click(within(row).getByRole('button', { name: '16마디 표현 삭제' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledTimes(2));
+    expect((database.putTempoMap.mock.calls[1]![0] as TempoMap).measureExpressions).toEqual([]);
+  });
+
+  it('offers only the nominal primary beats actually played in a pickup measure', async () => {
+    database.getTempoMapForRepertoire.mockResolvedValue({ ...storedMap, anacrusis: { beats: 2 } });
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    const row = addMeasureExpression(1);
+    fireEvent.click(within(row).getByRole('checkbox', { name: /페르마타/ }));
+    const beat = within(row).getByLabelText('늘일 박');
+    expect(within(beat).queryByRole('option', { name: '1박' })).not.toBeInTheDocument();
+    expect(within(beat).queryByRole('option', { name: '2박' })).not.toBeInTheDocument();
+    expect(within(beat).getByRole('option', { name: '3박' })).toBeInTheDocument();
+    fireEvent.change(beat, { target: { value: '3' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    expect((database.putTempoMap.mock.calls[0]![0] as TempoMap).measureExpressions).toEqual([
+      { measure: 1, fermata: { extraBeats: 1, beat: 3 } },
+    ]);
+  });
+
+  it('persists measure-level breaths through the remote revision response and user cache', async () => {
+    authState.user = { id: 'user-1' };
+    authState.client.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith('/access') ? { role: 'leader' } : serverResponse(remoteMap('map-1')),
+      ),
+    );
+    authState.client.put.mockImplementation((_path: string, body: { data: TempoMap }) =>
+      Promise.resolve(serverResponse({ ...body.data, revision: 4 })),
+    );
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    const row = addMeasureExpression(8);
+    fireEvent.click(within(row).getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(within(row).getByRole('checkbox', { name: /재개 전 예비박/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    const expressions = [{ measure: 8, breath: { durationSec: 2, countIn: false } }];
+    await waitFor(() =>
+      expect(authState.client.put).toHaveBeenCalledWith('/repertoire/map-1/tempomap', {
+        expectedRevision: 3,
+        data: expect.objectContaining({
+          measureExpressions: expressions,
+          sections: storedMap.sections,
+        }),
+      }),
+    );
+    await waitFor(() =>
+      expect(database.putTempoMap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ revision: 4, measureExpressions: expressions }),
+        { userId: 'user-1' },
+      ),
+    );
+  });
+
+  it('saves fractional fermatas and silent automatic breaths, reopens them and opens the exact map for playback', async () => {
+    const { router, unmount } = renderEditor('/editor/map-1?source=local');
+    await screen.findByLabelText('BPM');
+    fireEvent.click(screen.getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.change(screen.getByLabelText('추가로 늘일 박 수'), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.change(screen.getByLabelText('쉬는 시간 (초)'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /재개 전 예비박/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    const saved = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+    expect(saved).toMatchObject({
+      id: 'map-1',
+      revision: 4,
+      sections: [
+        {
+          fermata: { extraBeats: 0.5 },
+          breath: { durationSec: 2.5, countIn: false },
+        },
+      ],
+    });
+    await screen.findByText('저장됨', { exact: true });
+    fireEvent.click(screen.getByRole('button', { name: '메트로놈에서 열기' }));
+    await screen.findByRole('heading', { name: '메트로놈' });
+    expect(router.state.location.search).toBe('?tempoMap=map-1');
+
+    unmount();
+    database.getTempoMapForRepertoire.mockResolvedValue(saved);
+    renderEditor('/editor/map-1?source=local');
+    expect(await screen.findByLabelText('추가로 늘일 박 수')).toHaveValue(0.5);
+    expect(screen.getByLabelText('쉬는 시간 (초)')).toHaveValue(2.5);
+    expect(screen.getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledTimes(2));
+    const cleared = database.putTempoMap.mock.calls[1]![0] as TempoMap;
+    expect(cleared.sections[0]).not.toHaveProperty('fermata');
+    expect(cleared.sections[0]).not.toHaveProperty('breath');
+  });
+
+  it.each([
+    { label: '추가로 늘일 박 수', toggle: /페르마타/, invalid: '0', valid: '0.5' },
+    { label: '추가로 늘일 박 수', toggle: /페르마타/, invalid: '17', valid: '16' },
+    { label: '쉬는 시간 (초)', toggle: /쉼표 · 숨 고르기/, invalid: '-1', valid: '0.5' },
+    { label: '쉬는 시간 (초)', toggle: /쉼표 · 숨 고르기/, invalid: '301', valid: '300' },
+  ])('rejects $label=$invalid and accepts $valid', async ({ label, toggle, invalid, valid }) => {
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    fireEvent.click(screen.getByRole('checkbox', { name: toggle }));
+    const input = screen.getByLabelText(label);
+    fireEvent.change(input, { target: { value: invalid } });
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    expect(database.putTempoMap).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '템포맵 오류를 먼저 고쳐 주세요.' }),
+    );
+    fireEvent.change(input, { target: { value: valid } });
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+  });
+
+  it('keeps section-end instructions at the original end through split and merge', async () => {
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    fireEvent.click(screen.getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.change(screen.getByLabelText('추가로 늘일 박 수'), { target: { value: '1.5' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /재개 전 예비박/ }));
+    fireEvent.click(screen.getByRole('button', { name: '구간 나누기' }));
+    const dialog = screen.getByRole('dialog', { name: '구간 나누기' });
+    fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '9' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '나누기' }));
+    expect(screen.getByLabelText('추가로 늘일 박 수')).toHaveValue(1.5);
+    expect(screen.getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+    const split = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+    expect(split.sections[0]).toMatchObject({ startMeasure: 1, endMeasure: 8 });
+    expect(split.sections[0]).not.toHaveProperty('fermata');
+    expect(split.sections[0]).not.toHaveProperty('breath');
+    expect(split.sections[1]).toMatchObject({
+      startMeasure: 9,
+      endMeasure: 16,
+      fermata: { extraBeats: 1.5 },
+      breath: { durationSec: 2, countIn: false },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '이전과 합치기' }));
+    expect(screen.getByLabelText('추가로 늘일 박 수')).toHaveValue(1.5);
+    expect(screen.getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledTimes(2));
+    const merged = database.putTempoMap.mock.calls[1]![0] as TempoMap;
+    expect(merged.sections).toHaveLength(1);
+    expect(merged.sections[0]).toMatchObject({
+      startMeasure: 1,
+      endMeasure: 16,
+      fermata: { extraBeats: 1.5 },
+      breath: { durationSec: 2, countIn: false },
+    });
+  });
+
+  it('sends expressions to the remote revision endpoint and keeps count-in false in the saved cache', async () => {
+    authState.user = { id: 'user-1' };
+    authState.client.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith('/access') ? { role: 'leader' } : serverResponse(remoteMap('map-1')),
+      ),
+    );
+    authState.client.put.mockImplementation((_path: string, body: { data: TempoMap }) =>
+      Promise.resolve(serverResponse({ ...body.data, revision: 4 })),
+    );
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    fireEvent.change(screen.getByLabelText('템포 변화'), { target: { value: 'aTempo' } });
+    fireEvent.change(screen.getByLabelText('복귀 BPM'), { target: { value: '108' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /재개 전 예비박/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+    const section = {
+      bpm: 108,
+      tempoChange: { type: 'aTempo', targetBpm: 108 },
+      fermata: { extraBeats: 1 },
+      breath: { durationSec: 2, countIn: false },
+    };
+    await waitFor(() =>
+      expect(authState.client.put).toHaveBeenCalledWith('/repertoire/map-1/tempomap', {
+        expectedRevision: 3,
+        data: expect.objectContaining({
+          sections: [expect.objectContaining(section)],
+        }),
+      }),
+    );
+    await waitFor(() =>
+      expect(database.putTempoMap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ revision: 4, sections: [expect.objectContaining(section)] }),
+        { userId: 'user-1' },
+      ),
+    );
+    expect(screen.getByRole('checkbox', { name: /재개 전 예비박/ })).not.toBeChecked();
+  });
+
+  it('prevents merging across a fermata or breath at the preceding boundary', async () => {
+    const opening = storedMap.sections[0]!;
+    database.getTempoMapForRepertoire.mockResolvedValue({
+      ...storedMap,
+      sections: [
+        { ...opening, endMeasure: 8, breath: { durationSec: 2, countIn: true } },
+        { ...opening, id: 'section-2', label: 'B', startMeasure: 9 },
+      ],
+    });
+    renderEditor();
+    await screen.findByLabelText('BPM');
+    fireEvent.click(screen.getByRole('button', { name: '표' }));
+    fireEvent.click(screen.getByRole('button', { name: 'B' }));
+    expect(screen.getByRole('button', { name: '이전과 합치기' })).toBeDisabled();
+    expect(screen.getByText(/이전 구간 끝의 페르마타·쉼표를 먼저 해제/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'A' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /쉼표 · 숨 고르기/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /페르마타/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'B' }));
+    expect(screen.getByRole('button', { name: '이전과 합치기' })).toBeDisabled();
+  });
+
+  it.each(['rit', 'accel', 'none'] as const)(
+    'defaults a tempo to the preceding %s reference, allows an explicit BPM and preserves it on save',
+    async (type) => {
+      const opening = storedMap.sections[0]!;
+      database.getTempoMapForRepertoire.mockResolvedValue({
+        ...storedMap,
+        sections: [
+          {
+            ...opening,
+            endMeasure: 4,
+            ...(type !== 'none'
+              ? { tempoChange: { type, targetBpm: type === 'rit' ? 80 : 120 } }
+              : {}),
+          },
+          { ...opening, id: 'section-2', label: 'B', startMeasure: 5, endMeasure: 8, bpm: 90 },
+          { ...opening, id: 'section-3', label: 'C', startMeasure: 9, bpm: 80 },
+        ],
+      });
+      renderEditor();
+      await screen.findByLabelText('BPM');
+      fireEvent.click(screen.getByRole('button', { name: '표' }));
+      fireEvent.click(screen.getByRole('button', { name: 'C' }));
+      fireEvent.change(screen.getByLabelText('템포 변화'), { target: { value: 'aTempo' } });
+      expect(screen.getByLabelText('복귀 BPM')).toHaveValue(type === 'none' ? 90 : 100);
+      fireEvent.change(screen.getByLabelText('복귀 BPM'), { target: { value: '110' } });
+      fireEvent.click(screen.getAllByRole('button', { name: '저장' })[0]!);
+      await waitFor(() => expect(database.putTempoMap).toHaveBeenCalledOnce());
+      const saved = database.putTempoMap.mock.calls[0]![0] as TempoMap;
+      expect(saved.sections[2]?.tempoChange).toEqual({ type: 'aTempo', targetBpm: 110 });
+      expect(screen.getByRole('table', { name: '템포 구간' })).toHaveTextContent('아 템포 110');
+    },
+  );
+});
 
 describe('EditorPage unsaved navigation', () => {
   beforeEach(() => {

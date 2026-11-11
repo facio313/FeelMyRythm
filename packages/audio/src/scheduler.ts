@@ -22,6 +22,7 @@ export interface TimelineMeasureLike {
   readonly sectionId: string;
   readonly startTimeSec: number;
   readonly beats: readonly TimelineBeatLike[];
+  readonly resumeCountIn?: readonly (TimelineBeatLike & { readonly countdown: number })[];
 }
 
 /** Structurally compatible with packages/core PerformanceTimeline. */
@@ -213,7 +214,10 @@ export class LookaheadScheduler {
     this.stop();
     validateStartOptions(options);
     this.pending = flattenSchedule(options);
-    this.endAudioTime = maximumAudioTime(this.pending);
+    this.endAudioTime = Math.max(
+      options.anchorAudioTime + options.timeline.totalDurationSec - options.anchorTimelineTimeSec,
+      maximumAudioTime(this.pending) ?? Number.NEGATIVE_INFINITY,
+    );
     this.running = true;
     try {
       this.timer.start(() => this.tick());
@@ -302,7 +306,12 @@ export class LookaheadScheduler {
     this.pending = [...retained, ...incoming].sort(
       (left, right) => left.scheduled.audioTime - right.scheduled.audioTime,
     );
-    this.endAudioTime = maximumAudioTime(this.pending, this.beatQueue.snapshot());
+    this.endAudioTime = Math.max(
+      replacement.anchorAudioTime +
+        replacement.timeline.totalDurationSec -
+        replacement.anchorTimelineTimeSec,
+      maximumAudioTime(this.pending, this.beatQueue.snapshot()) ?? Number.NEGATIVE_INFINITY,
+    );
     this.tick();
   }
 
@@ -369,6 +378,33 @@ function flattenSchedule(options: SchedulerStartOptions): PendingBeat[] {
         },
       });
     });
+    const nextEntry = options.timeline.entries[entryIndex + 1];
+    for (const [cueIndex, beat] of (entry.resumeCountIn ?? []).entries()) {
+      if (!nextEntry) throw new RangeError('Reentry count-in requires a following timeline entry');
+      if (beat.timeSec + Number.EPSILON < options.anchorTimelineTimeSec) continue;
+      assertFiniteNumber(
+        beat.timeSec,
+        `timeline.entries[${entryIndex}].resumeCountIn[${cueIndex}].timeSec`,
+      );
+      const audioTime = options.anchorAudioTime + beat.timeSec - options.anchorTimelineTimeSec;
+      result.push({
+        scheduled: {
+          id: `resume-count-in:${entryIndex}:${cueIndex}:${audioTime}`,
+          audioTime,
+          timelineTimeSec: beat.timeSec,
+          kind: 'countIn',
+          accent: beat.accent,
+          isSubdivision: false,
+          isCountIn: true,
+          countdown: beat.countdown,
+          measureNumber: nextEntry.measureNumber,
+          pass: nextEntry.pass,
+          sectionId: nextEntry.sectionId,
+          entryIndex: entryIndex + 1,
+          beatIndex: 0,
+        },
+      });
+    }
   });
   return result.sort((left, right) => left.scheduled.audioTime - right.scheduled.audioTime);
 }

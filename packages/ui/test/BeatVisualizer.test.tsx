@@ -140,6 +140,92 @@ describe('BeatVisualizer announcements', () => {
     act(() => callback?.(performance.now()));
   }
 
+  it.each(['beats', 'number'] as const)(
+    'shows an audio-frame count-in popup in %s and removes it on entry or stop',
+    (variant) => {
+      let frame: BeatFrame = {
+        accent: 1,
+        beatCount: 4,
+        beatIndex: 0,
+        progress: 0,
+        measureNumber: 12,
+        isWaiting: true,
+      };
+      const source = () => frame;
+      const { container, rerender } = render(
+        <BeatVisualizer variant={variant} countInDisplay="overlay" frameSource={source} running />,
+      );
+      expect(container.querySelector('.fmr-count-in')).toBeNull();
+
+      frame = { ...frame, isWaiting: false, isCountIn: true, countInValue: 4 };
+      context.fillText.mockClear();
+      advance();
+      const popup = container.querySelector('.fmr-count-in')!;
+      expect(popup).toHaveTextContent('예비박');
+      expect(popup).toHaveTextContent('12마디에서 시작');
+      expect(popup.querySelector('.fmr-count-in__value')).toHaveTextContent('3');
+      expect(context.fillText).not.toHaveBeenCalled();
+      expect(container.querySelector('[aria-live]')).toHaveTextContent('예비박 3');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      for (const countdown of [3, 2, 1]) {
+        frame = { ...frame, countInValue: countdown };
+        advance();
+        expect(popup.querySelector('.fmr-count-in__value')).toHaveTextContent(
+          String(countdown - 1),
+        );
+        expect(container.querySelector('[aria-live]')).toHaveTextContent(`예비박 ${countdown - 1}`);
+      }
+
+      frame = { ...frame, isCountIn: false };
+      delete frame.countInValue;
+      advance();
+      expect(container.querySelector('.fmr-count-in')).toBeNull();
+      expect(context.fillText).toHaveBeenCalled();
+
+      frame = { ...frame, isResting: true };
+      advance();
+      expect(container.querySelector('.fmr-count-in')).toBeNull();
+      frame = { ...frame, isResting: false, isCountIn: true, countInValue: 4, measureNumber: 13 };
+      advance();
+      expect(container.querySelector('.fmr-count-in')).toHaveTextContent('13마디에서 시작');
+      rerender(
+        <BeatVisualizer
+          variant={variant}
+          countInDisplay="overlay"
+          frameSource={source}
+          running={false}
+        />,
+      );
+      expect(container.querySelector('.fmr-count-in')).toBeNull();
+    },
+  );
+
+  it.each(['beats', 'number', 'progress'] as const)(
+    'does not repeat the countdown or animate a background in the hidden %s display',
+    (variant) => {
+      const { container } = render(
+        <BeatVisualizer
+          variant={variant}
+          countInDisplay="hidden"
+          frameSource={() => ({
+            accent: 1,
+            beatCount: 4,
+            beatIndex: 0,
+            progress: 0.5,
+            isCountIn: true,
+            countInValue: 4,
+          })}
+          running
+        />,
+      );
+      expect(container.querySelector('.fmr-count-in')).toBeNull();
+      expect(context.fillText).not.toHaveBeenCalled();
+      expect(context.fillRect).not.toHaveBeenCalled();
+      expect(container.querySelector('[aria-live]')?.textContent ?? '').toBe('');
+    },
+  );
+
   it.each(['number', 'progress'] as const)(
     'respects canvas progress color and opacity overrides in the %s variant',
     (variant) => {
@@ -288,6 +374,30 @@ describe('BeatVisualizer announcements', () => {
     expect(container.querySelector('[aria-live]')).toBeNull();
   });
 
+  it.each(['breath', 'fermata'] as const)(
+    'keeps the number still and clears progress during %s',
+    (phase) => {
+      const draws = captureTextDraws();
+      render(
+        <BeatVisualizer
+          running
+          variant="number"
+          progressStyle="background"
+          frameSource={() => ({
+            accent: 1,
+            beatCount: 4,
+            beatIndex: 3,
+            progress: 0.75,
+            isResting: phase === 'breath',
+            isFermata: phase === 'fermata',
+          })}
+        />,
+      );
+      expect(draws.at(-1)).toMatchObject({ label: phase === 'breath' ? '쉼' : '4', alpha: 1 });
+      expect(context.fillRect).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['stopped', 'waiting', 'reduced-motion', 'hidden'] as const)(
     'leaves the decorative progress layer blank when %s',
     (state) => {
@@ -373,7 +483,7 @@ describe('BeatVisualizer announcements', () => {
       context.fillText.mock.invocationCallOrder[0]!,
     );
     expect(fills[0]).toEqual({ alpha: 0.16, color: '#d4a853' });
-    expect(draws[0]?.alpha).toBeCloseTo(0.6 + 0.4 * 0.75 ** 3);
+    expect(draws[0]?.alpha).toBe(1);
     expect(draws[0]?.color).toBe('#f4f1e8');
     expect(context.globalAlpha).toBe(1);
 
@@ -383,7 +493,7 @@ describe('BeatVisualizer announcements', () => {
     frame = { ...frame, isSubdivision: true, progress: 0.4 };
     advance();
     expect(context.fillRect).toHaveBeenLastCalledWith(0, 0, boundsWidth * 0.4, boundsHeight);
-    expect(draws.at(-1)?.alpha).toBe(0.6);
+    expect(draws.at(-1)?.alpha).toBe(1);
     frame = { ...frame, isCountIn: true, countInValue: 12, isSubdivision: false, progress: 0.5 };
     advance();
     expect(draws.at(-1)?.label).toBe('12');
@@ -413,8 +523,9 @@ describe('BeatVisualizer announcements', () => {
         />,
       );
       expect(context.fillRect).not.toHaveBeenCalled();
-      expect(draws).toHaveLength(1);
-      expect(draws[0]?.label).toBe(state === 'waiting' ? '—' : '1');
+      expect(draws).toHaveLength(state === 'waiting' ? 0 : 1);
+      if (state === 'waiting') return;
+      expect(draws[0]?.label).toBe('1');
       if (state !== 'hidden') expect(draws[0]?.alpha).toBe(1);
     },
   );
@@ -550,7 +661,7 @@ describe('BeatVisualizer announcements', () => {
     expect(draws[0]?.bottom).toBeLessThanOrEqual(boundsHeight);
   });
 
-  it('keeps the meter steady while the number pulses and changes between digit widths', () => {
+  it('keeps the number and meter fully opaque across progress and digit widths', () => {
     let frame: BeatFrame = { accent: 1, beatCount: 12, beatIndex: 0, progress: 0 };
     const draws = captureTextDraws();
     render(<BeatVisualizer frameSource={() => frame} variant="number" meterLabel="12/8" running />);
@@ -558,7 +669,7 @@ describe('BeatVisualizer announcements', () => {
     expect(draws[1]).toMatchObject({ label: '12/8', alpha: 1, color: '#a8adb8' });
     frame = { ...frame, progress: 0.95 };
     advance();
-    expect(draws.at(-2)?.alpha).toBeLessThan(0.7);
+    expect(draws.at(-2)?.alpha).toBe(1);
     expect(draws.at(-1)).toMatchObject({ label: '12/8', alpha: 1, color: '#a8adb8' });
     frame = { ...frame, beatIndex: 11, progress: 0 };
     advance();
@@ -624,8 +735,13 @@ describe('BeatVisualizer announcements', () => {
           running
         />,
       );
+      if (state === 'waiting') {
+        expect(draws).toHaveLength(0);
+        expect(context.fillRect).not.toHaveBeenCalled();
+        return;
+      }
       expect(draws[0]).toMatchObject({
-        label: state === 'waiting' ? '—' : '1',
+        label: '1',
         x: boundsWidth / 2,
         alpha: 1,
       });
@@ -650,7 +766,7 @@ describe('BeatVisualizer announcements', () => {
     ]);
   });
 
-  it('draws only the current number and pulses once per main beat from the audio frame', () => {
+  it('draws only the current number at full opacity throughout main beats and subdivisions', () => {
     let frame: BeatFrame = {
       accent: 2,
       beatCount: 4,
@@ -672,10 +788,10 @@ describe('BeatVisualizer announcements', () => {
 
     frame = { ...frame, progress: 0.95 };
     advance();
-    expect(draws.at(-1)?.alpha).toBeLessThan(0.7);
+    expect(draws.at(-1)?.alpha).toBe(1);
     frame = { ...frame, isSubdivision: true, progress: 0 };
     advance();
-    expect(draws.at(-1)).toEqual({ label: '1', alpha: 0.6 });
+    expect(draws.at(-1)).toEqual({ label: '1', alpha: 1 });
     frame = { ...frame, beatIndex: 1, isSubdivision: false, progress: 0 };
     advance();
     expect(draws.at(-1)).toEqual({ label: '2', alpha: 1 });
@@ -703,12 +819,45 @@ describe('BeatVisualizer announcements', () => {
           running={state !== 'stopped'}
         />,
       );
+      if (state === 'waiting') {
+        expect(context.fillText).not.toHaveBeenCalled();
+        return;
+      }
       expect(drawnAlpha).toBe(1);
-      expect(context.fillText).toHaveBeenLastCalledWith(
-        state === 'waiting' ? '—' : '3',
-        boundsWidth / 2,
-        boundsHeight / 2,
+      expect(context.fillText).toHaveBeenLastCalledWith('3', boundsWidth / 2, boundsHeight / 2);
+    },
+  );
+
+  it.each(['inline', 'overlay', 'hidden'] as const)(
+    'clears the number during scheduled waiting before %s count-in',
+    (countInDisplay) => {
+      let frame: BeatFrame = { accent: 2, beatCount: 4, beatIndex: 0, progress: 0 };
+      const draws = captureTextDraws();
+      render(
+        <BeatVisualizer
+          frameSource={() => frame}
+          variant="number"
+          countInDisplay={countInDisplay}
+          running
+        />,
       );
+      expect(draws.at(-1)).toMatchObject({ label: '1', alpha: 1 });
+      draws.length = 0;
+      context.clearRect.mockClear();
+      frame = { ...frame, isWaiting: true };
+      advance();
+      expect(context.clearRect).toHaveBeenCalled();
+      expect(draws).toHaveLength(0);
+      expect(screen.queryByText('예비박')).not.toBeInTheDocument();
+      frame = { ...frame, isWaiting: false, isCountIn: true, countInValue: 4 };
+      advance();
+      if (countInDisplay === 'inline') expect(draws.at(-1)?.label).toBe('4');
+      else expect(draws).toHaveLength(0);
+      if (countInDisplay === 'overlay') expect(screen.getByText('3')).toBeInTheDocument();
+      frame = { ...frame, isCountIn: false };
+      advance();
+      expect(draws.at(-1)).toMatchObject({ label: '1', alpha: 1 });
+      expect(screen.queryByText('예비박')).not.toBeInTheDocument();
     },
   );
 
@@ -770,6 +919,10 @@ describe('BeatVisualizer announcements', () => {
           })}
         />,
       );
+      if (state === 'waiting') {
+        expect(context.fillRect).not.toHaveBeenCalled();
+        return;
+      }
       expect(context.fillRect).toHaveBeenCalledTimes(1);
       expect(Number(context.fillRect.mock.calls[0]?.[2])).toBeGreaterThan(0);
     },

@@ -340,6 +340,144 @@ describe('scheduled playback display phase', () => {
     expect(result.current.frameSource().progress).toBeCloseTo(0.5);
   });
 
+  it.each([1, 2])(
+    'continues the remaining beats after a middle-beat fermata with %s measures',
+    async (totalMeasures) => {
+      const advanceAudio = controllableEngine();
+      const markedMap: TempoMap = {
+        ...map,
+        totalMeasures,
+        sections: [{ ...map.sections[0]!, startMeasure: 1, endMeasure: totalMeasures, bpm: 120 }],
+        measureExpressions: [{ measure: 1, fermata: { beat: 2, extraBeats: 1 } }],
+      };
+      const { result } = renderHook(() => useMetronome(markedMap));
+      await act(async () => result.current.start(1, 1, false));
+      const anchor = powerMocks.starts.at(-1)!.anchorAudioTime;
+      advanceAudio(anchor + 0.75);
+      expect(result.current.frameSource()).toMatchObject({
+        beatIndex: 1,
+        isFermata: true,
+        progress: 0,
+      });
+      advanceAudio(anchor + 1.75);
+      expect(result.current.frameSource()).toMatchObject({
+        beatIndex: 2,
+        isFermata: false,
+        progress: 0.5,
+      });
+      advanceAudio(anchor + 2.25);
+      expect(result.current.frameSource()).toMatchObject({
+        beatIndex: 3,
+        isFermata: false,
+        progress: 0.5,
+      });
+    },
+  );
+
+  it('uses a measure tempo instruction for direct starts and their count-in display', async () => {
+    const advanceAudio = controllableEngine();
+    const markedMap: TempoMap = {
+      ...map,
+      totalMeasures: 2,
+      sections: [{ ...map.sections[0]!, startMeasure: 1, endMeasure: 2, bpm: 120 }],
+      measureExpressions: [{ measure: 2, tempoChange: { type: 'aTempo', targetBpm: 90 } }],
+    };
+    const { result } = renderHook(() => useMetronome(markedMap));
+    await act(async () => result.current.start(2, 1, true));
+    const start = powerMocks.starts.at(-1)!;
+    expect(result.current.position).toMatchObject({ measureNumber: 2, bpm: 90, isWaiting: true });
+    const firstCue = start.anchorAudioTime + start.countIn![0]!.timeSec;
+    advanceAudio(firstCue + 0.1);
+    expect(result.current.frameSource()).toMatchObject({
+      isCountIn: true,
+      bpm: 90,
+      measureNumber: 2,
+    });
+    advanceAudio(start.anchorAudioTime + 1 / 3);
+    expect(result.current.frameSource()).toMatchObject({
+      bpm: 90,
+      measureNumber: 2,
+    });
+    expect(result.current.frameSource().progress).toBeCloseTo(0.5, 10);
+  });
+
+  it.each([false, true])(
+    'shows holds, breath silence and automatic reentry with count-in=%s',
+    async (countIn) => {
+      const advanceAudio = controllableEngine();
+      const expressiveMap: TempoMap = {
+        ...map,
+        totalMeasures: 2,
+        sections: [
+          {
+            ...map.sections[0]!,
+            id: 'held',
+            startMeasure: 1,
+            endMeasure: 1,
+            bpm: 120,
+            fermata: { extraBeats: 1 },
+            breath: { durationSec: 1, countIn },
+          },
+          {
+            ...map.sections[0]!,
+            id: 'return',
+            startMeasure: 2,
+            endMeasure: 2,
+            bpm: 60,
+            timeSignature: { num: 3, denom: 4 },
+            tempoChange: { type: 'aTempo', targetBpm: 120 },
+          },
+        ],
+      };
+      const { result } = renderHook(() => useMetronome(expressiveMap));
+      await act(async () => result.current.start(1, 1, false));
+      const anchor = powerMocks.starts.at(-1)!.anchorAudioTime;
+      queueAnchorBeat();
+      advanceAudio(anchor + 1.6);
+      expect(result.current.frameSource()).toMatchObject({
+        isFermata: true,
+        beatIndex: 3,
+        progress: 0,
+      });
+      expect(result.current.position).toMatchObject({ isFermata: true, measureNumber: 1 });
+      advanceAudio(anchor + 2.75);
+      expect(result.current.frameSource()).toMatchObject({
+        isResting: true,
+        accent: 0,
+        progress: 0,
+      });
+      expect(result.current.position).toMatchObject({ isResting: true, sectionId: 'held' });
+      if (countIn) {
+        advanceAudio(anchor + 3.6);
+        expect(result.current.frameSource()).toMatchObject({
+          isCountIn: true,
+          countInValue: 3,
+          measureNumber: 2,
+          beatCount: 3,
+          bpm: 120,
+        });
+        expect(result.current.position).toMatchObject({
+          isCountIn: true,
+          sectionId: 'return',
+          pass: 1,
+        });
+      }
+      advanceAudio(anchor + (countIn ? 5 : 3.5) + 0.25);
+      expect(result.current.frameSource()).toMatchObject({
+        measureNumber: 2,
+        beatIndex: 0,
+        bpm: 120,
+        progress: 0.5,
+      });
+      expect(result.current.position).toMatchObject({
+        sectionId: 'return',
+        isResting: false,
+        isFermata: false,
+        isCountIn: false,
+      });
+    },
+  );
+
   it('uses expanded beat times through tempo ramps, subdivisions, measure boundaries and the final beat', async () => {
     const changingMap: TempoMap = {
       ...map,

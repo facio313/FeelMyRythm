@@ -2178,6 +2178,13 @@ function ScoresPageContent({
     (section) => section.startMeasure <= playbackMeasure && section.endMeasure >= playbackMeasure,
   );
   const playbackBeatCount = playbackSection ? beatsPerMeasure(playbackSection) : 4;
+  const playbackSectionBpm =
+    playbackSection?.tempoChange?.type === 'aTempo'
+      ? playbackSection.tempoChange.targetBpm
+      : playbackSection?.bpm;
+  const playbackBpm = metronome.playing
+    ? (metronome.position.bpm ?? playbackSectionBpm)
+    : playbackSectionBpm;
   const scoreFrameSource = useCallback(
     () =>
       metronome.playing || embedded
@@ -2397,19 +2404,24 @@ function ScoresPageContent({
             </strong>
             <span>
               {playbackSection
-                ? `${playbackSection.bpm}${playbackSection.tempoChange ? ` → ${playbackSection.tempoChange.targetBpm}` : ''} BPM · ${playbackSection.timeSignature.num}/${playbackSection.timeSignature.denom}`
+                ? `${playbackBpm === undefined ? '—' : Math.round(playbackBpm * 10) / 10} BPM · ${playbackSection.timeSignature.num}/${playbackSection.timeSignature.denom}`
                 : '재생 범위 밖'}
             </span>
             <span>
               {metronome.position.isWaiting && metronome.playing
                 ? '시작 대기'
-                : metronome.position.isCountIn && metronome.playing
-                  ? `예비박 ${metronome.position.countdown ?? ''}`
-                  : `${metronome.playing ? metronome.position.beatIndex + 1 : 1} / ${playbackBeatCount}박`}
+                : metronome.position.isResting && metronome.playing
+                  ? '숨 고르기'
+                  : metronome.position.isFermata && metronome.playing
+                    ? '페르마타'
+                    : metronome.position.isCountIn && metronome.playing
+                      ? `예비박 ${metronome.position.countdown === undefined ? '' : metronome.position.countdown - 1}`
+                      : `${metronome.playing ? metronome.position.beatIndex + 1 : 1} / ${playbackBeatCount}박`}
             </span>
           </div>
           <BeatVisualizer
             className="score-playback__visualizer"
+            countInDisplay="overlay"
             frameSource={scoreFrameSource}
             running={metronome.playing}
             label="악보 박자 시각화"

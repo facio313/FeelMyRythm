@@ -1,4 +1,5 @@
 import { TimelineExpansionError } from './errors.js';
+import { compileMeasureTempos } from './measure-tempo.js';
 import type {
   Accent,
   Beat,
@@ -7,6 +8,7 @@ import type {
   DalSegnoDirective,
   ExpandTimelineOptions,
   LocateResult,
+  MeasureExpression,
   PerformanceTimeline,
   RepeatDirective,
   TempoMap,
@@ -17,6 +19,14 @@ import { assertValidTempoMap, beatsPerMeasure } from './validation.js';
 
 const DEFAULT_MAX_ENTRIES = 100_000;
 const TIME_EPSILON_SEC = 1e-9;
+
+export function tempoAtMeasureStart(map: TempoMap, measure: number): number {
+  assertValidTempoMap(map);
+  if (!Number.isInteger(measure) || measure < 1 || measure > map.totalMeasures) {
+    throw new RangeError('measure must be a measure in the map');
+  }
+  return compileMeasureTempos(map, beatsPerMeasure).bpmAt(measure);
+}
 
 interface RepeatPassContext {
   repeat: RepeatDirective;
@@ -261,6 +271,7 @@ function createSectionTimings(map: TempoMap): Map<string, SectionTiming> {
 
 function tempoAt(sectionTiming: SectionTiming, beatPosition: number): number {
   const { section, totalBeats } = sectionTiming;
+  if (section.tempoChange?.type === 'aTempo') return section.tempoChange.targetBpm;
   const targetBpm = section.tempoChange?.targetBpm ?? section.bpm;
   return section.bpm + ((targetBpm - section.bpm) * beatPosition) / totalBeats;
 }
@@ -268,6 +279,9 @@ function tempoAt(sectionTiming: SectionTiming, beatPosition: number): number {
 /** Integrates 60 / BPM over score-beat position for continuous linear BPM changes. */
 function durationBetween(sectionTiming: SectionTiming, startBeat: number, endBeat: number): number {
   const { section, totalBeats } = sectionTiming;
+  if (section.tempoChange?.type === 'aTempo') {
+    return (60 * (endBeat - startBeat)) / section.tempoChange.targetBpm;
+  }
   const targetBpm = section.tempoChange?.targetBpm ?? section.bpm;
   const slope = (targetBpm - section.bpm) / totalBeats;
   if (Math.abs(slope) < Number.EPSILON) return (60 * (endBeat - startBeat)) / section.bpm;
@@ -288,45 +302,88 @@ function createTimelineMeasure(
   pass: number,
   startTimeSec: number,
   sectionTimings: ReadonlyMap<string, SectionTiming>,
+  tempoPlan: ReturnType<typeof compileMeasureTempos>,
+  expression: MeasureExpression | undefined,
 ): { entry: TimelineMeasure; durationSec: number } {
   const section = sectionForMeasure(map, measureNumber);
-  const sectionTiming = sectionTimings.get(section.id);
-  const measureTiming = sectionTiming?.measures.get(measureNumber);
+  let sectionTiming = sectionTimings.get(section.id);
+  let measureTiming = sectionTiming?.measures.get(measureNumber);
   if (sectionTiming === undefined || measureTiming === undefined) {
     throw new TimelineExpansionError(`Missing timing data for measure ${String(measureNumber)}`);
+  }
+
+  const override = tempoPlan.timingAt(measureNumber);
+  if (override) {
+    sectionTiming = {
+      ...sectionTiming,
+      section: {
+        ...section,
+        bpm: override.startBpm,
+        tempoChange: { type: override.type, targetBpm: override.targetBpm },
+      },
+      totalBeats: override.totalBeats,
+    };
+    measureTiming = { ...measureTiming, beatOffset: override.beatOffset };
   }
 
   const fullBeatCount = Math.round(beatsPerMeasure(section));
   const accents = accentPattern(section, fullBeatCount);
   const subdivision = section.subdivision ?? 1;
   const beats: Beat[] = [];
+  const fermata = expression
+    ? expression.fermata
+    : measureNumber === section.endMeasure
+      ? section.fermata
+      : undefined;
+  const heldBeat = (fermata?.beat ?? fullBeatCount) - 1 - measureTiming.nominalBeatStart;
+  const heldScoreBeat = measureTiming.beatOffset + heldBeat;
+  const extraDuration = fermata
+    ? durationBetween(sectionTiming, heldScoreBeat, heldScoreBeat + 1) * fermata.extraBeats
+    : 0;
 
   for (let localBeat = 0; localBeat < measureTiming.beatCount; localBeat += 1) {
     const nominalBeat = measureTiming.nominalBeatStart + localBeat;
     const scoreBeat = measureTiming.beatOffset + localBeat;
     for (let sub = 0; sub < subdivision; sub += 1) {
+      if (fermata && localBeat === heldBeat && sub > 0) continue;
       const fraction = sub / subdivision;
       beats.push({
         timeSec:
           startTimeSec +
-          durationBetween(sectionTiming, measureTiming.beatOffset, scoreBeat + fraction),
+          durationBetween(sectionTiming, measureTiming.beatOffset, scoreBeat + fraction) +
+          (localBeat > heldBeat ? extraDuration : 0),
         accent: sub === 0 ? (accents[nominalBeat] ?? 0) : 0,
         isSubdivision: sub !== 0,
         beatIndex: nominalBeat,
         subdivisionIndex: sub,
+        bpm: tempoAt(sectionTiming, scoreBeat + fraction),
       });
     }
   }
 
-  const durationSec = durationBetween(
+  let durationSec = durationBetween(
     sectionTiming,
     measureTiming.beatOffset,
     measureTiming.beatOffset + measureTiming.beatCount,
   );
-  return {
-    entry: { measureNumber, pass, sectionId: section.id, startTimeSec, beats },
-    durationSec,
+  const entry: TimelineMeasure = {
+    measureNumber,
+    pass,
+    sectionId: section.id,
+    startTimeSec,
+    beats,
   };
+  if (fermata) {
+    const heldBeatDuration = durationBetween(sectionTiming, heldScoreBeat, heldScoreBeat + 1);
+    const holdStart =
+      startTimeSec + durationBetween(sectionTiming, measureTiming.beatOffset, heldScoreBeat);
+    durationSec += extraDuration;
+    entry.fermata = {
+      startTimeSec: holdStart,
+      endTimeSec: holdStart + heldBeatDuration + extraDuration,
+    };
+  }
+  return { entry, durationSec };
 }
 
 export function expandTimeline(
@@ -346,11 +403,13 @@ export function expandTimeline(
   }
 
   const sectionTimings = createSectionTimings(map);
+  const tempoPlan = compileMeasureTempos(map, beatsPerMeasure);
+  const expressions = new Map((map.measureExpressions ?? []).map((item) => [item.measure, item]));
   const passes = new Map<number, number>();
   const entries: TimelineMeasure[] = [];
   let timelineTime = 0;
 
-  for (const measureNumber of route) {
+  for (const [routeIndex, measureNumber] of route.entries()) {
     const pass = (passes.get(measureNumber) ?? 0) + 1;
     passes.set(measureNumber, pass);
     const { entry, durationSec } = createTimelineMeasure(
@@ -359,9 +418,40 @@ export function expandTimeline(
       pass,
       timelineTime,
       sectionTimings,
+      tempoPlan,
+      expressions.get(measureNumber),
     );
     entries.push(entry);
     timelineTime += durationSec;
+    const section = sectionForMeasure(map, measureNumber);
+    const expression = expressions.get(measureNumber);
+    const breath = expression
+      ? expression.breath
+      : measureNumber === section.endMeasure
+        ? section.breath
+        : undefined;
+    if (breath) {
+      entry.breath = { startTimeSec: timelineTime, endTimeSec: timelineTime + breath.durationSec };
+      timelineTime += breath.durationSec;
+      const nextMeasure = route[routeIndex + 1];
+      if (breath.countIn && nextMeasure !== undefined) {
+        const nextSection = sectionForMeasure(map, nextMeasure);
+        const beatCount = Math.round(beatsPerMeasure(nextSection));
+        const bpm = tempoPlan.bpmAt(nextMeasure);
+        const beatDuration = 60 / bpm;
+        const count = beatCount * map.countIn.measures;
+        entry.resumeCountIn = Array.from({ length: count }, (_, index) => ({
+          timeSec: timelineTime + index * beatDuration,
+          accent: index % beatCount === 0 ? 2 : 1,
+          isSubdivision: false,
+          beatIndex: index % beatCount,
+          subdivisionIndex: 0,
+          countdown: beatCount - (index % beatCount),
+          bpm,
+        }));
+        timelineTime += count * beatDuration;
+      }
+    }
   }
 
   return {
@@ -432,14 +522,8 @@ export function buildCountIn(map: TempoMap, fromTimeSec: number): Beat[] {
   }
 
   const section = sectionForMeasure(map, anchor.measureNumber);
-  const sectionTiming = createSectionTimings(map).get(section.id);
-  const measureTiming = sectionTiming?.measures.get(anchor.measureNumber);
-  if (sectionTiming === undefined || measureTiming === undefined) {
-    throw new TimelineExpansionError('Unable to derive count-in tempo');
-  }
-
   const fullBeatCount = Math.round(beatsPerMeasure(section));
-  const bpm = tempoAt(sectionTiming, measureTiming.beatOffset);
+  const bpm = compileMeasureTempos(map, beatsPerMeasure).bpmAt(anchor.measureNumber);
   const beatDurationSec = 60 / bpm;
   const count = map.countIn.measures * fullBeatCount;
   const startTimeSec = fromTimeSec - count * beatDurationSec;

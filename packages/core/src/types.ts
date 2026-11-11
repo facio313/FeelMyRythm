@@ -28,8 +28,35 @@ export interface Anacrusis {
 }
 
 export interface TempoChange {
-  type: 'rit' | 'accel';
+  type: 'rit' | 'accel' | 'aTempo';
   targetBpm: number;
+}
+
+export interface FermataPolicy {
+  /** Extra durations of the held primary beat (0 < extraBeats <= 16). */
+  extraBeats: number;
+  /** One-based primary beat; omitted means the measure's final beat. */
+  beat?: number;
+}
+
+export interface BreathPolicy {
+  /** Silent time after its score measure, before any reentry count-in. */
+  durationSec: number;
+  /** Uses the next performed measure's meter/tempo and the map's count-in length. */
+  countIn: boolean;
+}
+
+export interface MeasureTempoChange extends TempoChange {
+  /** Inclusive end of a rit./accel. span; omitted means the marked measure only. */
+  endMeasure?: number;
+}
+
+export interface MeasureExpression {
+  /** Absolute one-based score measure, independent of section boundaries. */
+  measure: number;
+  tempoChange?: MeasureTempoChange;
+  fermata?: FermataPolicy;
+  breath?: BreathPolicy;
 }
 
 export interface TempoSection {
@@ -43,6 +70,8 @@ export interface TempoSection {
   bpm: number;
   beatUnit: NoteValue;
   tempoChange?: TempoChange;
+  fermata?: FermataPolicy;
+  breath?: BreathPolicy;
   accentPattern?: Accent[];
   subdivision?: 1 | 2 | 3 | 4;
 }
@@ -98,6 +127,8 @@ export interface TempoMap {
   sections: TempoSection[];
   jumps: JumpDirective[];
   countIn: CountInPolicy;
+  /** One record per score measure. Its hold/breath settings replace section-end defaults. */
+  measureExpressions?: MeasureExpression[];
 }
 
 /** A click event. `timeSec` is an absolute offset on its containing timeline. */
@@ -109,6 +140,17 @@ export interface Beat {
   beatIndex: number;
   /** Zero for a primary beat, otherwise the subdivision index. */
   subdivisionIndex: number;
+  /** Tempo at this score position, before a fermata extends the beat. */
+  bpm?: number;
+}
+
+export interface TimelineHold {
+  startTimeSec: number;
+  endTimeSec: number;
+}
+
+export interface ResumeCountInBeat extends Beat {
+  countdown: number;
 }
 
 export interface TimelineMeasure {
@@ -119,6 +161,10 @@ export interface TimelineMeasure {
   /** Absolute offset from performance timeline t=0. */
   startTimeSec: number;
   beats: Beat[];
+  fermata?: TimelineHold;
+  breath?: TimelineHold;
+  /** Reentry cues after a breath; these are not score beats. */
+  resumeCountIn?: ResumeCountInBeat[];
 }
 
 export interface PerformanceTimeline {
